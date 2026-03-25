@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/fleet-man/fleet-man/internal/cli"
+	"github.com/BenjaminBenetti/fleet-man/internal/cli"
 )
 
 func main() {

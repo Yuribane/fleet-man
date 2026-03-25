@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-REPO="fleet-man/fleet-man"
+REPO="BenjaminBenetti/fleet-man"
 INSTALL_DIR="/usr/local/bin"
 BINARY="fleet"
 

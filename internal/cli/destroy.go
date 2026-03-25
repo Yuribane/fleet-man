@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/fleet-man/fleet-man/internal/devcontainer"
-	"github.com/fleet-man/fleet-man/internal/state"
+	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
+	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/spf13/cobra"
 )
 

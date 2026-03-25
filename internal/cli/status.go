@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/fleet-man/fleet-man/internal/state"
+	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/spf13/cobra"
 )
 

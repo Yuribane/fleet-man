@@ -13,9 +13,9 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/fleet-man/fleet-man/internal/devcontainer"
-	"github.com/fleet-man/fleet-man/internal/fleet"
-	"github.com/fleet-man/fleet-man/internal/state"
+	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
+	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
+	"github.com/BenjaminBenetti/fleet-man/internal/state"
 )
 
 type viewMode int

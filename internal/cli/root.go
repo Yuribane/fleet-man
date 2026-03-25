@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"github.com/fleet-man/fleet-man/internal/tui"
+	"github.com/BenjaminBenetti/fleet-man/internal/tui"
 	"github.com/spf13/cobra"
 )
 

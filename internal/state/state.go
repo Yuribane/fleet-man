@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/fleet-man/fleet-man/internal/fleet"
+	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 )
 
 var mu sync.Mutex

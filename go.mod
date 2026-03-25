@@ -1,4 +1,4 @@
-module github.com/fleet-man/fleet-man
+module github.com/BenjaminBenetti/fleet-man
 
 go 1.25.8
 
