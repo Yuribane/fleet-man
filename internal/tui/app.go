@@ -266,8 +266,9 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				break
 			}
+			banner := renderGradient(nameToBanner(inst.Name))
 			return m, tea.ExecProcess(
-				exec.Command("devcontainer", "exec", "--workspace-folder", inst.WorkspaceDir, "bash"),
+				execWithBanner(banner, "devcontainer", "exec", "--workspace-folder", inst.WorkspaceDir, "bash"),
 				func(err error) tea.Msg { return execDoneMsg{err} },
 			)
 
