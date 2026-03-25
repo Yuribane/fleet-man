@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // openInTerminal spawns a new terminal window running the given command.
@@ -19,6 +21,9 @@ func openInTerminal(command []string) error {
 		bin  string
 		args func([]string) []string
 	}{
+		{"ptyxis", func(cmd []string) []string {
+			return append([]string{"--"}, cmd...)
+		}},
 		{"gnome-terminal", func(cmd []string) []string {
 			return append([]string{"--"}, cmd...)
 		}},
@@ -39,12 +44,14 @@ func openInTerminal(command []string) error {
 		}},
 	}
 
+	tried := make([]string, 0, len(terminals))
 	for _, t := range terminals {
+		tried = append(tried, t.bin)
 		if _, err := exec.LookPath(t.bin); err == nil {
 			args := t.args(command)
 			return exec.Command(t.bin, args...).Start()
 		}
 	}
 
-	return exec.ErrNotFound
+	return fmt.Errorf("no terminal found (tried: %s)", strings.Join(tried, ", "))
 }
