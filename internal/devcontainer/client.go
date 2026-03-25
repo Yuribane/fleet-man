@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 )
 
 // Client wraps the devcontainer CLI.
@@ -57,6 +59,77 @@ func (c *Client) Down(containerID string) error {
 	cmd := exec.Command("docker", "rm", "-f", containerID)
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// Stats returns CPU and memory usage for the given container IDs.
+// Uses `docker stats --no-stream` for a single snapshot.
+func (c *Client) Stats(containerIDs []string) (map[string]*ContainerStats, error) {
+	if len(containerIDs) == 0 {
+		return nil, nil
+	}
+
+	args := append([]string{"stats", "--no-stream", "--format", "{{.ID}}\t{{.CPUPerc}}\t{{.MemUsage}}"}, containerIDs...)
+	cmd := exec.Command("docker", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]*ContainerStats)
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "\t", 3)
+		if len(fields) < 3 {
+			continue
+		}
+
+		id := fields[0]
+
+		// CPU: "12.34%" → 123.4 millicores
+		cpuStr := strings.TrimSuffix(strings.TrimSpace(fields[1]), "%")
+		cpuPct, _ := strconv.ParseFloat(cpuStr, 64)
+		cpuMillicores := cpuPct * 10 // 1% = 10 millicores
+
+		// Memory: "123.4MiB / 1.5GiB" → take the usage part
+		memParts := strings.SplitN(fields[2], "/", 2)
+		memMB := parseMemToMB(strings.TrimSpace(memParts[0]))
+
+		// Match by prefix — docker stats may return full or short IDs
+		for _, cid := range containerIDs {
+			if strings.HasPrefix(cid, id) || strings.HasPrefix(id, cid) {
+				result[cid] = &ContainerStats{
+					CPUMillicores: cpuMillicores,
+					MemoryMB:      memMB,
+				}
+			}
+		}
+	}
+
+	return result, nil
+}
+
+func parseMemToMB(s string) float64 {
+	s = strings.TrimSpace(s)
+	multiplier := 1.0
+
+	if strings.HasSuffix(s, "GiB") {
+		multiplier = 1024
+		s = strings.TrimSuffix(s, "GiB")
+	} else if strings.HasSuffix(s, "MiB") {
+		multiplier = 1
+		s = strings.TrimSuffix(s, "MiB")
+	} else if strings.HasSuffix(s, "KiB") {
+		multiplier = 1.0 / 1024
+		s = strings.TrimSuffix(s, "KiB")
+	} else if strings.HasSuffix(s, "B") {
+		multiplier = 1.0 / (1024 * 1024)
+		s = strings.TrimSuffix(s, "B")
+	}
+
+	val, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	return val * multiplier
 }
 
 // Logs streams docker logs for a container.

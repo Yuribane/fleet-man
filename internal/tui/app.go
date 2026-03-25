@@ -51,6 +51,8 @@ type model struct {
 	spinner  spinner.Model
 	creating map[string]bool // "fleet/instance" keys currently being created
 
+	stats map[string]*devcontainer.ContainerStats // containerID → stats
+
 	message  string
 	quitting bool
 	width    int
@@ -68,6 +70,7 @@ func newModel() model {
 	m := model{
 		collapsed: make(map[string]bool),
 		creating:  make(map[string]bool),
+		stats:     make(map[string]*devcontainer.ContainerStats),
 		textInput: ti,
 		spinner:   sp,
 	}
@@ -129,8 +132,38 @@ func (m *model) selectedInstance() (*fleet.Fleet, *fleet.Instance) {
 	return f, r.instance
 }
 
+func (m *model) containerIDs() []string {
+	var ids []string
+	for _, f := range m.st.Fleets {
+		for _, inst := range f.Instances {
+			if inst.ContainerID != "" && inst.Status == fleet.StatusRunning {
+				ids = append(ids, inst.ContainerID)
+			}
+		}
+	}
+	return ids
+}
+
+type statsMsg struct {
+	stats map[string]*devcontainer.ContainerStats
+}
+
+func fetchStatsCmd(ids []string, delay bool) tea.Cmd {
+	return func() tea.Msg {
+		if delay {
+			time.Sleep(3 * time.Second)
+		}
+		if len(ids) == 0 {
+			return statsMsg{}
+		}
+		dc := devcontainer.NewClient()
+		stats, _ := dc.Stats(ids)
+		return statsMsg{stats: stats}
+	}
+}
+
 func (m model) Init() tea.Cmd {
-	return m.spinner.Tick
+	return tea.Batch(m.spinner.Tick, fetchStatsCmd(m.containerIDs(), false))
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -138,8 +171,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = ws.Width
 	}
 
-	// Handle background instance creation results
+	// Handle background results
 	switch msg := msg.(type) {
+	case statsMsg:
+		if msg.stats != nil {
+			m.stats = msg.stats
+		}
+		return m, fetchStatsCmd(m.containerIDs(), true)
+
 	case instanceCreatedMsg:
 		key := msg.fleet + "/" + msg.instance
 		delete(m.creating, key)
@@ -271,6 +310,19 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				execWithBanner(banner, "devcontainer", "exec", "--workspace-folder", inst.WorkspaceDir, "bash"),
 				func(err error) tea.Msg { return execDoneMsg{err} },
 			)
+
+		case "o":
+			_, inst := m.selectedInstance()
+			if inst == nil {
+				m.message = "Select an instance"
+				break
+			}
+			err := openInTerminal([]string{"devcontainer", "exec", "--workspace-folder", inst.WorkspaceDir, "bash"})
+			if err != nil {
+				m.message = fmt.Sprintf("Could not open terminal: %v", err)
+			} else {
+				m.message = fmt.Sprintf("Opened terminal for %s", inst.Name)
+			}
 
 		case "c":
 			_, inst := m.selectedInstance()
@@ -614,11 +666,6 @@ func (m model) View() string {
 				status = renderStatus(inst.Status)
 			}
 
-			containerShort := inst.ContainerID
-			if len(containerShort) > 12 {
-				containerShort = containerShort[:12]
-			}
-
 			// Pad name to fixed width before styling to keep columns aligned
 			paddedName := fmt.Sprintf("%-24s", inst.Name)
 			if isSelected {
@@ -630,8 +677,13 @@ func (m model) View() string {
 					cursor, paddedName, status,
 				))
 			} else {
-				listContent.WriteString(fmt.Sprintf("%s    %s %s  %s",
-					cursor, paddedName, status, dimStyle.Render(containerShort),
+				// Show CPU/memory stats
+				statsStr := ""
+				if s, ok := m.stats[inst.ContainerID]; ok {
+					statsStr = dimStyle.Render(fmt.Sprintf("  %4.0f mcpu  %6.1f MB", s.CPUMillicores, s.MemoryMB))
+				}
+				listContent.WriteString(fmt.Sprintf("%s    %s %s%s",
+					cursor, paddedName, status, statsStr,
 				))
 			}
 			listContent.WriteString("\n")
@@ -647,6 +699,18 @@ func (m model) View() string {
 	}
 	b.WriteString(box.Render(boxContent))
 	b.WriteString("\n")
+
+	// Totals
+	var totalCPU float64
+	var totalMem float64
+	for _, s := range m.stats {
+		totalCPU += s.CPUMillicores
+		totalMem += s.MemoryMB
+	}
+	if len(m.stats) > 0 {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  Total: %.0f mcpu  %.1f MB", totalCPU, totalMem)))
+		b.WriteString("\n")
+	}
 
 	// Dialog overlay
 	switch m.mode {
@@ -728,7 +792,7 @@ func (m model) View() string {
 	// Help — wrap keys into lines that fit terminal width
 	helpKeys := []string{
 		"j/k: navigate", "space: expand/collapse", "enter/e: exec",
-		"n: new fleet", "a: add instance", "d: delete",
+		"o: open terminal", "n: new fleet", "a: add instance", "d: delete",
 		"c: code", "l: logs", "r: refresh", "q: quit",
 	}
 	maxW := m.width
