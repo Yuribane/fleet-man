@@ -8,7 +8,10 @@ import (
 )
 
 // Client wraps the devcontainer CLI.
-type Client struct{}
+type Client struct {
+	// Verbose sends devcontainer stderr to os.Stderr when true (for CLI use).
+	Verbose bool
+}
 
 func NewClient() *Client {
 	return &Client{}
@@ -17,7 +20,9 @@ func NewClient() *Client {
 // Up runs `devcontainer up` for the given workspace folder.
 func (c *Client) Up(workspaceDir string) (*UpResult, error) {
 	cmd := exec.Command("devcontainer", "up", "--workspace-folder", workspaceDir)
-	cmd.Stderr = os.Stderr
+	if c.Verbose {
+		cmd.Stderr = os.Stderr
+	}
 
 	out, err := cmd.Output()
 	if err != nil {

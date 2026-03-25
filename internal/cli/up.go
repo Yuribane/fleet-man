@@ -70,6 +70,7 @@ func newUpCmd() *cobra.Command {
 			// Run devcontainer up
 			fmt.Printf("Starting devcontainer for %s/%s...\n", target.Fleet, target.Instance)
 			dc := devcontainer.NewClient()
+			dc.Verbose = true
 			result, err := dc.Up(wsDir)
 			if err != nil {
 				return fmt.Errorf("devcontainer up failed: %w", err)
