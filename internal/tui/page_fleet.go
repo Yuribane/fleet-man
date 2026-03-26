@@ -21,7 +21,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.message = ""
 
 		switch msg.String() {
-		case "q", "ctrl+c":
+		case "q", "ctrl+c", "ctrl+q":
 			m.quitting = true
 			return m, tea.Quit
 
@@ -142,7 +142,8 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			banner := renderGradient(nameToBanner(inst.Name))
-			execArgs := devcontainer.ExecArgs(inst.WorkspaceDir, shellCommand(m.cfg))
+			banner += "\n  " + dimStyle.Render("ctrl+q to detach (session persists)")
+			execArgs := devcontainer.ExecArgs(inst.WorkspaceDir, shellCommand(m.cfg, inst.Name))
 			return m, tea.ExecProcess(
 				execWithBanner(banner, "devcontainer", execArgs...),
 				func(err error) tea.Msg { return execDoneMsg{err} },
@@ -154,7 +155,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = "Select an instance"
 				break
 			}
-			execArgs := devcontainer.ExecArgs(inst.WorkspaceDir, shellCommand(m.cfg))
+			execArgs := devcontainer.ExecArgs(inst.WorkspaceDir, freshShellCommand(m.cfg))
 			err := openInTerminal(append([]string{"devcontainer"}, execArgs...))
 			if err != nil {
 				m.message = fmt.Sprintf("Could not open terminal: %v", err)

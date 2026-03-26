@@ -88,7 +88,7 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.page = pageFleetList
 			return m, nil
 
-		case "ctrl+c":
+		case "ctrl+c", "ctrl+q":
 			m.quitting = true
 			return m, tea.Quit
 
