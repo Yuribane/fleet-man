@@ -3,6 +3,7 @@ package devcontainer
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strconv"
@@ -57,6 +58,22 @@ func (c *Client) Exec(workspaceDir string, command []string) error {
 // The devcontainer CLI does not have a built-in down/stop command.
 func (c *Client) Down(containerID string) error {
 	cmd := exec.Command("docker", "rm", "-f", containerID)
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// Stop stops a container by ID without removing it.
+func (c *Client) Stop(containerID string) error {
+	cmd := exec.Command("docker", "stop", containerID)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// Start starts an existing container by ID.
+func (c *Client) Start(containerID string) error {
+	cmd := exec.Command("docker", "start", containerID)
+	cmd.Stdout = io.Discard
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }

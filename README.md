@@ -20,6 +20,10 @@ fleet
 fleet up agent-1
 fleet up agent-2
 
+# Stop and restart an existing instance without removing it
+fleet stop agent-1
+fleet start agent-1
+
 # List instances
 fleet ls
 
@@ -52,6 +56,7 @@ fleet up my-project/agent-3
 | `j/k` | Navigate |
 | `space` | Expand/collapse fleet |
 | `enter/e` | Exec into instance |
+| `s` | Stop/start instance |
 | `o` | Open instance in new terminal |
 | `a` | Add instance |
 | `n` | New fleet |

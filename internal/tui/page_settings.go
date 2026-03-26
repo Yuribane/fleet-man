@@ -8,6 +8,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+const (
+	settingsItemToolSelection = iota
+	settingsItemDotfilesRepo
+	settingsItemDotfilesScript
+	settingsItemCount
+)
+
 var agentToolOptions = []state.AgentTool{
 	state.AgentToolCodex,
 	state.AgentToolClaude,
@@ -65,6 +72,13 @@ func (m *model) cycleAgentTool(direction int) {
 }
 
 func (m model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.settingsEditing {
+		return m.updateSettingsEditing(msg)
+	}
+	return m.updateSettingsNav(msg)
+}
+
+func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		m.message = ""
@@ -78,17 +92,95 @@ func (m model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 
-		case "left", "h":
-			m.cycleAgentTool(-1)
+		case "up", "k":
+			m.settingsCursor = (m.settingsCursor - 1 + settingsItemCount) % settingsItemCount
 			return m, nil
 
-		case "right", "l", "enter", " ":
-			m.cycleAgentTool(1)
+		case "down", "j":
+			m.settingsCursor = (m.settingsCursor + 1) % settingsItemCount
 			return m, nil
+
+		case "left", "h":
+			if m.settingsCursor == settingsItemToolSelection {
+				m.cycleAgentTool(-1)
+			}
+			return m, nil
+
+		case "right", "l":
+			if m.settingsCursor == settingsItemToolSelection {
+				m.cycleAgentTool(1)
+			}
+			return m, nil
+
+		case "enter", " ":
+			if m.settingsCursor == settingsItemToolSelection {
+				m.cycleAgentTool(1)
+				return m, nil
+			}
+			return m.enterSettingsEditing()
 		}
 	}
 
 	return m, nil
+}
+
+func (m model) enterSettingsEditing() (tea.Model, tea.Cmd) {
+	if m.cfg == nil {
+		m.cfg = state.DefaultConfig()
+	}
+
+	var current string
+	switch m.settingsCursor {
+	case settingsItemDotfilesRepo:
+		current = m.cfg.DotfilesSettings.RepoURL
+		m.settingsInput.Placeholder = "https://github.com/user/dotfiles"
+	case settingsItemDotfilesScript:
+		current = m.cfg.DotfilesSettings.InstallScript
+		m.settingsInput.Placeholder = "install.sh"
+	}
+
+	m.settingsEditing = true
+	m.settingsInput.SetValue(current)
+	m.settingsInput.Focus()
+	m.settingsInput.CursorEnd()
+	return m, m.settingsInput.Cursor.BlinkCmd()
+}
+
+func (m model) updateSettingsEditing(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEnter:
+			value := strings.TrimSpace(m.settingsInput.Value())
+			if m.cfg == nil {
+				m.cfg = state.DefaultConfig()
+			}
+			switch m.settingsCursor {
+			case settingsItemDotfilesRepo:
+				m.cfg.DotfilesSettings.RepoURL = value
+			case settingsItemDotfilesScript:
+				m.cfg.DotfilesSettings.InstallScript = value
+			}
+			if err := state.SaveConfig(m.cfg); err != nil {
+				m.message = fmt.Sprintf("Failed to save settings: %v", err)
+			} else {
+				m.message = "Saved"
+			}
+			m.settingsEditing = false
+			m.settingsInput.Blur()
+			return m, nil
+
+		case tea.KeyEsc:
+			m.settingsEditing = false
+			m.settingsInput.Blur()
+			m.message = "Cancelled"
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.settingsInput, cmd = m.settingsInput.Update(msg)
+	return m, cmd
 }
 
 func (m model) viewSettings() string {
@@ -118,18 +210,34 @@ func (m model) viewSettings() string {
 	}
 
 	var listContent strings.Builder
+
+	// Agent Settings section
 	listContent.WriteString(fleetExpandedStyle.Render("Agent Settings"))
 	listContent.WriteString("\n")
 	listContent.WriteString(dimStyle.Render(strings.Repeat("─", ruleWidth)))
 	listContent.WriteString("\n\n")
+	listContent.WriteString(m.renderSettingsRow(settingsItemToolSelection, "Tool selection",
+		fmt.Sprintf("[ %s ]", agentToolLabel(cfg.AgentSettings.ToolSelection))))
+	listContent.WriteString("\n\n")
 
-	label := fmt.Sprintf("%-18s", "Tool selection")
-	value := fmt.Sprintf("[ %s ]", agentToolLabel(cfg.AgentSettings.ToolSelection))
-	listContent.WriteString(fmt.Sprintf("%s%s %s",
-		cursorStyle.Render("> "),
-		selectedStyle.Render(label),
-		selectedStyle.Render(value),
-	))
+	// Dotfiles section
+	listContent.WriteString(fleetExpandedStyle.Render("Dotfiles"))
+	listContent.WriteString("\n")
+	listContent.WriteString(dimStyle.Render(strings.Repeat("─", ruleWidth)))
+	listContent.WriteString("\n\n")
+
+	repoValue := cfg.DotfilesSettings.RepoURL
+	if repoValue == "" && !(m.settingsEditing && m.settingsCursor == settingsItemDotfilesRepo) {
+		repoValue = dimStyle.Render("(not set)")
+	}
+	listContent.WriteString(m.renderSettingsRow(settingsItemDotfilesRepo, "Repository URL", repoValue))
+	listContent.WriteString("\n")
+
+	scriptValue := cfg.DotfilesSettings.InstallScript
+	if scriptValue == "" && !(m.settingsEditing && m.settingsCursor == settingsItemDotfilesScript) {
+		scriptValue = dimStyle.Render("(not set)")
+	}
+	listContent.WriteString(m.renderSettingsRow(settingsItemDotfilesScript, "Install script", scriptValue))
 
 	b.WriteString(box.Render(strings.TrimRight(listContent.String(), "\n")))
 	b.WriteString("\n")
@@ -139,9 +247,36 @@ func (m model) viewSettings() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(renderHelp(m.width, []string{
-		"left/right: change tool", "enter: next tool", "esc: back", "q: back", "ctrl+c: quit",
-	}))
+	if m.settingsEditing {
+		b.WriteString(renderHelp(m.width, []string{
+			"enter: save", "esc: cancel",
+		}))
+	} else {
+		b.WriteString(renderHelp(m.width, []string{
+			"j/k: navigate", "left/right: change tool", "enter: edit", "esc: back", "ctrl+c: quit",
+		}))
+	}
 
 	return b.String()
+}
+
+func (m model) renderSettingsRow(idx int, label string, value string) string {
+	isSelected := m.settingsCursor == idx
+
+	cursor := "  "
+	if isSelected {
+		cursor = cursorStyle.Render("> ")
+	}
+
+	formattedLabel := fmt.Sprintf("%-18s", label)
+
+	// If editing this row, show the text input instead of the static value
+	if m.settingsEditing && isSelected {
+		value = m.settingsInput.View()
+	}
+
+	if isSelected {
+		return fmt.Sprintf("%s%s %s", cursor, selectedStyle.Render(formattedLabel), value)
+	}
+	return fmt.Sprintf("%s%s %s", cursor, formattedLabel, value)
 }

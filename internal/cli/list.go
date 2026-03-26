@@ -2,12 +2,19 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"text/tabwriter"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
+	"github.com/BenjaminBenetti/fleet-man/internal/gitutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/spf13/cobra"
+)
+
+var (
+	listOutput     io.Writer = os.Stdout
+	listBranchName           = gitutil.BranchName
 )
 
 func newListCmd() *cobra.Command {
@@ -30,8 +37,8 @@ func newListCmd() *cobra.Command {
 				fleetFilter, _ = fleet.FleetNameFromCwd()
 			}
 
-			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "FLEET\tINSTANCE\tSTATUS\tCONTAINER\tCREATED")
+			w := tabwriter.NewWriter(listOutput, 0, 4, 2, ' ', 0)
+			fmt.Fprintln(w, "FLEET\tINSTANCE\tSTATUS\tCONTAINER\tCREATED\tBRANCH")
 
 			for name, f := range st.Fleets {
 				if fleetFilter != "" && name != fleetFilter {
@@ -42,12 +49,13 @@ func newListCmd() *cobra.Command {
 					if len(containerShort) > 12 {
 						containerShort = containerShort[:12]
 					}
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 						name,
 						inst.Name,
 						inst.Status,
 						containerShort,
 						inst.CreatedAt.Format("2006-01-02 15:04"),
+						listBranchName(inst.WorkspaceDir),
 					)
 				}
 			}

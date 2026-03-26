@@ -66,6 +66,10 @@ type model struct {
 
 	stats map[string]*devcontainer.ContainerStats // containerID → stats
 
+	settingsCursor  int             // 0=tool, 1=repo URL, 2=install script
+	settingsEditing bool            // true when editing a text field
+	settingsInput   textinput.Model // dedicated text input for settings page
+
 	message  string
 	quitting bool
 	width    int
@@ -80,12 +84,16 @@ func newModel() model {
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("170"))
 
+	si := textinput.New()
+	si.CharLimit = 256
+
 	m := model{
-		collapsed: make(map[string]bool),
-		creating:  make(map[string]bool),
-		stats:     make(map[string]*devcontainer.ContainerStats),
-		textInput: ti,
-		spinner:   sp,
+		collapsed:     make(map[string]bool),
+		creating:      make(map[string]bool),
+		stats:         make(map[string]*devcontainer.ContainerStats),
+		textInput:     ti,
+		spinner:       sp,
+		settingsInput: si,
 	}
 	m.reload()
 

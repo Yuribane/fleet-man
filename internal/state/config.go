@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type AgentTool string
@@ -28,9 +29,16 @@ type AgentSettings struct {
 	ToolSelection AgentTool `json:"tool_selection"`
 }
 
+// DotfilesSettings holds dotfiles repository preferences.
+type DotfilesSettings struct {
+	RepoURL       string `json:"repo_url"`
+	InstallScript string `json:"install_script"`
+}
+
 // Config holds user preferences.
 type Config struct {
-	AgentSettings AgentSettings `json:"agent_settings"`
+	AgentSettings    AgentSettings    `json:"agent_settings"`
+	DotfilesSettings DotfilesSettings `json:"dotfiles_settings"`
 }
 
 // DefaultConfig returns a config with default values applied.
@@ -50,6 +58,9 @@ func (c *Config) applyDefaults() {
 	if _, ok := validAgentTools[c.AgentSettings.ToolSelection]; !ok {
 		c.AgentSettings.ToolSelection = AgentToolClaude
 	}
+
+	c.DotfilesSettings.RepoURL = strings.TrimSpace(c.DotfilesSettings.RepoURL)
+	c.DotfilesSettings.InstallScript = strings.TrimSpace(c.DotfilesSettings.InstallScript)
 }
 
 // ConfigPath returns the path to the config file.

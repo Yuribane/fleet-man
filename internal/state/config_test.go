@@ -135,3 +135,88 @@ func TestSaveConfigRoundTrip(t *testing.T) {
 		t.Fatalf("ToolSelection = %q, want %q", got.AgentSettings.ToolSelection, AgentToolCopilot)
 	}
 }
+
+func TestLoadConfigDefaultDotfilesSettings(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	if cfg.DotfilesSettings.RepoURL != "" {
+		t.Fatalf("RepoURL = %q, want empty", cfg.DotfilesSettings.RepoURL)
+	}
+	if cfg.DotfilesSettings.InstallScript != "" {
+		t.Fatalf("InstallScript = %q, want empty", cfg.DotfilesSettings.InstallScript)
+	}
+}
+
+func TestSaveConfigRoundTripDotfiles(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	want := &Config{
+		AgentSettings: AgentSettings{
+			ToolSelection: AgentToolClaude,
+		},
+		DotfilesSettings: DotfilesSettings{
+			RepoURL:       "https://github.com/user/dotfiles",
+			InstallScript: "install.sh",
+		},
+	}
+
+	if err := SaveConfig(want); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	data, err := os.ReadFile(ConfigPath())
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	dotfiles, ok := raw["dotfiles_settings"].(map[string]any)
+	if !ok {
+		t.Fatalf("dotfiles_settings missing or wrong type: %#v", raw["dotfiles_settings"])
+	}
+	if got := dotfiles["repo_url"]; got != "https://github.com/user/dotfiles" {
+		t.Fatalf("repo_url = %#v, want %q", got, "https://github.com/user/dotfiles")
+	}
+	if got := dotfiles["install_script"]; got != "install.sh" {
+		t.Fatalf("install_script = %#v, want %q", got, "install.sh")
+	}
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	if got.DotfilesSettings.RepoURL != "https://github.com/user/dotfiles" {
+		t.Fatalf("RepoURL = %q, want %q", got.DotfilesSettings.RepoURL, "https://github.com/user/dotfiles")
+	}
+	if got.DotfilesSettings.InstallScript != "install.sh" {
+		t.Fatalf("InstallScript = %q, want %q", got.DotfilesSettings.InstallScript, "install.sh")
+	}
+}
+
+func TestApplyDefaultsTrimsDotfilesWhitespace(t *testing.T) {
+	cfg := &Config{
+		DotfilesSettings: DotfilesSettings{
+			RepoURL:       "  https://github.com/user/dotfiles  ",
+			InstallScript: "  install.sh\n",
+		},
+	}
+
+	cfg.applyDefaults()
+
+	if cfg.DotfilesSettings.RepoURL != "https://github.com/user/dotfiles" {
+		t.Fatalf("RepoURL = %q, want trimmed", cfg.DotfilesSettings.RepoURL)
+	}
+	if cfg.DotfilesSettings.InstallScript != "install.sh" {
+		t.Fatalf("InstallScript = %q, want trimmed", cfg.DotfilesSettings.InstallScript)
+	}
+}

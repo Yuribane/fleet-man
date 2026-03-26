@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -11,8 +12,10 @@ func TestUpdateSettingsCyclesToolAndPersistsConfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	m := model{
-		page: pageSettings,
-		cfg:  state.DefaultConfig(),
+		page:           pageSettings,
+		cfg:            state.DefaultConfig(),
+		settingsCursor: settingsItemToolSelection,
+		settingsInput:  textinput.New(),
 	}
 
 	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyRight})
@@ -78,5 +81,126 @@ func TestUpdateNormalWrapsCursorFromBottomToTop(t *testing.T) {
 
 	if got.cursor != 0 {
 		t.Fatalf("cursor = %d, want 0", got.cursor)
+	}
+}
+
+func TestUpdateSettingsNavUpDown(t *testing.T) {
+	m := model{
+		page:           pageSettings,
+		cfg:            state.DefaultConfig(),
+		settingsCursor: settingsItemToolSelection,
+		settingsInput:  textinput.New(),
+	}
+
+	// Down from 0 -> 1
+	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
+	got := updated.(model)
+	if got.settingsCursor != settingsItemDotfilesRepo {
+		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemDotfilesRepo)
+	}
+
+	// Down from 1 -> 2
+	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
+	got = updated.(model)
+	if got.settingsCursor != settingsItemDotfilesScript {
+		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemDotfilesScript)
+	}
+
+	// Down from 2 -> wraps to 0
+	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
+	got = updated.(model)
+	if got.settingsCursor != settingsItemToolSelection {
+		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemToolSelection)
+	}
+
+	// Up from 0 -> wraps to 2
+	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyUp})
+	got = updated.(model)
+	if got.settingsCursor != settingsItemDotfilesScript {
+		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemDotfilesScript)
+	}
+}
+
+func TestUpdateSettingsEnterEditingDotfiles(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	m := model{
+		page:           pageSettings,
+		cfg:            state.DefaultConfig(),
+		settingsCursor: settingsItemDotfilesRepo,
+		settingsInput:  textinput.New(),
+	}
+
+	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
+	got := updated.(model)
+
+	if !got.settingsEditing {
+		t.Fatal("settingsEditing should be true after enter on dotfiles repo")
+	}
+	if !got.settingsInput.Focused() {
+		t.Fatal("settingsInput should be focused")
+	}
+}
+
+func TestUpdateSettingsEditingSavesOnEnter(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	si := textinput.New()
+	si.CharLimit = 256
+
+	m := model{
+		page:            pageSettings,
+		cfg:             state.DefaultConfig(),
+		settingsCursor:  settingsItemDotfilesRepo,
+		settingsEditing: true,
+		settingsInput:   si,
+	}
+	m.settingsInput.SetValue("https://github.com/user/dotfiles")
+	m.settingsInput.Focus()
+
+	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
+	got := updated.(model)
+
+	if got.settingsEditing {
+		t.Fatal("settingsEditing should be false after enter")
+	}
+	if got.cfg.DotfilesSettings.RepoURL != "https://github.com/user/dotfiles" {
+		t.Fatalf("RepoURL = %q, want %q", got.cfg.DotfilesSettings.RepoURL, "https://github.com/user/dotfiles")
+	}
+
+	cfg, err := state.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if cfg.DotfilesSettings.RepoURL != "https://github.com/user/dotfiles" {
+		t.Fatalf("persisted RepoURL = %q, want %q", cfg.DotfilesSettings.RepoURL, "https://github.com/user/dotfiles")
+	}
+}
+
+func TestUpdateSettingsEditingCancelsOnEsc(t *testing.T) {
+	si := textinput.New()
+	si.CharLimit = 256
+
+	cfg := state.DefaultConfig()
+	cfg.DotfilesSettings.RepoURL = "original"
+
+	m := model{
+		page:            pageSettings,
+		cfg:             cfg,
+		settingsCursor:  settingsItemDotfilesRepo,
+		settingsEditing: true,
+		settingsInput:   si,
+	}
+	m.settingsInput.SetValue("changed")
+	m.settingsInput.Focus()
+
+	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEsc})
+	got := updated.(model)
+
+	if got.settingsEditing {
+		t.Fatal("settingsEditing should be false after esc")
+	}
+	if got.cfg.DotfilesSettings.RepoURL != "original" {
+		t.Fatalf("RepoURL = %q, want %q (should not have changed)", got.cfg.DotfilesSettings.RepoURL, "original")
 	}
 }

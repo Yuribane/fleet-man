@@ -43,7 +43,7 @@ var (
 				Foreground(lipgloss.Color("42"))
 
 	statusStoppedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("196"))
+				Foreground(lipgloss.Color("39"))
 
 	statusCreatingStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("214"))
@@ -81,10 +81,10 @@ var (
 			PaddingTop(1)
 
 	warnBox = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("196")).
-			Padding(1, 2).
-			Width(50)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("196")).
+		Padding(1, 2).
+		Width(50)
 
 	warnBanner = lipgloss.NewStyle().
 			Bold(true).

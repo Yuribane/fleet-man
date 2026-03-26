@@ -5,8 +5,14 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
+	"github.com/BenjaminBenetti/fleet-man/internal/gitutil"
+	"github.com/BenjaminBenetti/fleet-man/internal/instanceops"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+var toggleInstanceStatus = instanceops.ToggleInstance
+var resolveWorkspaceBranch = gitutil.BranchName
 
 func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -35,6 +41,47 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			m.reload()
 			m.message = "Refreshed"
+
+		case "s":
+			r := m.currentRow()
+			if r == nil || r.kind != rowInstance || r.instance == nil {
+				m.message = "Select an instance"
+				break
+			}
+
+			key := r.fleetName + "/" + r.instance.Name
+			if r.instance.Status == fleet.StatusCreating {
+				m.message = fmt.Sprintf("Instance %s is still creating", key)
+				break
+			}
+			if r.instance.Status == fleet.StatusFailed {
+				m.message = fmt.Sprintf("Instance %s is failed and cannot be toggled", key)
+				break
+			}
+
+			result, err := toggleInstanceStatus(r.fleetName, r.instance.Name)
+			if err != nil {
+				m.message = fmt.Sprintf("Could not toggle %s: %v", key, err)
+				break
+			}
+
+			m.reload()
+			switch result.Status {
+			case fleet.StatusStopped:
+				if result.Changed {
+					m.message = fmt.Sprintf("Stopped %s", key)
+				} else {
+					m.message = fmt.Sprintf("Instance %s is already stopped", key)
+				}
+			case fleet.StatusRunning:
+				if result.Changed {
+					m.message = fmt.Sprintf("Started %s", key)
+				} else {
+					m.message = fmt.Sprintf("Instance %s is already running", key)
+				}
+			default:
+				m.message = fmt.Sprintf("Instance %s is %s", key, result.Status)
+			}
 
 		case "d":
 			r := m.currentRow()
@@ -227,10 +274,16 @@ func (m model) viewFleetList() string {
 				paddedName = selectedStyle.Render(paddedName)
 			}
 
+			branchItem := ""
+			if branch := resolveWorkspaceBranch(inst.WorkspaceDir); branch != "" {
+				branchItem = dimStyle.Render("  " + branch)
+			}
+
 			if m.creating[key] {
 				listContent.WriteString(fmt.Sprintf("%s    %s %s",
 					cursor, paddedName, status,
 				))
+				listContent.WriteString(branchItem)
 			} else {
 				// Show CPU/memory stats
 				statsStr := ""
@@ -240,6 +293,7 @@ func (m model) viewFleetList() string {
 				listContent.WriteString(fmt.Sprintf("%s    %s %s%s",
 					cursor, paddedName, status, statsStr,
 				))
+				listContent.WriteString(branchItem)
 			}
 			listContent.WriteString("\n")
 		} else {
@@ -354,7 +408,7 @@ func (m model) viewFleetList() string {
 
 	b.WriteString(renderHelp(m.width, []string{
 		"j/k: navigate", "space: expand/collapse", "enter/e: exec or open",
-		"o: open terminal", "n: new fleet", "a: add instance", "d: delete",
+		"s: stop/start", "o: open terminal", "n: new fleet", "a: add instance", "d: delete",
 		"c: code", "l: logs", "r: refresh", "q: quit",
 	}))
 
