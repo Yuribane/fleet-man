@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/gitutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/instanceops"
@@ -141,8 +142,9 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			banner := renderGradient(nameToBanner(inst.Name))
+			execArgs := devcontainer.ExecArgs(inst.WorkspaceDir, shellCommand(m.cfg))
 			return m, tea.ExecProcess(
-				execWithBanner(banner, "devcontainer", "exec", "--workspace-folder", inst.WorkspaceDir, "bash"),
+				execWithBanner(banner, "devcontainer", execArgs...),
 				func(err error) tea.Msg { return execDoneMsg{err} },
 			)
 
@@ -152,7 +154,8 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = "Select an instance"
 				break
 			}
-			err := openInTerminal([]string{"devcontainer", "exec", "--workspace-folder", inst.WorkspaceDir, "bash"})
+			execArgs := devcontainer.ExecArgs(inst.WorkspaceDir, shellCommand(m.cfg))
+			err := openInTerminal(append([]string{"devcontainer"}, execArgs...))
 			if err != nil {
 				m.message = fmt.Sprintf("Could not open terminal: %v", err)
 			} else {

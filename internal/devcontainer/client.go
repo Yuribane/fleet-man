@@ -22,7 +22,9 @@ func NewClient() *Client {
 
 // Up runs `devcontainer up` for the given workspace folder.
 func (c *Client) Up(workspaceDir string) (*UpResult, error) {
-	cmd := exec.Command("devcontainer", "up", "--workspace-folder", workspaceDir)
+	args := []string{"up", "--workspace-folder", workspaceDir}
+	args = append(args, sshUpArgs()...)
+	cmd := exec.Command("devcontainer", args...)
 	if c.Verbose {
 		cmd.Stderr = os.Stderr
 	}
@@ -46,7 +48,7 @@ func (c *Client) Up(workspaceDir string) (*UpResult, error) {
 
 // Exec runs `devcontainer exec` in the given workspace folder.
 func (c *Client) Exec(workspaceDir string, command []string) error {
-	args := append([]string{"exec", "--workspace-folder", workspaceDir}, command...)
+	args := ExecArgs(workspaceDir, command)
 	cmd := exec.Command("devcontainer", args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
