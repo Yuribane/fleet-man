@@ -7,8 +7,13 @@ import (
 	"strings"
 )
 
-// Character map for simple block letters — each char is 5 lines tall.
-var charMap = map[rune][5]string{
+const (
+	glyphHeight  = 5
+	bannerHeight = 6
+)
+
+// Character map for simple block letters — each glyph has a 5-line body.
+var charMap = map[rune][glyphHeight]string{
 	'a': {"       ", "  __ _ ", " / _` |", "| (_| |", " \\__,_|"},
 	'b': {" _     ", "| |__  ", "| '_ \\ ", "| |_) |", "|_.__/ "},
 	'c': {"      ", "  ___ ", " / __|", "| (__ ", " \\___|"},
@@ -52,29 +57,47 @@ var charMap = map[rune][5]string{
 	' ': {"  ", "  ", "  ", "  ", "  "},
 }
 
-// nameToBanner converts a string into 5-line ASCII art.
+var descenderMap = map[rune]string{
+	'g': " |___/ ",
+	'q': "    |_|",
+	'y': " |___/ ",
+}
+
+// nameToBanner converts a string into 6-line ASCII art with a descender row.
 func nameToBanner(name string) string {
 	name = strings.ToLower(name)
-	lines := [5]strings.Builder{}
+	lines := [bannerHeight]strings.Builder{}
 
 	for _, ch := range name {
 		glyph, ok := charMap[ch]
 		if !ok {
 			glyph = charMap[' ']
 		}
-		for i := 0; i < 5; i++ {
+		for i := 0; i < glyphHeight; i++ {
 			lines[i].WriteString(glyph[i])
 		}
+		lines[glyphHeight].WriteString(descenderFor(ch, len(glyph[0])))
 	}
 
 	var result strings.Builder
-	for i := 0; i < 5; i++ {
+	for i := 0; i < bannerHeight; i++ {
 		if i > 0 {
 			result.WriteString("\n")
 		}
 		result.WriteString(lines[i].String())
 	}
 	return result.String()
+}
+
+func descenderFor(ch rune, width int) string {
+	descender, ok := descenderMap[ch]
+	if !ok {
+		return strings.Repeat(" ", width)
+	}
+	if len(descender) < width {
+		return descender + strings.Repeat(" ", width-len(descender))
+	}
+	return descender
 }
 
 // execWithBanner returns an *exec.Cmd that clears the screen, prints a banner, then execs the given command.

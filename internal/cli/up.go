@@ -2,12 +2,10 @@ package cli
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 
-	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
+	"github.com/BenjaminBenetti/fleet-man/internal/create"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/spf13/cobra"
@@ -53,48 +51,37 @@ func newUpCmd() *cobra.Command {
 				return fmt.Errorf("instance %s/%s already exists", target.Fleet, target.Instance)
 			}
 
-			// Clone the repo into the workspace directory
+			// Pre-create instance in state with "creating" status
 			wsDir := filepath.Join(state.WorkspacesDir(), target.Fleet, target.Instance, target.Fleet)
-			fmt.Printf("Cloning %s into %s...\n", remoteURL, wsDir)
-			if err := os.MkdirAll(filepath.Dir(wsDir), 0755); err != nil {
-				return fmt.Errorf("creating workspace parent dir: %w", err)
-			}
-
-			gitClone := exec.Command("git", "clone", remoteURL, wsDir)
-			gitClone.Stdout = os.Stdout
-			gitClone.Stderr = os.Stderr
-			if err := gitClone.Run(); err != nil {
-				return fmt.Errorf("git clone failed: %w", err)
-			}
-
-			// Run devcontainer up
-			fmt.Printf("Starting devcontainer for %s/%s...\n", target.Fleet, target.Instance)
-			dc := devcontainer.NewClient()
-			dc.Verbose = true
-			result, err := dc.Up(wsDir)
-			if err != nil {
-				return fmt.Errorf("devcontainer up failed: %w", err)
-			}
-
-			// Record the instance
 			inst := &fleet.Instance{
 				Name:         target.Instance,
-				ContainerID:  result.ContainerID,
 				Config:       ".devcontainer/devcontainer.json",
 				WorkspaceDir: wsDir,
 				CreatedAt:    time.Now(),
-				Status:       fleet.StatusRunning,
+				Status:       fleet.StatusCreating,
 			}
-
 			if err := f.AddInstance(inst); err != nil {
 				return err
 			}
-
 			if err := state.Save(st); err != nil {
 				return err
 			}
 
-			fmt.Printf("Instance %s/%s is running (container: %s)\n", target.Fleet, target.Instance, result.ContainerID[:12])
+			fmt.Printf("Creating %s/%s...\n", target.Fleet, target.Instance)
+			if err := create.Run(target.Fleet, target.Instance, remoteURL, true); err != nil {
+				return err
+			}
+
+			// Reload state to get the updated container ID
+			st, err = state.Load()
+			if err != nil {
+				return err
+			}
+			if f, ok := st.Fleets[target.Fleet]; ok {
+				if inst, err := f.GetInstance(target.Instance); err == nil {
+					fmt.Printf("Instance %s/%s is running (container: %s)\n", target.Fleet, target.Instance, inst.ContainerID[:min(12, len(inst.ContainerID))])
+				}
+			}
 			return nil
 		},
 	}

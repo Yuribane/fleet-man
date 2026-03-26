@@ -7,8 +7,50 @@ import (
 	"path/filepath"
 )
 
+type AgentTool string
+
+const (
+	AgentToolCodex   AgentTool = "codex"
+	AgentToolClaude  AgentTool = "claude"
+	AgentToolGemini  AgentTool = "gemini"
+	AgentToolCopilot AgentTool = "copilot"
+)
+
+var validAgentTools = map[AgentTool]struct{}{
+	AgentToolCodex:   {},
+	AgentToolClaude:  {},
+	AgentToolGemini:  {},
+	AgentToolCopilot: {},
+}
+
+// AgentSettings holds AI agent preferences.
+type AgentSettings struct {
+	ToolSelection AgentTool `json:"tool_selection"`
+}
+
 // Config holds user preferences.
-type Config struct{}
+type Config struct {
+	AgentSettings AgentSettings `json:"agent_settings"`
+}
+
+// DefaultConfig returns a config with default values applied.
+func DefaultConfig() *Config {
+	return &Config{
+		AgentSettings: AgentSettings{
+			ToolSelection: AgentToolClaude,
+		},
+	}
+}
+
+func (c *Config) applyDefaults() {
+	if c == nil {
+		return
+	}
+
+	if _, ok := validAgentTools[c.AgentSettings.ToolSelection]; !ok {
+		c.AgentSettings.ToolSelection = AgentToolClaude
+	}
+}
 
 // ConfigPath returns the path to the config file.
 func ConfigPath() string {
@@ -17,7 +59,7 @@ func ConfigPath() string {
 
 // LoadConfig reads the config from disk. Returns defaults if the file doesn't exist.
 func LoadConfig() (*Config, error) {
-	c := &Config{}
+	c := DefaultConfig()
 
 	data, err := os.ReadFile(ConfigPath())
 	if os.IsNotExist(err) {
@@ -31,11 +73,17 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("parsing config file: %w", err)
 	}
 
+	c.applyDefaults()
 	return c, nil
 }
 
 // SaveConfig writes the config to disk.
 func SaveConfig(c *Config) error {
+	if c == nil {
+		c = DefaultConfig()
+	}
+	c.applyDefaults()
+
 	if err := os.MkdirAll(FleetDir(), 0755); err != nil {
 		return fmt.Errorf("creating fleet dir: %w", err)
 	}

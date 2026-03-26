@@ -8,6 +8,7 @@ const (
 	StatusCreating InstanceStatus = "creating"
 	StatusRunning  InstanceStatus = "running"
 	StatusStopped  InstanceStatus = "stopped"
+	StatusFailed   InstanceStatus = "failed"
 )
 
 type Instance struct {
@@ -17,4 +18,5 @@ type Instance struct {
 	WorkspaceDir string        `json:"workspace_dir"`
 	CreatedAt   time.Time      `json:"created_at"`
 	Status      InstanceStatus `json:"status"`
+	Error       string         `json:"error,omitempty"`
 }
