@@ -50,13 +50,13 @@ func dotfilesSetup(cfg *state.Config) string {
 //   - No session exists: creates a new one.
 //   - Session exists: attaches to it.
 //
-// Ctrl+Q detaches and keeps processes running.
+// Ctrl+Q or Ctrl+O detaches and keeps processes running.
 func shellCommand(cfg *state.Config, instanceName string) []string {
 	setup := dotfilesSetup(cfg)
 	session := sanitizeSessionName(instanceName)
 	tmuxInstall := `command -v tmux >/dev/null 2>&1 || { echo '==> Installing tmux...'; (sudo apt-get update -qq && sudo apt-get install -y -qq tmux) 2>/dev/null || (sudo apk add tmux) 2>/dev/null || (sudo dnf install -y tmux) 2>/dev/null; }; `
 	inner := setup + tmuxInstall + fmt.Sprintf(
-		`exec tmux -u new-session -A -s %s \; bind-key -n C-q detach-client \; set status-right ' ctrl+q: detach '`,
+		`exec tmux -u new-session -A -s %s \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client \; set status-right ' ctrl+q/ctrl+o: detach '`,
 		shQuote(session),
 	)
 	return []string{"sh", "-c", inner}

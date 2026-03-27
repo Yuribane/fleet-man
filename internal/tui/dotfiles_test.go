@@ -68,6 +68,9 @@ func TestShellCommandProducesTmux(t *testing.T) {
 	if !strings.Contains(script, "bind-key -n C-q detach-client") {
 		t.Errorf("script missing ctrl+q keybinding: %s", script)
 	}
+	if !strings.Contains(script, "bind-key -n C-o detach-client") {
+		t.Errorf("script missing ctrl+o keybinding: %s", script)
+	}
 }
 
 func TestShellCommandWithDotfilesAndTmux(t *testing.T) {
