@@ -2,23 +2,23 @@ package devcontainer
 
 import "testing"
 
-func TestPgrepSafePattern(t *testing.T) {
+func TestBinaryMatchPattern(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
 	}{
-		{"claude", "[c]laude"},
-		{"codex", "[c]odex"},
-		{"gemini", "[g]emini"},
-		{"copilot", "[c]opilot"},
+		{"claude", `(^|\/)claude$`},
+		{"codex", `(^|\/)codex$`},
+		{"gemini", `(^|\/)gemini$`},
+		{"copilot", `(^|\/)copilot$`},
 		{"", ""},
-		{"a", "[a]"},
+		{"a", `(^|\/)a$`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := pgrepSafePattern(tt.input)
+			got := binaryMatchPattern(tt.input)
 			if got != tt.want {
-				t.Errorf("pgrepSafePattern(%q) = %q, want %q", tt.input, got, tt.want)
+				t.Errorf("binaryMatchPattern(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}

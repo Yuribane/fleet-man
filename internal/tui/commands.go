@@ -64,9 +64,9 @@ func fetchStatsCmd(ids []string, agentPattern string, delay bool) tea.Cmd {
 	}
 }
 
-// agentToolPattern returns the process substring to search for based
-// on the configured agent tool. The AgentTool values ("claude", "codex",
-// etc.) are already the process name substrings.
+// agentToolPattern returns the process name to search for based on the
+// configured agent tool. The AgentTool values ("claude", "codex", etc.)
+// double as the binary names matched against the ps command field.
 func agentToolPattern(cfg *state.Config) string {
 	if cfg == nil {
 		return ""
