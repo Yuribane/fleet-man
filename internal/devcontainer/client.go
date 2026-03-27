@@ -198,18 +198,21 @@ func (c *Client) AgentProbe(containerID string, tools []string) (AgentProbeResul
 		return AgentProbeResult{}, false
 	}
 
+	// Build awk rules that accumulate all PIDs for the first matched tool.
+	// Tools like copilot spawn multiple processes; summing ticks across all
+	// of them avoids reading only the idle launcher.
 	var awkRules []string
 	for _, t := range tools {
 		pat := binaryMatchPattern(t)
 		awkRules = append(awkRules, fmt.Sprintf(
-			`($11 ~ /%s/ || $12 ~ /%s/) {print "%s",$2; exit}`,
-			pat, pat, t,
+			`($11 ~ /%s/ || $12 ~ /%s/) { if (!tool) tool="%s"; if (tool=="%s") pids=pids" "$2 }`,
+			pat, pat, t, t,
 		))
 	}
-	awkProgram := strings.Join(awkRules, " ")
+	awkProgram := strings.Join(awkRules, " ") + ` END { if (tool) print tool, pids; else print "-" }`
 
 	script := fmt.Sprintf(`info=$(ps aux 2>/dev/null | awk '%s')`, awkProgram) +
-		`; [ -z "$info" ] && echo "- -1" || { tool=${info%% *}; pid=${info##* }; t=$(awk '{printf "%d\n",$14+$15}' /proc/$pid/stat 2>/dev/null || echo -1); echo "$tool $t"; }`
+		`; [ "$info" = "-" ] && echo "- -1" || { tool=${info%% *}; pids=${info#* }; total=0; for p in $pids; do v=$(awk '{printf "%d\n",$14+$15}' /proc/$p/stat 2>/dev/null); total=$((total + ${v:-0})); done; echo "$tool $total"; }`
 
 	cmd := exec.Command("docker", "exec", containerID, "sh", "-c", script)
 	out, err := cmd.Output()
