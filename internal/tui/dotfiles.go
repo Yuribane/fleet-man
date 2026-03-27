@@ -36,7 +36,7 @@ func dotfilesSetup(cfg *state.Config) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		`if [ ! -d ~/dotfiles ]; then echo '==> Cloning dotfiles...'; git clone %s ~/dotfiles && cd ~/dotfiles && sh %s; fi; `,
+		`if [ ! -d ~/dotfiles ]; then echo '==> Cloning dotfiles...'; git clone %s ~/dotfiles && (cd ~/dotfiles && sh %s); fi; `,
 		shQuote(repo), shQuote(script),
 	)
 }
