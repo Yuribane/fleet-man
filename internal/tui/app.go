@@ -74,6 +74,7 @@ type model struct {
 
 	stats          map[string]*devcontainer.ContainerStats // containerID → stats
 	agentStates    map[string]agentState                  // containerID → derived agent state
+	agentTools     map[string]state.AgentTool             // containerID → detected tool
 	agentPrevTicks map[string]int64                       // containerID → previous CPU ticks for delta
 
 	settingsCursor  int             // 0=tool, 1=repo URL, 2=install script
@@ -228,34 +229,38 @@ const agentIdleTickThreshold int64 = 10
 // readings to determine whether each agent is working or waiting.
 // A CPU tick delta above the idle threshold means the agent is working.
 // A delta at or below the threshold means it's idle (waiting for input).
-func (m *model) deriveAgentStates(probes map[string]int64) {
+func (m *model) deriveAgentStates(probes map[string]devcontainer.AgentProbeResult) {
 	newStates := make(map[string]agentState, len(probes))
 	newPrev := make(map[string]int64, len(probes))
+	newTools := make(map[string]state.AgentTool, len(probes))
 
-	for id, ticks := range probes {
-		if ticks < 0 {
+	for id, r := range probes {
+		if r.CPUTicks < 0 {
 			newStates[id] = agentNotRunning
 			continue
 		}
 
+		newTools[id] = state.AgentTool(r.Tool)
+
 		prev, hasPrev := m.agentPrevTicks[id]
-		if !hasPrev || ticks < prev {
+		if !hasPrev || r.CPUTicks < prev {
 			// First reading or process restarted → assume working
 			newStates[id] = agentWorking
-		} else if ticks-prev > agentIdleTickThreshold {
+		} else if r.CPUTicks-prev > agentIdleTickThreshold {
 			newStates[id] = agentWorking
 		} else {
 			newStates[id] = agentWaiting
 		}
-		newPrev[id] = ticks
+		newPrev[id] = r.CPUTicks
 	}
 
 	m.agentStates = newStates
 	m.agentPrevTicks = newPrev
+	m.agentTools = newTools
 }
 
 func (m model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.spinner.Tick, fetchStatsCmd(m.containerIDs(), agentToolPattern(m.cfg), false)}
+	cmds := []tea.Cmd{m.spinner.Tick, fetchStatsCmd(m.containerIDs(), false)}
 	if len(m.creating) > 0 {
 		cmds = append(cmds, pollCreatingCmd())
 	}
@@ -276,7 +281,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.agentProbes != nil {
 			m.deriveAgentStates(msg.agentProbes)
 		}
-		return m, fetchStatsCmd(m.containerIDs(), agentToolPattern(m.cfg), true)
+		return m, fetchStatsCmd(m.containerIDs(), true)
 
 	case instanceSpawnedMsg:
 		// Background process launched; start polling for completion

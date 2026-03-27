@@ -207,6 +207,7 @@ func TestViewFleetListShowsAgentWorkingIndicator(t *testing.T) {
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
 		agentStates:    map[string]agentState{"abc123": agentWorking},
+		agentTools:     map[string]state.AgentTool{"abc123": state.AgentToolClaude},
 		agentPrevTicks: map[string]int64{},
 		stats:          map[string]*devcontainer.ContainerStats{},
 		rows: []row{
@@ -243,6 +244,7 @@ func TestViewFleetListShowsAgentWaitingIndicator(t *testing.T) {
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
 		agentStates:    map[string]agentState{"abc123": agentWaiting},
+		agentTools:     map[string]state.AgentTool{"abc123": state.AgentToolClaude},
 		agentPrevTicks: map[string]int64{},
 		stats:          map[string]*devcontainer.ContainerStats{},
 		rows: []row{

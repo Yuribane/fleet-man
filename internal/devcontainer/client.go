@@ -165,45 +165,63 @@ func binaryMatchPattern(s string) string {
 	return `(^|\/)` + s + `$`
 }
 
-// parseProbeLine extracts CPU ticks from the probe script output.
-// Returns (ticks, true) on success, (-1, false) if process not found.
-func parseProbeLine(output string) (int64, bool) {
-	s := strings.TrimSpace(output)
-	if s == "" || s == "-1" {
-		return -1, false
-	}
-	ticks, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return -1, false
-	}
-	return ticks, true
+// AgentProbeResult holds the outcome of probing a container for agent
+// processes. Tool is the detected tool name; CPUTicks is the cumulative
+// CPU ticks (-1 when no agent was found).
+type AgentProbeResult struct {
+	Tool     string
+	CPUTicks int64
 }
 
-// AgentProbe checks if a process matching pattern is running inside the
-// container and returns its cumulative CPU ticks (utime+stime from
-// /proc/pid/stat). Returns (-1, false) if the process is not found.
+// parseProbeOutput parses "tool ticks" output from the probe script.
+func parseProbeOutput(output string) (AgentProbeResult, bool) {
+	fields := strings.Fields(strings.TrimSpace(output))
+	if len(fields) != 2 || fields[0] == "-" {
+		return AgentProbeResult{}, false
+	}
+	ticks, err := strconv.ParseInt(fields[1], 10, 64)
+	if err != nil {
+		return AgentProbeResult{}, false
+	}
+	return AgentProbeResult{Tool: fields[0], CPUTicks: ticks}, true
+}
+
+// AgentProbe checks if any of the given tool processes are running inside
+// the container and returns which tool was found along with its cumulative
+// CPU ticks (utime+stime from /proc/pid/stat).
 //
-// Uses `docker exec` with ps + /proc to avoid requiring pgrep in the
-// container. Matches the command ($11) or first arg ($12) to handle both
-// direct binaries and node-launched tools.
-func (c *Client) AgentProbe(containerID, pattern string) (cpuTicks int64, found bool) {
-	safe := binaryMatchPattern(pattern)
-	script := fmt.Sprintf(
-		`pid=$(ps aux 2>/dev/null | awk '($11 ~ /%s/ || $12 ~ /%s/) {print $2; exit}'); [ -z "$pid" ] && echo -1 || awk '{printf "%%d\n", $14+$15}' /proc/$pid/stat 2>/dev/null || echo -1`,
-		safe, safe,
-	)
+// Uses `docker exec` with a single ps+awk pass to scan for all tools.
+// Matches the command ($11) or first arg ($12) to handle both direct
+// binaries and node-launched tools.
+func (c *Client) AgentProbe(containerID string, tools []string) (AgentProbeResult, bool) {
+	if len(tools) == 0 {
+		return AgentProbeResult{}, false
+	}
+
+	var awkRules []string
+	for _, t := range tools {
+		pat := binaryMatchPattern(t)
+		awkRules = append(awkRules, fmt.Sprintf(
+			`($11 ~ /%s/ || $12 ~ /%s/) {print "%s",$2; exit}`,
+			pat, pat, t,
+		))
+	}
+	awkProgram := strings.Join(awkRules, " ")
+
+	script := fmt.Sprintf(`info=$(ps aux 2>/dev/null | awk '%s')`, awkProgram) +
+		`; [ -z "$info" ] && echo "- -1" || { tool=${info%% *}; pid=${info##* }; t=$(awk '{printf "%d\n",$14+$15}' /proc/$pid/stat 2>/dev/null || echo -1); echo "$tool $t"; }`
+
 	cmd := exec.Command("docker", "exec", containerID, "sh", "-c", script)
 	out, err := cmd.Output()
 	if err != nil {
-		return -1, false
+		return AgentProbeResult{}, false
 	}
-	return parseProbeLine(string(out))
+	return parseProbeOutput(string(out))
 }
 
 // AgentProbes runs AgentProbe concurrently for all containers.
-// Returns containerID → CPU ticks (-1 means process not found).
-func (c *Client) AgentProbes(containerIDs []string, pattern string) map[string]int64 {
-	result := make(map[string]int64, len(containerIDs))
+func (c *Client) AgentProbes(containerIDs []string, tools []string) map[string]AgentProbeResult {
+	result := make(map[string]AgentProbeResult, len(containerIDs))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -211,12 +229,12 @@ func (c *Client) AgentProbes(containerIDs []string, pattern string) map[string]i
 		wg.Add(1)
 		go func(cid string) {
 			defer wg.Done()
-			ticks, found := c.AgentProbe(cid, pattern)
+			r, found := c.AgentProbe(cid, tools)
 			mu.Lock()
 			if found {
-				result[cid] = ticks
+				result[cid] = r
 			} else {
-				result[cid] = -1
+				result[cid] = AgentProbeResult{CPUTicks: -1}
 			}
 			mu.Unlock()
 		}(id)

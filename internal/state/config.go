@@ -24,6 +24,16 @@ var validAgentTools = map[AgentTool]struct{}{
 	AgentToolCopilot: {},
 }
 
+// AllAgentToolNames returns the process names for all supported agent tools.
+func AllAgentToolNames() []string {
+	return []string{
+		string(AgentToolClaude),
+		string(AgentToolCodex),
+		string(AgentToolCopilot),
+		string(AgentToolGemini),
+	}
+}
+
 // AgentSettings holds AI agent preferences.
 type AgentSettings struct {
 	ToolSelection AgentTool `json:"tool_selection"`

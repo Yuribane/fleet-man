@@ -33,7 +33,7 @@ type pollCreatingTickMsg struct{}
 
 type statsMsg struct {
 	stats       map[string]*devcontainer.ContainerStats
-	agentProbes map[string]int64 // containerID → CPU ticks (-1 = not found)
+	agentProbes map[string]devcontainer.AgentProbeResult
 }
 
 // Commands
@@ -44,7 +44,7 @@ func pollCreatingCmd() tea.Cmd {
 	})
 }
 
-func fetchStatsCmd(ids []string, agentPattern string, delay bool) tea.Cmd {
+func fetchStatsCmd(ids []string, delay bool) tea.Cmd {
 	return func() tea.Msg {
 		if delay {
 			time.Sleep(3 * time.Second)
@@ -54,24 +54,9 @@ func fetchStatsCmd(ids []string, agentPattern string, delay bool) tea.Cmd {
 		}
 		dc := devcontainer.NewClient()
 		stats, _ := dc.Stats(ids)
-
-		var agentProbes map[string]int64
-		if agentPattern != "" {
-			agentProbes = dc.AgentProbes(ids, agentPattern)
-		}
-
+		agentProbes := dc.AgentProbes(ids, state.AllAgentToolNames())
 		return statsMsg{stats: stats, agentProbes: agentProbes}
 	}
-}
-
-// agentToolPattern returns the process name to search for based on the
-// configured agent tool. The AgentTool values ("claude", "codex", etc.)
-// double as the binary names matched against the ps command field.
-func agentToolPattern(cfg *state.Config) string {
-	if cfg == nil {
-		return ""
-	}
-	return string(cfg.AgentSettings.ToolSelection)
 }
 
 func createInstanceCmd(fleetName, instanceName, remoteURL string) tea.Cmd {
