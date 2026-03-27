@@ -36,7 +36,7 @@ func dotfilesSetup(cfg *state.Config) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		`if [ ! -d ~/dotfiles ]; then echo '==> Cloning dotfiles...'; git clone %s ~/dotfiles && cd ~/dotfiles && sh %s; fi; `,
+		`if [ ! -d ~/dotfiles ]; then echo '==> Cloning dotfiles...'; git clone %s ~/dotfiles && (cd ~/dotfiles && sh %s); fi; `,
 		shQuote(repo), shQuote(script),
 	)
 }
@@ -56,7 +56,7 @@ func shellCommand(cfg *state.Config, instanceName string) []string {
 	session := sanitizeSessionName(instanceName)
 	tmuxInstall := `command -v tmux >/dev/null 2>&1 || { echo '==> Installing tmux...'; (sudo apt-get update -qq && sudo apt-get install -y -qq tmux) 2>/dev/null || (sudo apk add tmux) 2>/dev/null || (sudo dnf install -y tmux) 2>/dev/null; }; `
 	inner := setup + tmuxInstall + fmt.Sprintf(
-		`exec tmux -u new-session -A -s %s \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client \; set status-right ' ctrl+q/ctrl+o: detach '`,
+		`exec tmux -u new-session -A -s %s \; set -g mouse on \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client \; set status-right ' ctrl+q/ctrl+o: detach '`,
 		shQuote(session),
 	)
 	return []string{"sh", "-c", inner}
