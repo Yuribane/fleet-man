@@ -14,6 +14,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+type agentState int
+
+const (
+	agentNotRunning agentState = iota
+	agentWorking
+	agentWaiting
+)
+
 type viewMode int
 
 const (
@@ -64,7 +72,9 @@ type model struct {
 	spinner  spinner.Model
 	creating map[string]bool // "fleet/instance" keys currently being created
 
-	stats map[string]*devcontainer.ContainerStats // containerID → stats
+	stats          map[string]*devcontainer.ContainerStats // containerID → stats
+	agentStates    map[string]agentState                  // containerID → derived agent state
+	agentPrevTicks map[string]int64                       // containerID → previous CPU ticks for delta
 
 	settingsCursor  int             // 0=tool, 1=repo URL, 2=install script
 	settingsEditing bool            // true when editing a text field
@@ -90,7 +100,9 @@ func newModel() model {
 	m := model{
 		collapsed:     make(map[string]bool),
 		creating:      make(map[string]bool),
-		stats:         make(map[string]*devcontainer.ContainerStats),
+		stats:          make(map[string]*devcontainer.ContainerStats),
+		agentStates:    make(map[string]agentState),
+		agentPrevTicks: make(map[string]int64),
 		textInput:     ti,
 		spinner:       sp,
 		settingsInput: si,
@@ -207,8 +219,38 @@ func (m *model) containerIDs() []string {
 	return ids
 }
 
+// deriveAgentStates compares current CPU tick readings with previous
+// readings to determine whether each agent is working or waiting.
+// A CPU tick delta > 0 means the agent consumed CPU → working.
+// A delta of 0 means it's idle (waiting for user input).
+func (m *model) deriveAgentStates(probes map[string]int64) {
+	newStates := make(map[string]agentState, len(probes))
+	newPrev := make(map[string]int64, len(probes))
+
+	for id, ticks := range probes {
+		if ticks < 0 {
+			newStates[id] = agentNotRunning
+			continue
+		}
+
+		prev, hasPrev := m.agentPrevTicks[id]
+		if !hasPrev || ticks < prev {
+			// First reading or process restarted → assume working
+			newStates[id] = agentWorking
+		} else if ticks > prev {
+			newStates[id] = agentWorking
+		} else {
+			newStates[id] = agentWaiting
+		}
+		newPrev[id] = ticks
+	}
+
+	m.agentStates = newStates
+	m.agentPrevTicks = newPrev
+}
+
 func (m model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.spinner.Tick, fetchStatsCmd(m.containerIDs(), false)}
+	cmds := []tea.Cmd{m.spinner.Tick, fetchStatsCmd(m.containerIDs(), agentToolPattern(m.cfg), false)}
 	if len(m.creating) > 0 {
 		cmds = append(cmds, pollCreatingCmd())
 	}
@@ -226,7 +268,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.stats != nil {
 			m.stats = msg.stats
 		}
-		return m, fetchStatsCmd(m.containerIDs(), true)
+		if msg.agentProbes != nil {
+			m.deriveAgentStates(msg.agentProbes)
+		}
+		return m, fetchStatsCmd(m.containerIDs(), agentToolPattern(m.cfg), true)
 
 	case instanceSpawnedMsg:
 		// Background process launched; start polling for completion

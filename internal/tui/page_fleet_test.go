@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/instanceops"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
@@ -186,6 +187,153 @@ func TestViewFleetListOmitsBranchItemWhenBranchIsUnavailable(t *testing.T) {
 	view := m.viewFleetList()
 	if strings.Contains(view, "feature/status-line") {
 		t.Fatalf("view unexpectedly contains branch item:\n%s", view)
+	}
+}
+
+func TestViewFleetListShowsAgentWorkingIndicator(t *testing.T) {
+	inst := &fleet.Instance{
+		Name:         "agent-1",
+		Status:       fleet.StatusRunning,
+		ContainerID:  "abc123",
+		WorkspaceDir: "/workspace/alpha/agent-1",
+	}
+	m := model{
+		st: &state.State{
+			Fleets: map[string]*fleet.Fleet{
+				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
+			},
+		},
+		cfg: &state.Config{
+			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
+		},
+		agentStates:    map[string]agentState{"abc123": agentWorking},
+		agentPrevTicks: map[string]int64{},
+		stats:          map[string]*devcontainer.ContainerStats{},
+		rows: []row{
+			{kind: rowFleetHeader, fleetName: "alpha"},
+			{kind: rowInstance, fleetName: "alpha", instance: inst},
+			{kind: rowSettings},
+		},
+	}
+
+	prevResolveBranch := resolveWorkspaceBranch
+	resolveWorkspaceBranch = func(string) string { return "" }
+	defer func() { resolveWorkspaceBranch = prevResolveBranch }()
+
+	view := m.viewFleetList()
+	if !strings.Contains(view, "\u25b6") || !strings.Contains(view, "Claude Code") {
+		t.Fatalf("view missing working indicator:\n%s", view)
+	}
+}
+
+func TestViewFleetListShowsAgentWaitingIndicator(t *testing.T) {
+	inst := &fleet.Instance{
+		Name:         "agent-1",
+		Status:       fleet.StatusRunning,
+		ContainerID:  "abc123",
+		WorkspaceDir: "/workspace/alpha/agent-1",
+	}
+	m := model{
+		st: &state.State{
+			Fleets: map[string]*fleet.Fleet{
+				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
+			},
+		},
+		cfg: &state.Config{
+			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
+		},
+		agentStates:    map[string]agentState{"abc123": agentWaiting},
+		agentPrevTicks: map[string]int64{},
+		stats:          map[string]*devcontainer.ContainerStats{},
+		rows: []row{
+			{kind: rowFleetHeader, fleetName: "alpha"},
+			{kind: rowInstance, fleetName: "alpha", instance: inst},
+			{kind: rowSettings},
+		},
+	}
+
+	prevResolveBranch := resolveWorkspaceBranch
+	resolveWorkspaceBranch = func(string) string { return "" }
+	defer func() { resolveWorkspaceBranch = prevResolveBranch }()
+
+	view := m.viewFleetList()
+	if !strings.Contains(view, "\u23f8") || !strings.Contains(view, "Claude Code") {
+		t.Fatalf("view missing waiting indicator:\n%s", view)
+	}
+}
+
+func TestViewFleetListShowsAgentOffIndicator(t *testing.T) {
+	inst := &fleet.Instance{
+		Name:         "agent-1",
+		Status:       fleet.StatusRunning,
+		ContainerID:  "abc123",
+		WorkspaceDir: "/workspace/alpha/agent-1",
+	}
+	m := model{
+		st: &state.State{
+			Fleets: map[string]*fleet.Fleet{
+				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
+			},
+		},
+		cfg: &state.Config{
+			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
+		},
+		agentStates:    map[string]agentState{"abc123": agentNotRunning},
+		agentPrevTicks: map[string]int64{},
+		stats:          map[string]*devcontainer.ContainerStats{},
+		rows: []row{
+			{kind: rowFleetHeader, fleetName: "alpha"},
+			{kind: rowInstance, fleetName: "alpha", instance: inst},
+			{kind: rowSettings},
+		},
+	}
+
+	prevResolveBranch := resolveWorkspaceBranch
+	resolveWorkspaceBranch = func(string) string { return "" }
+	defer func() { resolveWorkspaceBranch = prevResolveBranch }()
+
+	view := m.viewFleetList()
+	if !strings.Contains(view, "idle") {
+		t.Fatalf("view missing off/idle indicator:\n%s", view)
+	}
+	if strings.Contains(view, "\u25b6") || strings.Contains(view, "\u23f8") {
+		t.Fatalf("not-running instance should not show working/waiting icon:\n%s", view)
+	}
+}
+
+func TestViewFleetListNoAgentIndicatorForStoppedInstance(t *testing.T) {
+	inst := &fleet.Instance{
+		Name:         "agent-1",
+		Status:       fleet.StatusStopped,
+		ContainerID:  "abc123",
+		WorkspaceDir: "/workspace/alpha/agent-1",
+	}
+	m := model{
+		st: &state.State{
+			Fleets: map[string]*fleet.Fleet{
+				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
+			},
+		},
+		cfg: &state.Config{
+			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
+		},
+		agentStates:    map[string]agentState{},
+		agentPrevTicks: map[string]int64{},
+		stats:          map[string]*devcontainer.ContainerStats{},
+		rows: []row{
+			{kind: rowFleetHeader, fleetName: "alpha"},
+			{kind: rowInstance, fleetName: "alpha", instance: inst},
+			{kind: rowSettings},
+		},
+	}
+
+	prevResolveBranch := resolveWorkspaceBranch
+	resolveWorkspaceBranch = func(string) string { return "" }
+	defer func() { resolveWorkspaceBranch = prevResolveBranch }()
+
+	view := m.viewFleetList()
+	if strings.Contains(view, "Claude Code") || strings.Contains(view, "idle") {
+		t.Fatalf("stopped instance should not have agent indicator:\n%s", view)
 	}
 }
 

@@ -177,6 +177,77 @@ func TestUpdateSettingsEditingSavesOnEnter(t *testing.T) {
 	}
 }
 
+func TestDeriveAgentStates(t *testing.T) {
+	t.Run("first reading assumes working", func(t *testing.T) {
+		m := model{
+			agentStates:    make(map[string]agentState),
+			agentPrevTicks: make(map[string]int64),
+		}
+		m.deriveAgentStates(map[string]int64{"c1": 500})
+		if m.agentStates["c1"] != agentWorking {
+			t.Fatalf("got %d, want agentWorking", m.agentStates["c1"])
+		}
+	})
+
+	t.Run("increased ticks means working", func(t *testing.T) {
+		m := model{
+			agentStates:    map[string]agentState{"c1": agentWorking},
+			agentPrevTicks: map[string]int64{"c1": 500},
+		}
+		m.deriveAgentStates(map[string]int64{"c1": 600})
+		if m.agentStates["c1"] != agentWorking {
+			t.Fatalf("got %d, want agentWorking", m.agentStates["c1"])
+		}
+	})
+
+	t.Run("unchanged ticks means waiting", func(t *testing.T) {
+		m := model{
+			agentStates:    map[string]agentState{"c1": agentWorking},
+			agentPrevTicks: map[string]int64{"c1": 500},
+		}
+		m.deriveAgentStates(map[string]int64{"c1": 500})
+		if m.agentStates["c1"] != agentWaiting {
+			t.Fatalf("got %d, want agentWaiting", m.agentStates["c1"])
+		}
+	})
+
+	t.Run("negative ticks means not running", func(t *testing.T) {
+		m := model{
+			agentStates:    map[string]agentState{"c1": agentWorking},
+			agentPrevTicks: map[string]int64{"c1": 500},
+		}
+		m.deriveAgentStates(map[string]int64{"c1": -1})
+		if m.agentStates["c1"] != agentNotRunning {
+			t.Fatalf("got %d, want agentNotRunning", m.agentStates["c1"])
+		}
+	})
+
+	t.Run("lower ticks means process restarted treat as working", func(t *testing.T) {
+		m := model{
+			agentStates:    map[string]agentState{"c1": agentWaiting},
+			agentPrevTicks: map[string]int64{"c1": 1000},
+		}
+		m.deriveAgentStates(map[string]int64{"c1": 50})
+		if m.agentStates["c1"] != agentWorking {
+			t.Fatalf("got %d, want agentWorking", m.agentStates["c1"])
+		}
+	})
+
+	t.Run("cleans up removed containers", func(t *testing.T) {
+		m := model{
+			agentStates:    map[string]agentState{"c1": agentWorking, "c2": agentWaiting},
+			agentPrevTicks: map[string]int64{"c1": 500, "c2": 300},
+		}
+		m.deriveAgentStates(map[string]int64{"c1": 600})
+		if _, ok := m.agentStates["c2"]; ok {
+			t.Fatal("c2 should have been cleaned up")
+		}
+		if _, ok := m.agentPrevTicks["c2"]; ok {
+			t.Fatal("c2 prev ticks should have been cleaned up")
+		}
+	})
+}
+
 func TestUpdateSettingsEditingCancelsOnEsc(t *testing.T) {
 	si := textinput.New()
 	si.CharLimit = 256

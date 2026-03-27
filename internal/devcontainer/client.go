@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Client wraps the devcontainer CLI.
@@ -149,6 +150,75 @@ func parseMemToMB(s string) float64 {
 
 	val, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
 	return val * multiplier
+}
+
+// pgrepSafePattern transforms a process name into a grep pattern that
+// won't match the grep command itself. "claude" → "[c]laude".
+func pgrepSafePattern(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	return "[" + s[:1] + "]" + s[1:]
+}
+
+// parseProbeLine extracts CPU ticks from the probe script output.
+// Returns (ticks, true) on success, (-1, false) if process not found.
+func parseProbeLine(output string) (int64, bool) {
+	s := strings.TrimSpace(output)
+	if s == "" || s == "-1" {
+		return -1, false
+	}
+	ticks, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return -1, false
+	}
+	return ticks, true
+}
+
+// AgentProbe checks if a process matching pattern is running inside the
+// container and returns its cumulative CPU ticks (utime+stime from
+// /proc/pid/stat). Returns (-1, false) if the process is not found.
+//
+// Uses `docker exec` with ps + /proc to avoid requiring pgrep in the
+// container. The [f]irst-char grep trick avoids matching our own command.
+func (c *Client) AgentProbe(containerID, pattern string) (cpuTicks int64, found bool) {
+	safe := pgrepSafePattern(pattern)
+	script := fmt.Sprintf(
+		`pid=$(ps aux 2>/dev/null | grep '%s' | awk 'NR==1{print $2}'); [ -z "$pid" ] && echo -1 || awk '{printf "%%d\n", $14+$15}' /proc/$pid/stat 2>/dev/null || echo -1`,
+		safe,
+	)
+	cmd := exec.Command("docker", "exec", containerID, "sh", "-c", script)
+	out, err := cmd.Output()
+	if err != nil {
+		return -1, false
+	}
+	return parseProbeLine(string(out))
+}
+
+// AgentProbes runs AgentProbe concurrently for all containers.
+// Returns containerID → CPU ticks (-1 means process not found).
+func (c *Client) AgentProbes(containerIDs []string, pattern string) map[string]int64 {
+	result := make(map[string]int64, len(containerIDs))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, id := range containerIDs {
+		wg.Add(1)
+		go func(cid string) {
+			defer wg.Done()
+			ticks, found := c.AgentProbe(cid, pattern)
+			mu.Lock()
+			if found {
+				result[cid] = ticks
+			} else {
+				result[cid] = -1
+			}
+			mu.Unlock()
+		}(id)
+	}
+
+	wg.Wait()
+	return result
 }
 
 // Logs streams docker logs for a container.

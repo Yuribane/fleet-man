@@ -289,13 +289,27 @@ func (m model) viewFleetList() string {
 				))
 				listContent.WriteString(branchItem)
 			} else {
+				// Show agent tool indicator
+				agentStr := ""
+				if inst.Status == fleet.StatusRunning && m.cfg != nil {
+					label := agentToolLabel(m.cfg.AgentSettings.ToolSelection)
+					switch m.agentStates[inst.ContainerID] {
+					case agentWorking:
+						agentStr = agentWorkingStyle.Render(fmt.Sprintf("  \u25b6 %s", label))
+					case agentWaiting:
+						agentStr = agentWaitingStyle.Render(fmt.Sprintf("  \u23f8 %s", label))
+					default:
+						agentStr = agentOffStyle.Render("  \u25cb idle")
+					}
+				}
+
 				// Show CPU/memory stats
 				statsStr := ""
 				if s, ok := m.stats[inst.ContainerID]; ok {
 					statsStr = dimStyle.Render(fmt.Sprintf("  %4.0f mcpu  %6.1f MB", s.CPUMillicores, s.MemoryMB))
 				}
-				listContent.WriteString(fmt.Sprintf("%s    %s %s%s",
-					cursor, paddedName, status, statsStr,
+				listContent.WriteString(fmt.Sprintf("%s    %s %s%s%s",
+					cursor, paddedName, status, agentStr, statsStr,
 				))
 				listContent.WriteString(branchItem)
 			}

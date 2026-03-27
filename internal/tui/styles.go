@@ -48,6 +48,18 @@ var (
 	statusCreatingStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("214"))
 
+	// Agent tool indicator
+	agentWorkingStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("42")).
+				Bold(true)
+
+	agentWaitingStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("214")).
+				Bold(true)
+
+	agentOffStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240"))
+
 	// Help bar
 	helpStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("241")).
