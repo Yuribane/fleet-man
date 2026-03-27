@@ -153,9 +153,11 @@ func parseMemToMB(s string) float64 {
 }
 
 // binaryMatchPattern builds an awk regex that matches a binary name in
-// the command field ($11) of ps aux output.  Matches both bare names
-// ("claude") and full paths ("/usr/bin/claude"), but not occurrences of
-// the name buried in arguments (e.g. sshfs mounts containing ".claude").
+// the command ($11) or first argument ($12) of ps aux output. Checks
+// both fields to handle direct invocations ("claude --flag") and
+// node-launched tools ("node /path/to/bin/copilot"). Does not match
+// occurrences buried deeper in arguments (e.g. sshfs mounts containing
+// ".claude").
 func binaryMatchPattern(s string) string {
 	if len(s) == 0 {
 		return s
@@ -182,12 +184,13 @@ func parseProbeLine(output string) (int64, bool) {
 // /proc/pid/stat). Returns (-1, false) if the process is not found.
 //
 // Uses `docker exec` with ps + /proc to avoid requiring pgrep in the
-// container. The [f]irst-char grep trick avoids matching our own command.
+// container. Matches the command ($11) or first arg ($12) to handle both
+// direct binaries and node-launched tools.
 func (c *Client) AgentProbe(containerID, pattern string) (cpuTicks int64, found bool) {
 	safe := binaryMatchPattern(pattern)
 	script := fmt.Sprintf(
-		`pid=$(ps aux 2>/dev/null | awk '$11 ~ /%s/ {print $2; exit}'); [ -z "$pid" ] && echo -1 || awk '{printf "%%d\n", $14+$15}' /proc/$pid/stat 2>/dev/null || echo -1`,
-		safe,
+		`pid=$(ps aux 2>/dev/null | awk '($11 ~ /%s/ || $12 ~ /%s/) {print $2; exit}'); [ -z "$pid" ] && echo -1 || awk '{printf "%%d\n", $14+$15}' /proc/$pid/stat 2>/dev/null || echo -1`,
+		safe, safe,
 	)
 	cmd := exec.Command("docker", "exec", containerID, "sh", "-c", script)
 	out, err := cmd.Output()

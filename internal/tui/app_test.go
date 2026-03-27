@@ -211,6 +211,28 @@ func TestDeriveAgentStates(t *testing.T) {
 		}
 	})
 
+	t.Run("delta at threshold still counts as waiting", func(t *testing.T) {
+		m := model{
+			agentStates:    map[string]agentState{"c1": agentWorking},
+			agentPrevTicks: map[string]int64{"c1": 500},
+		}
+		m.deriveAgentStates(map[string]int64{"c1": 500 + agentIdleTickThreshold})
+		if m.agentStates["c1"] != agentWaiting {
+			t.Fatalf("got %d, want agentWaiting", m.agentStates["c1"])
+		}
+	})
+
+	t.Run("delta above threshold means working", func(t *testing.T) {
+		m := model{
+			agentStates:    map[string]agentState{"c1": agentWaiting},
+			agentPrevTicks: map[string]int64{"c1": 500},
+		}
+		m.deriveAgentStates(map[string]int64{"c1": 500 + agentIdleTickThreshold + 1})
+		if m.agentStates["c1"] != agentWorking {
+			t.Fatalf("got %d, want agentWorking", m.agentStates["c1"])
+		}
+	})
+
 	t.Run("negative ticks means not running", func(t *testing.T) {
 		m := model{
 			agentStates:    map[string]agentState{"c1": agentWorking},

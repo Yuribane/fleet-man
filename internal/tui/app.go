@@ -219,10 +219,15 @@ func (m *model) containerIDs() []string {
 	return ids
 }
 
+// agentIdleTickThreshold is the maximum CPU tick delta (between polls)
+// that still counts as idle. Allows minor background activity like
+// heartbeats or GC without flipping the status to working.
+const agentIdleTickThreshold int64 = 10
+
 // deriveAgentStates compares current CPU tick readings with previous
 // readings to determine whether each agent is working or waiting.
-// A CPU tick delta > 0 means the agent consumed CPU → working.
-// A delta of 0 means it's idle (waiting for user input).
+// A CPU tick delta above the idle threshold means the agent is working.
+// A delta at or below the threshold means it's idle (waiting for input).
 func (m *model) deriveAgentStates(probes map[string]int64) {
 	newStates := make(map[string]agentState, len(probes))
 	newPrev := make(map[string]int64, len(probes))
@@ -237,7 +242,7 @@ func (m *model) deriveAgentStates(probes map[string]int64) {
 		if !hasPrev || ticks < prev {
 			// First reading or process restarted → assume working
 			newStates[id] = agentWorking
-		} else if ticks > prev {
+		} else if ticks-prev > agentIdleTickThreshold {
 			newStates[id] = agentWorking
 		} else {
 			newStates[id] = agentWaiting
