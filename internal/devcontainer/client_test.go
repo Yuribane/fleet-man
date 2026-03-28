@@ -17,7 +17,7 @@ func TestParseProbeOutput(t *testing.T) {
 		{"copilot waiting", "copilot waiting\n", "copilot", "waiting", 0, true},
 		{"codex ticks", "codex 12345\n", "codex", "", 12345, true},
 		{"gemini ticks", "gemini 0\n", "gemini", "", 0, true},
-		{"not found", "- -\n", "", "", 0, false},
+		{"not found", "- -\n", "", "", 0, true},
 		{"empty", "", "", "", 0, false},
 		{"whitespace ticks", "  codex  67890  \n", "codex", "", 67890, true},
 		{"bad ticks", "codex error\n", "", "", 0, false},

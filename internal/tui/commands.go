@@ -32,8 +32,9 @@ type instanceCreateErrMsg struct {
 type pollCreatingTickMsg struct{}
 
 type statsMsg struct {
-	stats       map[string]*devcontainer.ContainerStats
-	agentProbes map[string]devcontainer.AgentProbeResult
+	stats        map[string]*devcontainer.ContainerStats
+	agentProbes  map[string]devcontainer.AgentProbeResult
+	containerIDs []string // containers that were probed (for staleness detection)
 }
 
 // Commands
@@ -44,7 +45,7 @@ func pollCreatingCmd() tea.Cmd {
 	})
 }
 
-func fetchStatsCmd(ids []string, delay bool) tea.Cmd {
+func fetchStatsCmd(dc *devcontainer.Client, ids []string, delay bool) tea.Cmd {
 	return func() tea.Msg {
 		if delay {
 			time.Sleep(3 * time.Second)
@@ -52,10 +53,9 @@ func fetchStatsCmd(ids []string, delay bool) tea.Cmd {
 		if len(ids) == 0 {
 			return statsMsg{}
 		}
-		dc := devcontainer.NewClient()
 		stats, _ := dc.Stats(ids)
 		agentProbes := dc.AgentProbes(ids)
-		return statsMsg{stats: stats, agentProbes: agentProbes}
+		return statsMsg{stats: stats, agentProbes: agentProbes, containerIDs: ids}
 	}
 }
 

@@ -15,10 +15,39 @@ import (
 type Client struct {
 	// Verbose sends devcontainer stderr to os.Stderr when true (for CLI use).
 	Verbose bool
+
+	// userCache caches the non-root username per container to avoid
+	// repeated docker exec calls on every poll cycle.
+	userCache   map[string]string
+	userCacheMu sync.Mutex
 }
 
 func NewClient() *Client {
-	return &Client{}
+	return &Client{userCache: make(map[string]string)}
+}
+
+// containerUser returns the non-root user inside the container, caching
+// the result to avoid a docker exec round-trip on every poll.
+func (c *Client) containerUser(containerID string) string {
+	c.userCacheMu.Lock()
+	if u, ok := c.userCache[containerID]; ok {
+		c.userCacheMu.Unlock()
+		return u
+	}
+	c.userCacheMu.Unlock()
+
+	cmd := exec.Command("docker", "exec", containerID, "sh", "-c",
+		`for d in /home/*/; do [ -d "$d" ] && stat -c %U "$d" 2>/dev/null && exit; done`)
+	out, err := cmd.Output()
+	u := ""
+	if err == nil {
+		u = strings.TrimSpace(string(out))
+	}
+
+	c.userCacheMu.Lock()
+	c.userCache[containerID] = u
+	c.userCacheMu.Unlock()
+	return u
 }
 
 // Up runs `devcontainer up` for the given workspace folder.
@@ -169,7 +198,8 @@ type AgentProbeResult struct {
 // Phase 2: Tool-specific state determination:
 //   - Claude Code: newest JSONL transcript mtime in ~/.claude/projects/
 //   - Copilot: events.jsonl event type + mtime in ~/.copilot/session-state/
-//   - Codex/Gemini: CPU tick sum for delta comparison
+//   - Codex: newest rollout JSONL mtime in ~/.codex/sessions/
+//   - Gemini: CPU tick sum for delta comparison (no known session files)
 const probeScript = `
 tool=""
 for t in claude copilot codex gemini; do
@@ -187,7 +217,7 @@ case "$tool" in
     done
     if [ -n "$newest" ]; then
       age=$(( $(date +%s) - newest_mt ))
-      [ "$age" -lt 8 ] && echo "claude working" || echo "claude waiting"
+      [ "$age" -lt 30 ] && echo "claude working" || echo "claude waiting"
     else
       echo "claude waiting"
     fi;;
@@ -203,10 +233,23 @@ case "$tool" in
       case "$last" in
         *turn_start*|*execution_start*|user.message) echo "copilot working";;
         *) age=$(( $(date +%s) - newest_mt ))
-           [ "$age" -lt 8 ] && echo "copilot working" || echo "copilot waiting";;
+           [ "$age" -lt 30 ] && echo "copilot working" || echo "copilot waiting";;
       esac
     else
       echo "copilot waiting"
+    fi;;
+  codex)
+    newest="" newest_mt=0
+    for f in "$HOME"/.codex/sessions/*/*/*/*.jsonl "$HOME"/.codex/sessions/*/*.jsonl; do
+      [ -f "$f" ] || continue
+      mt=$(stat -c %Y "$f" 2>/dev/null)
+      [ "${mt:-0}" -gt "$newest_mt" ] && { newest="$f"; newest_mt="$mt"; }
+    done
+    if [ -n "$newest" ]; then
+      age=$(( $(date +%s) - newest_mt ))
+      [ "$age" -lt 30 ] && echo "codex working" || echo "codex waiting"
+    else
+      echo "codex waiting"
     fi;;
   *)
     total=0
@@ -221,10 +264,16 @@ esac
 // parseProbeOutput parses the probe script output.
 // File-based tools return "tool working" or "tool waiting".
 // Tick-based tools return "tool <ticks>".
+// "- -" means no agent found (valid result, not a failure).
 func parseProbeOutput(output string) (AgentProbeResult, bool) {
 	fields := strings.Fields(strings.TrimSpace(output))
-	if len(fields) != 2 || fields[0] == "-" {
+	if len(fields) != 2 {
 		return AgentProbeResult{}, false
+	}
+	if fields[0] == "-" {
+		// No agent found — return empty result with found=true so the
+		// caller knows the probe ran successfully (vs docker exec failure).
+		return AgentProbeResult{}, true
 	}
 	switch fields[1] {
 	case "working", "waiting":
@@ -237,23 +286,13 @@ func parseProbeOutput(output string) (AgentProbeResult, bool) {
 	return AgentProbeResult{Tool: fields[0], CPUTicks: ticks}, true
 }
 
-// containerUser returns the non-root user inside the container by checking
-// who owns /home/*. Falls back to empty string (default user).
-func containerUser(containerID string) string {
-	cmd := exec.Command("docker", "exec", containerID, "sh", "-c",
-		`for d in /home/*/; do [ -d "$d" ] && stat -c %U "$d" 2>/dev/null && exit; done`)
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
 // AgentProbe runs the detection script inside a container to find which
 // agent tool (if any) is running and whether it is working or waiting.
+// Returns (result, true) when the probe ran (even if no agent found).
+// Returns (_, false) only on docker exec failure (transient error).
 func (c *Client) AgentProbe(containerID string) (AgentProbeResult, bool) {
 	args := []string{"exec"}
-	if u := containerUser(containerID); u != "" {
+	if u := c.containerUser(containerID); u != "" {
 		args = append(args, "-u", u)
 	}
 	args = append(args, containerID, "sh", "-c", probeScript)
@@ -266,6 +305,9 @@ func (c *Client) AgentProbe(containerID string) (AgentProbeResult, bool) {
 }
 
 // AgentProbes runs AgentProbe concurrently for all containers.
+// Containers whose probe succeeded are always in the result (even if no
+// agent was found). Containers whose probe failed (docker exec error)
+// are omitted so the caller can preserve their previous state.
 func (c *Client) AgentProbes(containerIDs []string) map[string]AgentProbeResult {
 	result := make(map[string]AgentProbeResult, len(containerIDs))
 	var mu sync.Mutex
@@ -275,9 +317,9 @@ func (c *Client) AgentProbes(containerIDs []string) map[string]AgentProbeResult 
 		wg.Add(1)
 		go func(cid string) {
 			defer wg.Done()
-			r, found := c.AgentProbe(cid)
+			r, ok := c.AgentProbe(cid)
 			mu.Lock()
-			if found {
+			if ok {
 				result[cid] = r
 			}
 			mu.Unlock()

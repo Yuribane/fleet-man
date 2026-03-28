@@ -193,7 +193,7 @@ func TestDeriveAgentStates(t *testing.T) {
 			agentStates:    make(map[string]agentState),
 			agentPrevTicks: make(map[string]int64),
 		}
-		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": stateProbe("claude", "working")})
+		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": stateProbe("claude", "working")}, []string{"c1"})
 		if m.agentStates["c1"] != agentWorking {
 			t.Fatalf("got %d, want agentWorking", m.agentStates["c1"])
 		}
@@ -204,7 +204,7 @@ func TestDeriveAgentStates(t *testing.T) {
 			agentStates:    make(map[string]agentState),
 			agentPrevTicks: make(map[string]int64),
 		}
-		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": stateProbe("copilot", "waiting")})
+		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": stateProbe("copilot", "waiting")}, []string{"c1"})
 		if m.agentStates["c1"] != agentWaiting {
 			t.Fatalf("got %d, want agentWaiting", m.agentStates["c1"])
 		}
@@ -216,7 +216,7 @@ func TestDeriveAgentStates(t *testing.T) {
 			agentStates:    make(map[string]agentState),
 			agentPrevTicks: make(map[string]int64),
 		}
-		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": tickProbe("codex", 500)})
+		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": tickProbe("codex", 500)}, []string{"c1"})
 		if m.agentStates["c1"] != agentWorking {
 			t.Fatalf("got %d, want agentWorking", m.agentStates["c1"])
 		}
@@ -227,7 +227,7 @@ func TestDeriveAgentStates(t *testing.T) {
 			agentStates:    map[string]agentState{"c1": agentWorking},
 			agentPrevTicks: map[string]int64{"c1": 500},
 		}
-		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": tickProbe("codex", 600)})
+		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": tickProbe("codex", 600)}, []string{"c1"})
 		if m.agentStates["c1"] != agentWorking {
 			t.Fatalf("got %d, want agentWorking", m.agentStates["c1"])
 		}
@@ -238,7 +238,7 @@ func TestDeriveAgentStates(t *testing.T) {
 			agentStates:    map[string]agentState{"c1": agentWorking},
 			agentPrevTicks: map[string]int64{"c1": 500},
 		}
-		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": tickProbe("codex", 500)})
+		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": tickProbe("codex", 500)}, []string{"c1"})
 		if m.agentStates["c1"] != agentWaiting {
 			t.Fatalf("got %d, want agentWaiting", m.agentStates["c1"])
 		}
@@ -249,7 +249,7 @@ func TestDeriveAgentStates(t *testing.T) {
 			agentStates:    map[string]agentState{"c1": agentWorking},
 			agentPrevTicks: map[string]int64{"c1": 500},
 		}
-		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": tickProbe("codex", 500+agentIdleTickThreshold)})
+		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": tickProbe("codex", 500+agentIdleTickThreshold)}, []string{"c1"})
 		if m.agentStates["c1"] != agentWaiting {
 			t.Fatalf("got %d, want agentWaiting", m.agentStates["c1"])
 		}
@@ -260,7 +260,7 @@ func TestDeriveAgentStates(t *testing.T) {
 			agentStates:    map[string]agentState{"c1": agentWaiting},
 			agentPrevTicks: map[string]int64{"c1": 500},
 		}
-		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": tickProbe("codex", 500+agentIdleTickThreshold+1)})
+		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": tickProbe("codex", 500+agentIdleTickThreshold+1)}, []string{"c1"})
 		if m.agentStates["c1"] != agentWorking {
 			t.Fatalf("got %d, want agentWorking", m.agentStates["c1"])
 		}
@@ -271,7 +271,7 @@ func TestDeriveAgentStates(t *testing.T) {
 			agentStates:    map[string]agentState{"c1": agentWorking},
 			agentPrevTicks: map[string]int64{"c1": 500},
 		}
-		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": {}})
+		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": {}}, []string{"c1"})
 		if m.agentStates["c1"] != agentNotRunning {
 			t.Fatalf("got %d, want agentNotRunning", m.agentStates["c1"])
 		}
@@ -282,9 +282,25 @@ func TestDeriveAgentStates(t *testing.T) {
 			agentStates:    make(map[string]agentState),
 			agentPrevTicks: make(map[string]int64),
 		}
-		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": stateProbe("copilot", "working")})
+		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": stateProbe("copilot", "working")}, []string{"c1"})
 		if m.agentTools["c1"] != state.AgentToolCopilot {
 			t.Fatalf("got %q, want %q", m.agentTools["c1"], state.AgentToolCopilot)
+		}
+	})
+
+	t.Run("preserves state on probe failure", func(t *testing.T) {
+		m := model{
+			agentStates:    map[string]agentState{"c1": agentWorking},
+			agentTools:     map[string]state.AgentTool{"c1": state.AgentToolClaude},
+			agentPrevTicks: map[string]int64{"c1": 500},
+		}
+		// c1 is in expectedIDs but missing from probes (probe failed)
+		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{}, []string{"c1"})
+		if m.agentStates["c1"] != agentWorking {
+			t.Fatalf("got %d, want agentWorking (preserved)", m.agentStates["c1"])
+		}
+		if m.agentTools["c1"] != state.AgentToolClaude {
+			t.Fatalf("tool not preserved: got %q", m.agentTools["c1"])
 		}
 	})
 
@@ -293,7 +309,7 @@ func TestDeriveAgentStates(t *testing.T) {
 			agentStates:    map[string]agentState{"c1": agentWorking, "c2": agentWaiting},
 			agentPrevTicks: map[string]int64{"c1": 500, "c2": 300},
 		}
-		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": tickProbe("codex", 600)})
+		m.deriveAgentStates(map[string]devcontainer.AgentProbeResult{"c1": tickProbe("codex", 600)}, []string{"c1"})
 		if _, ok := m.agentStates["c2"]; ok {
 			t.Fatal("c2 should have been cleaned up")
 		}

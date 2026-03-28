@@ -72,6 +72,7 @@ type model struct {
 	spinner  spinner.Model
 	creating map[string]bool // "fleet/instance" keys currently being created
 
+	dc             *devcontainer.Client                    // shared client (caches container user)
 	stats          map[string]*devcontainer.ContainerStats // containerID → stats
 	agentStates    map[string]agentState                  // containerID → derived agent state
 	agentTools     map[string]state.AgentTool             // containerID → detected tool
@@ -101,6 +102,7 @@ func newModel() model {
 	m := model{
 		collapsed:     make(map[string]bool),
 		creating:      make(map[string]bool),
+		dc:             devcontainer.NewClient(),
 		stats:          make(map[string]*devcontainer.ContainerStats),
 		agentStates:    make(map[string]agentState),
 		agentPrevTicks: make(map[string]int64),
@@ -228,12 +230,37 @@ const agentIdleTickThreshold int64 = 10
 // deriveAgentStates updates the agent state map from probe results.
 // File-based probes (claude, copilot) provide a definitive state.
 // Tick-based probes (codex, gemini) use CPU tick deltas.
-func (m *model) deriveAgentStates(probes map[string]devcontainer.AgentProbeResult) {
-	newStates := make(map[string]agentState, len(probes))
-	newPrev := make(map[string]int64, len(probes))
-	newTools := make(map[string]state.AgentTool, len(probes))
+//
+// expectedIDs lists containers that were probed. Containers in expectedIDs
+// but missing from probes had a transient probe failure — their previous
+// state is preserved to avoid flickering. Containers no longer in
+// expectedIDs are cleaned up.
+func (m *model) deriveAgentStates(probes map[string]devcontainer.AgentProbeResult, expectedIDs []string) {
+	expected := make(map[string]struct{}, len(expectedIDs))
+	for _, id := range expectedIDs {
+		expected[id] = struct{}{}
+	}
 
-	for id, r := range probes {
+	newStates := make(map[string]agentState, len(expected))
+	newPrev := make(map[string]int64, len(expected))
+	newTools := make(map[string]state.AgentTool, len(expected))
+
+	for _, id := range expectedIDs {
+		r, probed := probes[id]
+		if !probed {
+			// Probe failed — preserve previous state to avoid flicker
+			if prev, ok := m.agentStates[id]; ok {
+				newStates[id] = prev
+				if t, ok := m.agentTools[id]; ok {
+					newTools[id] = t
+				}
+				if p, ok := m.agentPrevTicks[id]; ok {
+					newPrev[id] = p
+				}
+			}
+			continue
+		}
+
 		if r.Tool == "" {
 			newStates[id] = agentNotRunning
 			continue
@@ -269,7 +296,7 @@ func (m *model) deriveAgentStates(probes map[string]devcontainer.AgentProbeResul
 }
 
 func (m model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.spinner.Tick, fetchStatsCmd(m.containerIDs(), false)}
+	cmds := []tea.Cmd{m.spinner.Tick, fetchStatsCmd(m.dc, m.containerIDs(), false)}
 	if len(m.creating) > 0 {
 		cmds = append(cmds, pollCreatingCmd())
 	}
@@ -288,9 +315,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stats = msg.stats
 		}
 		if msg.agentProbes != nil {
-			m.deriveAgentStates(msg.agentProbes)
+			m.deriveAgentStates(msg.agentProbes, msg.containerIDs)
 		}
-		return m, fetchStatsCmd(m.containerIDs(), true)
+		return m, fetchStatsCmd(m.dc, m.containerIDs(), true)
 
 	case instanceSpawnedMsg:
 		// Background process launched; start polling for completion
