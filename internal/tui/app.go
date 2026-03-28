@@ -225,26 +225,35 @@ func (m *model) containerIDs() []string {
 // heartbeats or GC without flipping the status to working.
 const agentIdleTickThreshold int64 = 10
 
-// deriveAgentStates compares current CPU tick readings with previous
-// readings to determine whether each agent is working or waiting.
-// A CPU tick delta above the idle threshold means the agent is working.
-// A delta at or below the threshold means it's idle (waiting for input).
+// deriveAgentStates updates the agent state map from probe results.
+// File-based probes (claude, copilot) provide a definitive state.
+// Tick-based probes (codex, gemini) use CPU tick deltas.
 func (m *model) deriveAgentStates(probes map[string]devcontainer.AgentProbeResult) {
 	newStates := make(map[string]agentState, len(probes))
 	newPrev := make(map[string]int64, len(probes))
 	newTools := make(map[string]state.AgentTool, len(probes))
 
 	for id, r := range probes {
-		if r.CPUTicks < 0 {
+		if r.Tool == "" {
 			newStates[id] = agentNotRunning
 			continue
 		}
 
 		newTools[id] = state.AgentTool(r.Tool)
 
+		// File-based detection: definitive state
+		if r.State == "working" {
+			newStates[id] = agentWorking
+			continue
+		}
+		if r.State == "waiting" {
+			newStates[id] = agentWaiting
+			continue
+		}
+
+		// Tick-based detection: delta comparison
 		prev, hasPrev := m.agentPrevTicks[id]
 		if !hasPrev || r.CPUTicks < prev {
-			// First reading or process restarted → assume working
 			newStates[id] = agentWorking
 		} else if r.CPUTicks-prev > agentIdleTickThreshold {
 			newStates[id] = agentWorking

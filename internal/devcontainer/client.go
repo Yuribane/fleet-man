@@ -152,32 +152,83 @@ func parseMemToMB(s string) float64 {
 	return val * multiplier
 }
 
-// binaryMatchPattern builds an awk regex that matches a binary name in
-// the command ($11) or first argument ($12) of ps aux output. Checks
-// both fields to handle direct invocations ("claude --flag") and
-// node-launched tools ("node /path/to/bin/copilot"). Does not match
-// occurrences buried deeper in arguments (e.g. sshfs mounts containing
-// ".claude").
-func binaryMatchPattern(s string) string {
-	if len(s) == 0 {
-		return s
-	}
-	return `(^|\/)` + s + `$`
-}
-
 // AgentProbeResult holds the outcome of probing a container for agent
-// processes. Tool is the detected tool name; CPUTicks is the cumulative
-// CPU ticks (-1 when no agent was found).
+// processes. Tool is the detected tool name. State is "working" or
+// "waiting" for file-based detection (claude, copilot). CPUTicks holds
+// cumulative ticks for tick-based detection (codex, gemini).
 type AgentProbeResult struct {
 	Tool     string
-	CPUTicks int64
+	State    string // "working" or "waiting" (file-based); empty for tick-based
+	CPUTicks int64  // only used when State is empty
 }
 
-// parseProbeOutput parses "tool ticks" output from the probe script.
+// probeScript is the shell script run inside each container to detect
+// which agent tool is running and whether it is working or waiting.
+//
+// Claude Code & Copilot use file-based detection (session files + mtime).
+// Codex & Gemini fall back to process scanning + CPU tick sums.
+const probeScript = `
+for f in "$HOME"/.claude/sessions/*.json; do
+  [ -f "$f" ] || continue
+  pid=$(basename "$f" .json)
+  kill -0 "$pid" 2>/dev/null || continue
+  sid=$(sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p' "$f")
+  cwd=$(sed -n 's/.*"cwd":"\([^"]*\)".*/\1/p' "$f")
+  encoded=$(echo "$cwd" | sed 's|^/|-|;s|/|-|g')
+  logfile="$HOME/.claude/projects/${encoded}/${sid}.jsonl"
+  if [ -f "$logfile" ]; then
+    age=$(( $(date +%s) - $(stat -c %Y "$logfile") ))
+    [ "$age" -lt 8 ] && echo "claude working" || echo "claude waiting"
+  else
+    echo "claude waiting"
+  fi
+  exit 0
+done
+for d in "$HOME"/.copilot/session-state/*/; do
+  [ -d "$d" ] || continue
+  for lf in "$d"inuse.*.lock; do
+    [ -f "$lf" ] || continue
+    pid=$(cat "$lf")
+    kill -0 "$pid" 2>/dev/null || continue
+    evts="${d}events.jsonl"
+    if [ -f "$evts" ]; then
+      last=$(tail -1 "$evts" | sed -n 's/.*"type":"\([^"]*\)".*/\1/p')
+      case "$last" in
+        *turn_start*|*execution_start*|user.message) echo "copilot working";;
+        *) age=$(( $(date +%s) - $(stat -c %Y "$evts") ))
+           [ "$age" -lt 8 ] && echo "copilot working" || echo "copilot waiting";;
+      esac
+    else
+      echo "copilot waiting"
+    fi
+    exit 0
+  done
+done
+for tool in codex gemini; do
+  pids=$(ps aux 2>/dev/null | awk -v t="$tool" '($11 ~ "(^|/)"t"$" || $12 ~ "(^|/)"t"$") {print $2}')
+  [ -z "$pids" ] && continue
+  total=0
+  for p in $pids; do
+    v=$(awk '{printf "%d\n",$14+$15}' /proc/$p/stat 2>/dev/null)
+    total=$((total + ${v:-0}))
+  done
+  echo "$tool $total"
+  exit 0
+done
+echo "- -"
+`
+
+// parseProbeOutput parses the probe script output.
+// File-based tools return "tool working" or "tool waiting".
+// Tick-based tools return "tool <ticks>".
 func parseProbeOutput(output string) (AgentProbeResult, bool) {
 	fields := strings.Fields(strings.TrimSpace(output))
 	if len(fields) != 2 || fields[0] == "-" {
 		return AgentProbeResult{}, false
+	}
+	switch fields[1] {
+	case "working", "waiting":
+		return AgentProbeResult{Tool: fields[0], State: fields[1]}, true
 	}
 	ticks, err := strconv.ParseInt(fields[1], 10, 64)
 	if err != nil {
@@ -186,35 +237,27 @@ func parseProbeOutput(output string) (AgentProbeResult, bool) {
 	return AgentProbeResult{Tool: fields[0], CPUTicks: ticks}, true
 }
 
-// AgentProbe checks if any of the given tool processes are running inside
-// the container and returns which tool was found along with its cumulative
-// CPU ticks (utime+stime from /proc/pid/stat).
-//
-// Uses `docker exec` with a single ps+awk pass to scan for all tools.
-// Matches the command ($11) or first arg ($12) to handle both direct
-// binaries and node-launched tools.
-func (c *Client) AgentProbe(containerID string, tools []string) (AgentProbeResult, bool) {
-	if len(tools) == 0 {
-		return AgentProbeResult{}, false
+// containerUser returns the non-root user inside the container by checking
+// who owns /home/*. Falls back to empty string (default user).
+func containerUser(containerID string) string {
+	cmd := exec.Command("docker", "exec", containerID, "sh", "-c",
+		`for d in /home/*/; do [ -d "$d" ] && stat -c %U "$d" 2>/dev/null && exit; done`)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
 	}
+	return strings.TrimSpace(string(out))
+}
 
-	// Build awk rules that accumulate all PIDs for the first matched tool.
-	// Tools like copilot spawn multiple processes; summing ticks across all
-	// of them avoids reading only the idle launcher.
-	var awkRules []string
-	for _, t := range tools {
-		pat := binaryMatchPattern(t)
-		awkRules = append(awkRules, fmt.Sprintf(
-			`($11 ~ /%s/ || $12 ~ /%s/) { if (!tool) tool="%s"; if (tool=="%s") pids=pids" "$2 }`,
-			pat, pat, t, t,
-		))
+// AgentProbe runs the detection script inside a container to find which
+// agent tool (if any) is running and whether it is working or waiting.
+func (c *Client) AgentProbe(containerID string) (AgentProbeResult, bool) {
+	args := []string{"exec"}
+	if u := containerUser(containerID); u != "" {
+		args = append(args, "-u", u)
 	}
-	awkProgram := strings.Join(awkRules, " ") + ` END { if (tool) print tool, pids; else print "-" }`
-
-	script := fmt.Sprintf(`info=$(ps aux 2>/dev/null | awk '%s')`, awkProgram) +
-		`; [ "$info" = "-" ] && echo "- -1" || { tool=${info%% *}; pids=${info#* }; total=0; for p in $pids; do v=$(awk '{printf "%d\n",$14+$15}' /proc/$p/stat 2>/dev/null); total=$((total + ${v:-0})); done; echo "$tool $total"; }`
-
-	cmd := exec.Command("docker", "exec", containerID, "sh", "-c", script)
+	args = append(args, containerID, "sh", "-c", probeScript)
+	cmd := exec.Command("docker", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return AgentProbeResult{}, false
@@ -223,7 +266,7 @@ func (c *Client) AgentProbe(containerID string, tools []string) (AgentProbeResul
 }
 
 // AgentProbes runs AgentProbe concurrently for all containers.
-func (c *Client) AgentProbes(containerIDs []string, tools []string) map[string]AgentProbeResult {
+func (c *Client) AgentProbes(containerIDs []string) map[string]AgentProbeResult {
 	result := make(map[string]AgentProbeResult, len(containerIDs))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -232,12 +275,10 @@ func (c *Client) AgentProbes(containerIDs []string, tools []string) map[string]A
 		wg.Add(1)
 		go func(cid string) {
 			defer wg.Done()
-			r, found := c.AgentProbe(cid, tools)
+			r, found := c.AgentProbe(cid)
 			mu.Lock()
 			if found {
 				result[cid] = r
-			} else {
-				result[cid] = AgentProbeResult{CPUTicks: -1}
 			}
 			mu.Unlock()
 		}(id)

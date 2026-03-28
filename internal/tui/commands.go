@@ -54,7 +54,7 @@ func fetchStatsCmd(ids []string, delay bool) tea.Cmd {
 		}
 		dc := devcontainer.NewClient()
 		stats, _ := dc.Stats(ids)
-		agentProbes := dc.AgentProbes(ids, state.AllAgentToolNames())
+		agentProbes := dc.AgentProbes(ids)
 		return statsMsg{stats: stats, agentProbes: agentProbes}
 	}
 }
