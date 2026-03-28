@@ -165,57 +165,57 @@ type AgentProbeResult struct {
 // probeScript is the shell script run inside each container to detect
 // which agent tool is running and whether it is working or waiting.
 //
-// Claude Code & Copilot use file-based detection (session files + mtime).
-// Codex & Gemini fall back to process scanning + CPU tick sums.
+// Phase 1: Process scan finds which tool is running (works universally).
+// Phase 2: Tool-specific state determination:
+//   - Claude Code: newest JSONL transcript mtime in ~/.claude/projects/
+//   - Copilot: events.jsonl event type + mtime in ~/.copilot/session-state/
+//   - Codex/Gemini: CPU tick sum for delta comparison
 const probeScript = `
-for f in "$HOME"/.claude/sessions/*.json; do
-  [ -f "$f" ] || continue
-  pid=$(basename "$f" .json)
-  kill -0 "$pid" 2>/dev/null || continue
-  sid=$(sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p' "$f")
-  cwd=$(sed -n 's/.*"cwd":"\([^"]*\)".*/\1/p' "$f")
-  encoded=$(echo "$cwd" | sed 's|^/|-|;s|/|-|g')
-  logfile="$HOME/.claude/projects/${encoded}/${sid}.jsonl"
-  if [ -f "$logfile" ]; then
-    age=$(( $(date +%s) - $(stat -c %Y "$logfile") ))
-    [ "$age" -lt 8 ] && echo "claude working" || echo "claude waiting"
-  else
-    echo "claude waiting"
-  fi
-  exit 0
+tool=""
+for t in claude copilot codex gemini; do
+  pids=$(ps aux 2>/dev/null | awk -v t="$t" '($11 ~ "(^|/)"t"$" || $12 ~ "(^|/)"t"$") {print $2}')
+  [ -n "$pids" ] && { tool="$t"; break; }
 done
-for d in "$HOME"/.copilot/session-state/*/; do
-  [ -d "$d" ] || continue
-  for lf in "$d"inuse.*.lock; do
-    [ -f "$lf" ] || continue
-    pid=$(cat "$lf")
-    kill -0 "$pid" 2>/dev/null || continue
-    evts="${d}events.jsonl"
-    if [ -f "$evts" ]; then
-      last=$(tail -1 "$evts" | sed -n 's/.*"type":"\([^"]*\)".*/\1/p')
+[ -z "$tool" ] && { echo "- -"; exit 0; }
+case "$tool" in
+  claude)
+    newest="" newest_mt=0
+    for f in "$HOME"/.claude/projects/*/*.jsonl; do
+      [ -f "$f" ] || continue
+      mt=$(stat -c %Y "$f" 2>/dev/null)
+      [ "${mt:-0}" -gt "$newest_mt" ] && { newest="$f"; newest_mt="$mt"; }
+    done
+    if [ -n "$newest" ]; then
+      age=$(( $(date +%s) - newest_mt ))
+      [ "$age" -lt 8 ] && echo "claude working" || echo "claude waiting"
+    else
+      echo "claude waiting"
+    fi;;
+  copilot)
+    newest="" newest_mt=0
+    for f in "$HOME"/.copilot/session-state/*/events.jsonl; do
+      [ -f "$f" ] || continue
+      mt=$(stat -c %Y "$f" 2>/dev/null)
+      [ "${mt:-0}" -gt "$newest_mt" ] && { newest="$f"; newest_mt="$mt"; }
+    done
+    if [ -n "$newest" ]; then
+      last=$(tail -1 "$newest" | sed -n 's/.*"type":"\([^"]*\)".*/\1/p')
       case "$last" in
         *turn_start*|*execution_start*|user.message) echo "copilot working";;
-        *) age=$(( $(date +%s) - $(stat -c %Y "$evts") ))
+        *) age=$(( $(date +%s) - newest_mt ))
            [ "$age" -lt 8 ] && echo "copilot working" || echo "copilot waiting";;
       esac
     else
       echo "copilot waiting"
-    fi
-    exit 0
-  done
-done
-for tool in codex gemini; do
-  pids=$(ps aux 2>/dev/null | awk -v t="$tool" '($11 ~ "(^|/)"t"$" || $12 ~ "(^|/)"t"$") {print $2}')
-  [ -z "$pids" ] && continue
-  total=0
-  for p in $pids; do
-    v=$(awk '{printf "%d\n",$14+$15}' /proc/$p/stat 2>/dev/null)
-    total=$((total + ${v:-0}))
-  done
-  echo "$tool $total"
-  exit 0
-done
-echo "- -"
+    fi;;
+  *)
+    total=0
+    for p in $pids; do
+      v=$(awk '{printf "%d\n",$14+$15}' /proc/$p/stat 2>/dev/null)
+      total=$((total + ${v:-0}))
+    done
+    echo "$tool $total";;
+esac
 `
 
 // parseProbeOutput parses the probe script output.
