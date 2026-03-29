@@ -94,15 +94,32 @@ func (t *ActivityTracker) Update(captures map[string]devcontainer.ScreenCapture,
 			continue
 		}
 
-		// Detect which tool is running from process probes
+		// Detect which tool is running from process probes.
+		// probeConfirmedEmpty is true only when the probe ran
+		// successfully and found no agent process.
+		probeConfirmedEmpty := false
 		if probes != nil {
-			if probeTool, probed := probes[id]; probed && probeTool != "" {
-				newTools[id] = state.AgentTool(probeTool)
-			} else if probeTool, ok := t.tools[id]; ok {
-				newTools[id] = probeTool // preserve previous detection
+			if probeTool, probed := probes[id]; probed {
+				if probeTool != "" {
+					newTools[id] = state.AgentTool(probeTool)
+				} else {
+					probeConfirmedEmpty = true
+				}
+			} else if tool, ok := t.tools[id]; ok {
+				// probe didn't run for this container (docker exec failure) → preserve
+				newTools[id] = tool
 			}
 		} else if tool, ok := t.tools[id]; ok {
 			newTools[id] = tool // no probes this cycle, preserve
+		}
+
+		// If the probe confirmed no agent is running, mark idle
+		// regardless of tmux session state — a shell prompt with no
+		// agent process is not a "waiting" agent.
+		if probeConfirmedEmpty {
+			newStates[id] = agentNotRunning
+			newPrev[id] = sc.Content
+			continue
 		}
 
 		// Compare with previous screen

@@ -117,15 +117,19 @@ func TestActivityTrackerUpdate(t *testing.T) {
 		}
 	})
 
-	t.Run("preserves tool when probe finds no agent", func(t *testing.T) {
+	t.Run("clears tool and marks idle when probe finds no agent", func(t *testing.T) {
 		tr := NewActivityTracker()
 		tr.tools["c1"] = state.AgentToolClaude
+		tr.states["c1"] = agentWaiting
 		tr.prevScreen["c1"] = "old content"
 		tr.Update(map[string]devcontainer.ScreenCapture{
 			"c1": capture("some screen content"),
 		}, map[string]string{"c1": ""}, []string{"c1"}, now)
-		if tr.Tool("c1") != state.AgentToolClaude {
-			t.Fatalf("got %q, want %q", tr.Tool("c1"), state.AgentToolClaude)
+		if tr.Tool("c1") != "" {
+			t.Fatalf("tool should be cleared, got %q", tr.Tool("c1"))
+		}
+		if tr.State("c1") != agentNotRunning {
+			t.Fatalf("got %d, want agentNotRunning", tr.State("c1"))
 		}
 	})
 
