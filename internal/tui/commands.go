@@ -33,7 +33,7 @@ type pollCreatingTickMsg struct{}
 
 type statsMsg struct {
 	stats        map[string]*devcontainer.ContainerStats
-	agentProbes  map[string]devcontainer.AgentProbeResult
+	screens      map[string]devcontainer.ScreenCapture
 	containerIDs []string // containers that were probed (for staleness detection)
 }
 
@@ -45,7 +45,7 @@ func pollCreatingCmd() tea.Cmd {
 	})
 }
 
-func fetchStatsCmd(dc *devcontainer.Client, ids []string, delay bool) tea.Cmd {
+func fetchStatsCmd(dc *devcontainer.Client, ids []string, sessions map[string]string, delay bool) tea.Cmd {
 	return func() tea.Msg {
 		if delay {
 			time.Sleep(3 * time.Second)
@@ -54,8 +54,8 @@ func fetchStatsCmd(dc *devcontainer.Client, ids []string, delay bool) tea.Cmd {
 			return statsMsg{}
 		}
 		stats, _ := dc.Stats(ids)
-		agentProbes := dc.AgentProbes(ids)
-		return statsMsg{stats: stats, agentProbes: agentProbes, containerIDs: ids}
+		screens := dc.CaptureScreens(sessions)
+		return statsMsg{stats: stats, screens: screens, containerIDs: ids}
 	}
 }
 

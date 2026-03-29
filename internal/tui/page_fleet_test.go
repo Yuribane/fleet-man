@@ -206,10 +206,9 @@ func TestViewFleetListShowsAgentWorkingIndicator(t *testing.T) {
 		cfg: &state.Config{
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
-		agentStates:    map[string]agentState{"abc123": agentWorking},
-		agentTools:     map[string]state.AgentTool{"abc123": state.AgentToolClaude},
-		agentPrevTicks: map[string]int64{},
-		stats:          map[string]*devcontainer.ContainerStats{},
+		agentStates: map[string]agentState{"abc123": agentWorking},
+		agentTools:  map[string]state.AgentTool{"abc123": state.AgentToolClaude},
+		stats:       map[string]*devcontainer.ContainerStats{},
 		rows: []row{
 			{kind: rowFleetHeader, fleetName: "alpha"},
 			{kind: rowInstance, fleetName: "alpha", instance: inst},
@@ -243,10 +242,9 @@ func TestViewFleetListShowsAgentWaitingIndicator(t *testing.T) {
 		cfg: &state.Config{
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
-		agentStates:    map[string]agentState{"abc123": agentWaiting},
-		agentTools:     map[string]state.AgentTool{"abc123": state.AgentToolClaude},
-		agentPrevTicks: map[string]int64{},
-		stats:          map[string]*devcontainer.ContainerStats{},
+		agentStates: map[string]agentState{"abc123": agentWaiting},
+		agentTools:  map[string]state.AgentTool{"abc123": state.AgentToolClaude},
+		stats:       map[string]*devcontainer.ContainerStats{},
 		rows: []row{
 			{kind: rowFleetHeader, fleetName: "alpha"},
 			{kind: rowInstance, fleetName: "alpha", instance: inst},
@@ -280,9 +278,8 @@ func TestViewFleetListShowsAgentOffIndicator(t *testing.T) {
 		cfg: &state.Config{
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
-		agentStates:    map[string]agentState{"abc123": agentNotRunning},
-		agentPrevTicks: map[string]int64{},
-		stats:          map[string]*devcontainer.ContainerStats{},
+		agentStates: map[string]agentState{"abc123": agentNotRunning},
+		stats:       map[string]*devcontainer.ContainerStats{},
 		rows: []row{
 			{kind: rowFleetHeader, fleetName: "alpha"},
 			{kind: rowInstance, fleetName: "alpha", instance: inst},
@@ -319,9 +316,8 @@ func TestViewFleetListNoAgentIndicatorForStoppedInstance(t *testing.T) {
 		cfg: &state.Config{
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
-		agentStates:    map[string]agentState{},
-		agentPrevTicks: map[string]int64{},
-		stats:          map[string]*devcontainer.ContainerStats{},
+		agentStates: map[string]agentState{},
+		stats:       map[string]*devcontainer.ContainerStats{},
 		rows: []row{
 			{kind: rowFleetHeader, fleetName: "alpha"},
 			{kind: rowInstance, fleetName: "alpha", instance: inst},

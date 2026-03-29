@@ -181,149 +181,47 @@ func parseMemToMB(s string) float64 {
 	return val * multiplier
 }
 
-// AgentProbeResult holds the outcome of probing a container for agent
-// processes. Tool is the detected tool name. State is "working" or
-// "waiting" for file-based detection (claude, copilot). CPUTicks holds
-// cumulative ticks for tick-based detection (codex, gemini).
-type AgentProbeResult struct {
-	Tool     string
-	State    string // "working" or "waiting" (file-based); empty for tick-based
-	CPUTicks int64  // only used when State is empty
+// ScreenCapture holds the result of capturing a tmux pane's content.
+type ScreenCapture struct {
+	Content string // visible pane text; empty when capture failed
+	OK      bool   // true if the tmux session exists and capture succeeded
 }
 
-// probeScript is the shell script run inside each container to detect
-// which agent tool is running and whether it is working or waiting.
-//
-// Phase 1: Process scan finds which tool is running (works universally).
-// Phase 2: Tool-specific state determination:
-//   - Claude Code: newest JSONL transcript mtime in ~/.claude/projects/
-//   - Copilot: events.jsonl event type + mtime in ~/.copilot/session-state/
-//   - Codex: newest rollout JSONL mtime in ~/.codex/sessions/
-//   - Gemini: CPU tick sum for delta comparison (no known session files)
-const probeScript = `
-tool=""
-for t in claude copilot codex gemini; do
-  pids=$(ps aux 2>/dev/null | awk -v t="$t" '($11 ~ "(^|/)"t"$" || $12 ~ "(^|/)"t"$") {print $2}')
-  [ -n "$pids" ] && { tool="$t"; break; }
-done
-[ -z "$tool" ] && { echo "- -"; exit 0; }
-case "$tool" in
-  claude)
-    newest="" newest_mt=0
-    for f in "$HOME"/.claude/projects/*/*.jsonl; do
-      [ -f "$f" ] || continue
-      mt=$(stat -c %Y "$f" 2>/dev/null)
-      [ "${mt:-0}" -gt "$newest_mt" ] && { newest="$f"; newest_mt="$mt"; }
-    done
-    if [ -n "$newest" ]; then
-      age=$(( $(date +%s) - newest_mt ))
-      [ "$age" -lt 30 ] && echo "claude working" || echo "claude waiting"
-    else
-      echo "claude waiting"
-    fi;;
-  copilot)
-    newest="" newest_mt=0
-    for f in "$HOME"/.copilot/session-state/*/events.jsonl; do
-      [ -f "$f" ] || continue
-      mt=$(stat -c %Y "$f" 2>/dev/null)
-      [ "${mt:-0}" -gt "$newest_mt" ] && { newest="$f"; newest_mt="$mt"; }
-    done
-    if [ -n "$newest" ]; then
-      last=$(tail -1 "$newest" | sed -n 's/.*"type":"\([^"]*\)".*/\1/p')
-      case "$last" in
-        *turn_start*|*execution_start*|user.message) echo "copilot working";;
-        *) age=$(( $(date +%s) - newest_mt ))
-           [ "$age" -lt 30 ] && echo "copilot working" || echo "copilot waiting";;
-      esac
-    else
-      echo "copilot waiting"
-    fi;;
-  codex)
-    newest="" newest_mt=0
-    for f in "$HOME"/.codex/sessions/*/*/*/*.jsonl "$HOME"/.codex/sessions/*/*.jsonl; do
-      [ -f "$f" ] || continue
-      mt=$(stat -c %Y "$f" 2>/dev/null)
-      [ "${mt:-0}" -gt "$newest_mt" ] && { newest="$f"; newest_mt="$mt"; }
-    done
-    if [ -n "$newest" ]; then
-      age=$(( $(date +%s) - newest_mt ))
-      [ "$age" -lt 30 ] && echo "codex working" || echo "codex waiting"
-    else
-      echo "codex waiting"
-    fi;;
-  *)
-    total=0
-    for p in $pids; do
-      v=$(awk '{printf "%d\n",$14+$15}' /proc/$p/stat 2>/dev/null)
-      total=$((total + ${v:-0}))
-    done
-    echo "$tool $total";;
-esac
-`
-
-// parseProbeOutput parses the probe script output.
-// File-based tools return "tool working" or "tool waiting".
-// Tick-based tools return "tool <ticks>".
-// "- -" means no agent found (valid result, not a failure).
-func parseProbeOutput(output string) (AgentProbeResult, bool) {
-	fields := strings.Fields(strings.TrimSpace(output))
-	if len(fields) != 2 {
-		return AgentProbeResult{}, false
-	}
-	if fields[0] == "-" {
-		// No agent found — return empty result with found=true so the
-		// caller knows the probe ran successfully (vs docker exec failure).
-		return AgentProbeResult{}, true
-	}
-	switch fields[1] {
-	case "working", "waiting":
-		return AgentProbeResult{Tool: fields[0], State: fields[1]}, true
-	}
-	ticks, err := strconv.ParseInt(fields[1], 10, 64)
-	if err != nil {
-		return AgentProbeResult{}, false
-	}
-	return AgentProbeResult{Tool: fields[0], CPUTicks: ticks}, true
-}
-
-// AgentProbe runs the detection script inside a container to find which
-// agent tool (if any) is running and whether it is working or waiting.
-// Returns (result, true) when the probe ran (even if no agent found).
-// Returns (_, false) only on docker exec failure (transient error).
-func (c *Client) AgentProbe(containerID string) (AgentProbeResult, bool) {
+// CaptureScreen runs `tmux capture-pane` inside a container to grab
+// the current visible content of the named tmux session.
+// Returns OK=false when the session does not exist or docker exec fails.
+func (c *Client) CaptureScreen(containerID, tmuxSession string) ScreenCapture {
 	args := []string{"exec"}
 	if u := c.containerUser(containerID); u != "" {
 		args = append(args, "-u", u)
 	}
-	args = append(args, containerID, "sh", "-c", probeScript)
+	args = append(args, containerID, "tmux", "capture-pane", "-t", tmuxSession, "-p")
 	cmd := exec.Command("docker", args...)
 	out, err := cmd.Output()
 	if err != nil {
-		return AgentProbeResult{}, false
+		return ScreenCapture{}
 	}
-	return parseProbeOutput(string(out))
+	return ScreenCapture{Content: string(out), OK: true}
 }
 
-// AgentProbes runs AgentProbe concurrently for all containers.
-// Containers whose probe succeeded are always in the result (even if no
-// agent was found). Containers whose probe failed (docker exec error)
-// are omitted so the caller can preserve their previous state.
-func (c *Client) AgentProbes(containerIDs []string) map[string]AgentProbeResult {
-	result := make(map[string]AgentProbeResult, len(containerIDs))
+// CaptureScreens runs CaptureScreen concurrently for all containers.
+// The sessions map is containerID → tmux session name.
+// All containers are included in the result; check OK to distinguish
+// a live session from a missing one.
+func (c *Client) CaptureScreens(sessions map[string]string) map[string]ScreenCapture {
+	result := make(map[string]ScreenCapture, len(sessions))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	for _, id := range containerIDs {
+	for id, sess := range sessions {
 		wg.Add(1)
-		go func(cid string) {
+		go func(cid, session string) {
 			defer wg.Done()
-			r, ok := c.AgentProbe(cid)
+			sc := c.CaptureScreen(cid, session)
 			mu.Lock()
-			if ok {
-				result[cid] = r
-			}
+			result[cid] = sc
 			mu.Unlock()
-		}(id)
+		}(id, sess)
 	}
 
 	wg.Wait()
