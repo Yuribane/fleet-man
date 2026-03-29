@@ -34,7 +34,8 @@ type pollCreatingTickMsg struct{}
 type statsMsg struct {
 	stats        map[string]*devcontainer.ContainerStats
 	screens      map[string]devcontainer.ScreenCapture
-	containerIDs []string // containers that were probed (for staleness detection)
+	probes       map[string]string // containerID → detected tool name (from ps aux)
+	containerIDs []string          // containers that were probed (for staleness detection)
 }
 
 // Commands
@@ -55,7 +56,8 @@ func fetchStatsCmd(dc *devcontainer.Client, ids []string, sessions map[string]st
 		}
 		stats, _ := dc.Stats(ids)
 		screens := dc.CaptureScreens(sessions)
-		return statsMsg{stats: stats, screens: screens, containerIDs: ids}
+		probes := dc.AgentToolProbes(ids)
+		return statsMsg{stats: stats, screens: screens, probes: probes, containerIDs: ids}
 	}
 }
 

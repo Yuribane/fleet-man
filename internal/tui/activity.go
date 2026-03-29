@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"strings"
 	"time"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
@@ -54,16 +53,18 @@ func (t *ActivityTracker) Tool(containerID string) state.AgentTool {
 	return t.tools[containerID]
 }
 
-// Update processes new screen captures and derives agent states.
+// Update processes new screen captures and probe results to derive
+// agent states and tool identifications.
 //
-// For each container in expectedIDs:
+// Tool detection uses process-based probes (ps aux inside containers).
+// State detection uses tmux screen diffs:
 //   - Missing from captures → preserve previous state (transient failure)
 //   - Present with OK=false → agentNotRunning (no tmux session)
 //   - Present with OK=true  → diff against previous capture to determine
 //     working (≥3 chars changed within 12s) or waiting
 //
 // Containers not in expectedIDs are cleaned up.
-func (t *ActivityTracker) Update(captures map[string]devcontainer.ScreenCapture, expectedIDs []string, now time.Time) {
+func (t *ActivityTracker) Update(captures map[string]devcontainer.ScreenCapture, probes map[string]string, expectedIDs []string, now time.Time) {
 	newStates := make(map[string]agentState, len(expectedIDs))
 	newTools := make(map[string]state.AgentTool, len(expectedIDs))
 	newPrev := make(map[string]string, len(expectedIDs))
@@ -93,11 +94,15 @@ func (t *ActivityTracker) Update(captures map[string]devcontainer.ScreenCapture,
 			continue
 		}
 
-		// Detect which tool is running from screen content
-		if tool := detectTool(sc.Content); tool != "" {
-			newTools[id] = tool
+		// Detect which tool is running from process probes
+		if probes != nil {
+			if probeTool, probed := probes[id]; probed && probeTool != "" {
+				newTools[id] = state.AgentTool(probeTool)
+			} else if probeTool, ok := t.tools[id]; ok {
+				newTools[id] = probeTool // preserve previous detection
+			}
 		} else if tool, ok := t.tools[id]; ok {
-			newTools[id] = tool // preserve previous detection
+			newTools[id] = tool // no probes this cycle, preserve
 		}
 
 		// Compare with previous screen
@@ -149,22 +154,3 @@ func countDiffs(a, b string) int {
 	return diffs
 }
 
-// detectTool identifies the agent tool from screen content by looking
-// for each tool's name in the captured terminal output.
-// Order matters: copilot is checked before claude because Copilot's
-// UI displays its backend model name (e.g. "Claude Sonnet 4.5").
-func detectTool(screen string) state.AgentTool {
-	lower := strings.ToLower(screen)
-	switch {
-	case strings.Contains(lower, "copilot"):
-		return state.AgentToolCopilot
-	case strings.Contains(lower, "claude"):
-		return state.AgentToolClaude
-	case strings.Contains(lower, "codex"):
-		return state.AgentToolCodex
-	case strings.Contains(lower, "gemini"):
-		return state.AgentToolGemini
-	default:
-		return ""
-	}
-}

@@ -246,7 +246,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stats = msg.stats
 		}
 		if msg.screens != nil {
-			m.activity.Update(msg.screens, msg.containerIDs, time.Now())
+			m.activity.Update(msg.screens, msg.probes, msg.containerIDs, time.Now())
 		}
 		return m, fetchStatsCmd(m.dc, m.containerIDs(), m.containerSessions(), true)
 

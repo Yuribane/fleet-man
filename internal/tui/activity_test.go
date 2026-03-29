@@ -35,30 +35,6 @@ func TestCountDiffs(t *testing.T) {
 	}
 }
 
-func TestDetectTool(t *testing.T) {
-	tests := []struct {
-		name   string
-		screen string
-		want   state.AgentTool
-	}{
-		{"claude prompt", "❯ claude --resume abc123\nsome output", state.AgentToolClaude},
-		{"codex session", "codex> reading files...", state.AgentToolCodex},
-		{"copilot ui", "GitHub Copilot is thinking...", state.AgentToolCopilot},
-		{"gemini output", "gemini: summarizing results", state.AgentToolGemini},
-		{"case insensitive", "CLAUDE is working", state.AgentToolClaude},
-		{"empty screen", "", ""},
-		{"no tool", "vscode ➜ /workspaces $", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := detectTool(tt.screen)
-			if got != tt.want {
-				t.Fatalf("detectTool(%q) = %q, want %q", tt.screen, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestActivityTrackerUpdate(t *testing.T) {
 	now := time.Now()
 
@@ -67,7 +43,7 @@ func TestActivityTrackerUpdate(t *testing.T) {
 		tr.prevScreen["c1"] = "hello world"
 		tr.Update(map[string]devcontainer.ScreenCapture{
 			"c1": capture("XXXXX world"),
-		}, []string{"c1"}, now)
+		}, nil, []string{"c1"}, now)
 		if tr.State("c1") != agentWorking {
 			t.Fatalf("got %d, want agentWorking", tr.State("c1"))
 		}
@@ -79,7 +55,7 @@ func TestActivityTrackerUpdate(t *testing.T) {
 		tr.lastChange["c1"] = now.Add(-31 * time.Second)
 		tr.Update(map[string]devcontainer.ScreenCapture{
 			"c1": capture("hellX world"), // 1 char diff < threshold
-		}, []string{"c1"}, now)
+		}, nil, []string{"c1"}, now)
 		if tr.State("c1") != agentWaiting {
 			t.Fatalf("got %d, want agentWaiting", tr.State("c1"))
 		}
@@ -91,7 +67,7 @@ func TestActivityTrackerUpdate(t *testing.T) {
 		tr.lastChange["c1"] = now.Add(-10 * time.Second)
 		tr.Update(map[string]devcontainer.ScreenCapture{
 			"c1": capture("hello world"),
-		}, []string{"c1"}, now)
+		}, nil, []string{"c1"}, now)
 		if tr.State("c1") != agentWorking {
 			t.Fatalf("got %d, want agentWorking", tr.State("c1"))
 		}
@@ -103,7 +79,7 @@ func TestActivityTrackerUpdate(t *testing.T) {
 		tr.lastChange["c1"] = now.Add(-31 * time.Second)
 		tr.Update(map[string]devcontainer.ScreenCapture{
 			"c1": capture("hello world"),
-		}, []string{"c1"}, now)
+		}, nil, []string{"c1"}, now)
 		if tr.State("c1") != agentWaiting {
 			t.Fatalf("got %d, want agentWaiting", tr.State("c1"))
 		}
@@ -114,7 +90,7 @@ func TestActivityTrackerUpdate(t *testing.T) {
 		tr.states["c1"] = agentWorking
 		tr.Update(map[string]devcontainer.ScreenCapture{
 			"c1": {Content: "", OK: false},
-		}, []string{"c1"}, now)
+		}, nil, []string{"c1"}, now)
 		if tr.State("c1") != agentNotRunning {
 			t.Fatalf("got %d, want agentNotRunning", tr.State("c1"))
 		}
@@ -124,20 +100,32 @@ func TestActivityTrackerUpdate(t *testing.T) {
 		tr := NewActivityTracker()
 		tr.Update(map[string]devcontainer.ScreenCapture{
 			"c1": capture("spinner content here"),
-		}, []string{"c1"}, now)
+		}, nil, []string{"c1"}, now)
 		if tr.State("c1") != agentWaiting {
 			t.Fatalf("got %d, want agentWaiting on first capture", tr.State("c1"))
 		}
 	})
 
-	t.Run("detects tool from screen content", func(t *testing.T) {
+	t.Run("detects tool from probe results", func(t *testing.T) {
 		tr := NewActivityTracker()
 		tr.prevScreen["c1"] = "old content"
 		tr.Update(map[string]devcontainer.ScreenCapture{
-			"c1": capture("codex> reading files..."),
-		}, []string{"c1"}, now)
+			"c1": capture("some screen content"),
+		}, map[string]string{"c1": "codex"}, []string{"c1"}, now)
 		if tr.Tool("c1") != state.AgentToolCodex {
 			t.Fatalf("got %q, want %q", tr.Tool("c1"), state.AgentToolCodex)
+		}
+	})
+
+	t.Run("preserves tool when probe finds no agent", func(t *testing.T) {
+		tr := NewActivityTracker()
+		tr.tools["c1"] = state.AgentToolClaude
+		tr.prevScreen["c1"] = "old content"
+		tr.Update(map[string]devcontainer.ScreenCapture{
+			"c1": capture("some screen content"),
+		}, map[string]string{"c1": ""}, []string{"c1"}, now)
+		if tr.Tool("c1") != state.AgentToolClaude {
+			t.Fatalf("got %q, want %q", tr.Tool("c1"), state.AgentToolClaude)
 		}
 	})
 
@@ -147,7 +135,7 @@ func TestActivityTrackerUpdate(t *testing.T) {
 		tr.tools["c1"] = state.AgentToolClaude
 		tr.prevScreen["c1"] = "prev"
 		tr.lastChange["c1"] = now
-		tr.Update(map[string]devcontainer.ScreenCapture{}, []string{"c1"}, now)
+		tr.Update(map[string]devcontainer.ScreenCapture{}, nil, []string{"c1"}, now)
 		if tr.Tool("c1") != state.AgentToolClaude {
 			t.Fatalf("tool not preserved: got %q", tr.Tool("c1"))
 		}
@@ -158,7 +146,7 @@ func TestActivityTrackerUpdate(t *testing.T) {
 		tr.states["c1"] = agentWorking
 		tr.prevScreen["c1"] = "prev"
 		tr.lastChange["c1"] = now
-		tr.Update(map[string]devcontainer.ScreenCapture{}, []string{"c1"}, now)
+		tr.Update(map[string]devcontainer.ScreenCapture{}, nil, []string{"c1"}, now)
 		if tr.State("c1") != agentWorking {
 			t.Fatalf("got %d, want agentWorking (preserved)", tr.State("c1"))
 		}
@@ -174,7 +162,7 @@ func TestActivityTrackerUpdate(t *testing.T) {
 		tr.lastChange["c2"] = now
 		tr.Update(map[string]devcontainer.ScreenCapture{
 			"c1": capture("a"),
-		}, []string{"c1"}, now)
+		}, nil, []string{"c1"}, now)
 		if tr.State("c2") != agentNotRunning {
 			t.Fatal("c2 should have been cleaned up")
 		}

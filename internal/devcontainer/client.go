@@ -228,6 +228,85 @@ func (c *Client) CaptureScreens(sessions map[string]string) map[string]ScreenCap
 	return result
 }
 
+// AgentProbeResult holds the outcome of probing a container for agent
+// processes. Tool is the detected tool name (e.g. "claude", "copilot"),
+// or empty if no agent was found. The probe only identifies the tool;
+// working/waiting state is determined separately via tmux screen diffs.
+type AgentProbeResult struct {
+	Tool string
+}
+
+// toolProbeScript is the shell script run inside each container to
+// detect which agent tool is running. It scans `ps aux` for known tool
+// names and prints the first match (or "-" if none found).
+const toolProbeScript = `
+for t in claude copilot codex gemini; do
+  pids=$(ps aux 2>/dev/null | awk -v t="$t" '($11 ~ "(^|/)"t"$" || $12 ~ "(^|/)"t"$") {print $2}')
+  [ -n "$pids" ] && { echo "$t"; exit 0; }
+done
+echo "-"
+`
+
+// parseToolProbeOutput parses the tool probe script output.
+// Returns (result, true) when the probe ran successfully.
+// Returns ("", true) when no agent was found (valid result).
+// Returns ("", false) on unparseable output.
+func parseToolProbeOutput(output string) (string, bool) {
+	tool := strings.TrimSpace(output)
+	if tool == "" {
+		return "", false
+	}
+	if tool == "-" {
+		return "", true
+	}
+	return tool, true
+}
+
+// AgentToolProbe runs the detection script inside a container to find
+// which agent tool (if any) is running.
+// Returns (tool, true) when the probe ran (even if no agent found).
+// Returns ("", false) only on docker exec failure (transient error).
+func (c *Client) AgentToolProbe(containerID string) (string, bool) {
+	args := []string{"exec"}
+	if u := c.containerUser(containerID); u != "" {
+		args = append(args, "-u", u)
+	}
+	args = append(args, containerID, "sh", "-c", toolProbeScript)
+	cmd := exec.Command("docker", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	return parseToolProbeOutput(string(out))
+}
+
+// AgentToolProbes runs AgentToolProbe concurrently for all containers.
+// Containers whose probe succeeded are always in the result (even if no
+// agent was found — stored as empty string). Containers whose probe
+// failed (docker exec error) are omitted so the caller can preserve
+// their previous state.
+func (c *Client) AgentToolProbes(containerIDs []string) map[string]string {
+	result := make(map[string]string, len(containerIDs))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, id := range containerIDs {
+		wg.Add(1)
+		go func(cid string) {
+			defer wg.Done()
+			tool, ok := c.AgentToolProbe(cid)
+			mu.Lock()
+			if ok {
+				result[cid] = tool
+			}
+			mu.Unlock()
+		}(id)
+	}
+
+	wg.Wait()
+	return result
+}
+
 // Logs streams docker logs for a container.
 func (c *Client) Logs(containerID string, follow bool) error {
 	args := []string{"logs"}
