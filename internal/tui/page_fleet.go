@@ -291,14 +291,14 @@ func (m model) viewFleetList() string {
 			} else {
 				// Show agent tool indicator
 				agentStr := ""
-				if inst.Status == fleet.StatusRunning {
+				if inst.Status == fleet.StatusRunning && m.activity != nil {
 					// Use detected tool if available, fall back to configured tool
-					tool := m.agentTools[inst.ContainerID]
+					tool := m.activity.Tool(inst.ContainerID)
 					if tool == "" && m.cfg != nil {
 						tool = m.cfg.AgentSettings.ToolSelection
 					}
 					label := agentToolLabel(tool)
-					switch m.agentStates[inst.ContainerID] {
+					switch m.activity.State(inst.ContainerID) {
 					case agentWorking:
 						agentStr = agentWorkingStyle.Render(fmt.Sprintf("  \u25b6 %s", label))
 					case agentWaiting:

@@ -15,14 +15,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-type agentState int
-
-const (
-	agentNotRunning agentState = iota
-	agentWorking
-	agentWaiting
-)
-
 type viewMode int
 
 const (
@@ -73,12 +65,9 @@ type model struct {
 	spinner  spinner.Model
 	creating map[string]bool // "fleet/instance" keys currently being created
 
-	dc              *devcontainer.Client                    // shared client (caches container user)
-	stats           map[string]*devcontainer.ContainerStats // containerID → stats
-	agentStates     map[string]agentState                  // containerID → derived agent state
-	agentTools      map[string]state.AgentTool             // containerID → tool detected from screen content
-	agentPrevScreen map[string]string                      // containerID → previous screen capture
-	agentLastChange map[string]time.Time                   // containerID → last time screen changed ≥ threshold
+	dc       *devcontainer.Client                    // shared client (caches container user)
+	stats    map[string]*devcontainer.ContainerStats // containerID → stats
+	activity *ActivityTracker                        // agent working/waiting/idle detection
 
 	settingsCursor  int             // 0=tool, 1=repo URL, 2=install script
 	settingsEditing bool            // true when editing a text field
@@ -104,12 +93,9 @@ func newModel() model {
 	m := model{
 		collapsed:     make(map[string]bool),
 		creating:      make(map[string]bool),
-		dc:              devcontainer.NewClient(),
-		stats:           make(map[string]*devcontainer.ContainerStats),
-		agentStates:     make(map[string]agentState),
-		agentTools:      make(map[string]state.AgentTool),
-		agentPrevScreen: make(map[string]string),
-		agentLastChange: make(map[string]time.Time),
+		dc:       devcontainer.NewClient(),
+		stats:    make(map[string]*devcontainer.ContainerStats),
+		activity: NewActivityTracker(),
 		textInput:     ti,
 		spinner:       sp,
 		settingsInput: si,
@@ -226,128 +212,6 @@ func (m *model) containerIDs() []string {
 	return ids
 }
 
-// screenChangeThreshold is the minimum number of characters that must
-// differ between consecutive screen captures to count as meaningful
-// activity (catches spinner animations while ignoring cursor blink).
-const screenChangeThreshold = 3
-
-// screenActivityWindow is how recently a meaningful screen change must
-// have occurred for the agent to be considered actively working.
-const screenActivityWindow = 12 * time.Second
-
-// countDiffs returns the number of character positions that differ
-// between two strings, plus any length difference.
-func countDiffs(a, b string) int {
-	diffs := 0
-	ar, br := []rune(a), []rune(b)
-	minLen := len(ar)
-	if len(br) < minLen {
-		minLen = len(br)
-	}
-	for i := 0; i < minLen; i++ {
-		if ar[i] != br[i] {
-			diffs++
-		}
-	}
-	// Characters in the longer string that have no match
-	if len(ar) > minLen {
-		diffs += len(ar) - minLen
-	} else {
-		diffs += len(br) - minLen
-	}
-	return diffs
-}
-
-// detectTool identifies the agent tool from screen content by looking
-// for each tool's name in the captured terminal output.
-func detectTool(screen string) state.AgentTool {
-	lower := strings.ToLower(screen)
-	switch {
-	case strings.Contains(lower, "claude"):
-		return state.AgentToolClaude
-	case strings.Contains(lower, "codex"):
-		return state.AgentToolCodex
-	case strings.Contains(lower, "copilot"):
-		return state.AgentToolCopilot
-	case strings.Contains(lower, "gemini"):
-		return state.AgentToolGemini
-	default:
-		return ""
-	}
-}
-
-// deriveAgentStates updates the agent state map from screen captures.
-// A tmux session that exists but whose screen hasn't changed ≥5 chars
-// in the last 30s is "waiting". One with recent changes is "working".
-// A missing capture (no tmux session) means the agent is not running.
-//
-// expectedIDs lists containers that were probed. Containers in
-// expectedIDs but missing from captures had a transient failure —
-// their previous state is preserved to avoid flickering.
-func (m *model) deriveAgentStates(captures map[string]devcontainer.ScreenCapture, expectedIDs []string, now time.Time) {
-	newStates := make(map[string]agentState, len(expectedIDs))
-	newTools := make(map[string]state.AgentTool, len(expectedIDs))
-	newPrev := make(map[string]string, len(expectedIDs))
-	newLastChange := make(map[string]time.Time, len(expectedIDs))
-
-	for _, id := range expectedIDs {
-		sc, captured := captures[id]
-		if !captured {
-			// Capture failed — preserve previous state to avoid flicker
-			if prev, ok := m.agentStates[id]; ok {
-				newStates[id] = prev
-			}
-			if t, ok := m.agentTools[id]; ok {
-				newTools[id] = t
-			}
-			if s, ok := m.agentPrevScreen[id]; ok {
-				newPrev[id] = s
-			}
-			if t, ok := m.agentLastChange[id]; ok {
-				newLastChange[id] = t
-			}
-			continue
-		}
-
-		if !sc.OK {
-			newStates[id] = agentNotRunning
-			continue
-		}
-
-		// Detect which tool is running from screen content
-		if tool := detectTool(sc.Content); tool != "" {
-			newTools[id] = tool
-		} else if t, ok := m.agentTools[id]; ok {
-			newTools[id] = t // preserve previous detection
-		}
-
-		// Compare with previous screen
-		prev, hasPrev := m.agentPrevScreen[id]
-		lastChange := m.agentLastChange[id]
-
-		if hasPrev && countDiffs(prev, sc.Content) >= screenChangeThreshold {
-			lastChange = now
-		}
-
-		newPrev[id] = sc.Content
-		newLastChange[id] = lastChange
-
-		if !lastChange.IsZero() && now.Sub(lastChange) < screenActivityWindow {
-			newStates[id] = agentWorking
-		} else if hasPrev {
-			newStates[id] = agentWaiting
-		} else {
-			// First capture — no history yet, assume waiting
-			newStates[id] = agentWaiting
-		}
-	}
-
-	m.agentStates = newStates
-	m.agentTools = newTools
-	m.agentPrevScreen = newPrev
-	m.agentLastChange = newLastChange
-}
-
 // containerSessions returns a map of containerID → tmux session name
 // for all running instances.
 func (m *model) containerSessions() map[string]string {
@@ -382,7 +246,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.stats = msg.stats
 		}
 		if msg.screens != nil {
-			m.deriveAgentStates(msg.screens, msg.containerIDs, time.Now())
+			m.activity.Update(msg.screens, msg.containerIDs, time.Now())
 		}
 		return m, fetchStatsCmd(m.dc, m.containerIDs(), m.containerSessions(), true)
 

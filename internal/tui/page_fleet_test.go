@@ -11,6 +11,18 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// testTracker returns an ActivityTracker pre-loaded with specific states/tools.
+func testTracker(states map[string]agentState, tools map[string]state.AgentTool) *ActivityTracker {
+	t := NewActivityTracker()
+	for k, v := range states {
+		t.states[k] = v
+	}
+	for k, v := range tools {
+		t.tools[k] = v
+	}
+	return t
+}
+
 func TestUpdateNormalStopShortcutStopsRunningInstance(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
@@ -206,9 +218,11 @@ func TestViewFleetListShowsAgentWorkingIndicator(t *testing.T) {
 		cfg: &state.Config{
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
-		agentStates: map[string]agentState{"abc123": agentWorking},
-		agentTools:  map[string]state.AgentTool{"abc123": state.AgentToolClaude},
-		stats:       map[string]*devcontainer.ContainerStats{},
+		activity: testTracker(
+			map[string]agentState{"abc123": agentWorking},
+			map[string]state.AgentTool{"abc123": state.AgentToolClaude},
+		),
+		stats: map[string]*devcontainer.ContainerStats{},
 		rows: []row{
 			{kind: rowFleetHeader, fleetName: "alpha"},
 			{kind: rowInstance, fleetName: "alpha", instance: inst},
@@ -242,9 +256,11 @@ func TestViewFleetListShowsAgentWaitingIndicator(t *testing.T) {
 		cfg: &state.Config{
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
-		agentStates: map[string]agentState{"abc123": agentWaiting},
-		agentTools:  map[string]state.AgentTool{"abc123": state.AgentToolClaude},
-		stats:       map[string]*devcontainer.ContainerStats{},
+		activity: testTracker(
+			map[string]agentState{"abc123": agentWaiting},
+			map[string]state.AgentTool{"abc123": state.AgentToolClaude},
+		),
+		stats: map[string]*devcontainer.ContainerStats{},
 		rows: []row{
 			{kind: rowFleetHeader, fleetName: "alpha"},
 			{kind: rowInstance, fleetName: "alpha", instance: inst},
@@ -278,8 +294,11 @@ func TestViewFleetListShowsAgentOffIndicator(t *testing.T) {
 		cfg: &state.Config{
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
-		agentStates: map[string]agentState{"abc123": agentNotRunning},
-		stats:       map[string]*devcontainer.ContainerStats{},
+		activity: testTracker(
+			map[string]agentState{"abc123": agentNotRunning},
+			nil,
+		),
+		stats: map[string]*devcontainer.ContainerStats{},
 		rows: []row{
 			{kind: rowFleetHeader, fleetName: "alpha"},
 			{kind: rowInstance, fleetName: "alpha", instance: inst},
@@ -316,8 +335,8 @@ func TestViewFleetListNoAgentIndicatorForStoppedInstance(t *testing.T) {
 		cfg: &state.Config{
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
-		agentStates: map[string]agentState{},
-		stats:       map[string]*devcontainer.ContainerStats{},
+		activity: NewActivityTracker(),
+		stats:    map[string]*devcontainer.ContainerStats{},
 		rows: []row{
 			{kind: rowFleetHeader, fleetName: "alpha"},
 			{kind: rowInstance, fleetName: "alpha", instance: inst},
