@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backend"
 )
@@ -52,6 +53,16 @@ func New(opts ...Option) *CoderBackend {
 	return b
 }
 
+// coderAgent represents a single agent in a coder workspace.
+type coderAgent struct {
+	Name              string  `json:"name"`
+	Status            string  `json:"status"`
+	LifecycleState    string  `json:"lifecycle_state"`
+	ParentID          *string `json:"parent_id"` // non-nil for devcontainer agents
+	Directory         string  `json:"directory"`
+	ExpandedDirectory string  `json:"expanded_directory"`
+}
+
 // coderWorkspace is the JSON structure returned by `coder list -o json`.
 type coderWorkspace struct {
 	ID           string `json:"id"`
@@ -60,12 +71,7 @@ type coderWorkspace struct {
 	LatestBuild  struct {
 		Status    string `json:"status"`
 		Resources []struct {
-			Agents []struct {
-				Name              string `json:"name"`
-				Status            string `json:"status"`
-				Directory         string `json:"directory"`
-				ExpandedDirectory string `json:"expanded_directory"`
-			} `json:"agents"`
+			Agents []coderAgent `json:"agents"`
 		} `json:"resources"`
 	} `json:"latest_build"`
 }
@@ -100,43 +106,66 @@ func (b *CoderBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 		return nil, fmt.Errorf("coder create failed: %w", err)
 	}
 
-	// Fetch workspace details to get agent info
-	ws, err := b.getWorkspace(name)
+	// Wait for the agent to be connected and its startup script to finish.
+	remoteDir, err := b.waitForAgent(name)
 	if err != nil {
-		return nil, fmt.Errorf("coder workspace created but failed to fetch details: %w", err)
+		return nil, err
 	}
 
-	remoteDir := "/workspaces"
-	remoteUser := "coder"
-	if len(ws.LatestBuild.Resources) > 0 {
-		for _, r := range ws.LatestBuild.Resources {
-			if len(r.Agents) > 0 {
-				if d := r.Agents[0].ExpandedDirectory; d != "" {
-					remoteDir = d
-				}
-				break
-			}
-		}
+	// Detect and provision nested devcontainer if present.
+	b.maybeDevcontainerUp(name, remoteDir)
+
+	// Check if a devcontainer agent is now available. If so, use
+	// "workspace.agent" as the container ID so all SSH calls route
+	// to the devcontainer instead of the outer workspace.
+	sshTarget := name
+	if dcAgent := b.findDevcontainerAgent(name); dcAgent != "" {
+		sshTarget = name + "." + dcAgent
 	}
 
 	return &backend.UpResult{
 		Outcome:               "success",
-		ContainerID:           name, // workspace name is the ID for coder
-		RemoteUser:            remoteUser,
+		ContainerID:           sshTarget,
+		RemoteUser:            "coder",
 		RemoteWorkspaceFolder: remoteDir,
 	}, nil
 }
 
+// workspaceName extracts the workspace name from a containerID which may
+// be in "workspace.agent" format. Coder lifecycle commands (stop, start,
+// delete) operate on the workspace, not individual agents.
+func workspaceName(containerID string) string {
+	if i := strings.Index(containerID, "."); i >= 0 {
+		return containerID[:i]
+	}
+	return containerID
+}
+
+// resolveSSHTarget returns the best SSH target for a workspace. If the
+// workspace has a connected devcontainer agent, returns "workspace.agent".
+// Otherwise returns the containerID as-is. This ensures SSH always routes
+// to the devcontainer when one exists.
+func (b *CoderBackend) resolveSSHTarget(containerID string) string {
+	// Already has an agent suffix — use as-is
+	if strings.Contains(containerID, ".") {
+		return containerID
+	}
+	if agent := b.findDevcontainerAgent(containerID); agent != "" {
+		return containerID + "." + agent
+	}
+	return containerID
+}
+
 // Down deletes a Coder workspace permanently.
 func (b *CoderBackend) Down(containerID string) error {
-	cmd := exec.Command("coder", "delete", "--yes", containerID)
+	cmd := exec.Command("coder", "delete", "--yes", workspaceName(containerID))
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
 // Stop stops a Coder workspace.
 func (b *CoderBackend) Stop(containerID string) error {
-	cmd := exec.Command("coder", "stop", "--yes", containerID)
+	cmd := exec.Command("coder", "stop", "--yes", workspaceName(containerID))
 	cmd.Stdout = io.Discard
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -144,7 +173,7 @@ func (b *CoderBackend) Stop(containerID string) error {
 
 // Start starts a stopped Coder workspace.
 func (b *CoderBackend) Start(containerID string) error {
-	cmd := exec.Command("coder", "start", "--yes", containerID)
+	cmd := exec.Command("coder", "start", "--yes", workspaceName(containerID))
 	cmd.Stdout = io.Discard
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -153,7 +182,8 @@ func (b *CoderBackend) Start(containerID string) error {
 // Exec runs an interactive command inside a Coder workspace via SSH.
 func (b *CoderBackend) Exec(workspaceDir string, command []string) error {
 	name := coderWorkspaceName(workspaceDir)
-	args := sshArgs(name, command)
+	target := b.resolveSSHTarget(name)
+	args := sshArgs(target, command)
 	cmd := exec.Command("coder", args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -165,7 +195,8 @@ func (b *CoderBackend) Exec(workspaceDir string, command []string) error {
 // inside a Coder workspace via SSH.
 func (b *CoderBackend) ExecCommand(workspaceDir string, command []string) *exec.Cmd {
 	name := coderWorkspaceName(workspaceDir)
-	args := sshArgs(name, command)
+	target := b.resolveSSHTarget(name)
+	args := sshArgs(target, command)
 	return exec.Command("coder", args...)
 }
 
@@ -203,7 +234,7 @@ func (b *CoderBackend) Stats(containerIDs []string) (map[string]*backend.Contain
 
 // Logs streams workspace build logs.
 func (b *CoderBackend) Logs(containerID string, follow bool) error {
-	args := []string{"logs", containerID}
+	args := []string{"logs", workspaceName(containerID)}
 	if follow {
 		args = append(args, "--follow")
 	}
@@ -216,7 +247,7 @@ func (b *CoderBackend) Logs(containerID string, follow bool) error {
 
 // LogsCommand returns an unstarted *exec.Cmd for streaming workspace logs.
 func (b *CoderBackend) LogsCommand(containerID string, follow bool) *exec.Cmd {
-	args := []string{"logs", containerID}
+	args := []string{"logs", workspaceName(containerID)}
 	if follow {
 		args = append(args, "--follow")
 	}
@@ -225,7 +256,8 @@ func (b *CoderBackend) LogsCommand(containerID string, follow bool) *exec.Cmd {
 
 // CaptureScreen runs `tmux capture-pane` inside a Coder workspace via SSH.
 func (b *CoderBackend) CaptureScreen(containerID, tmuxSession string) backend.ScreenCapture {
-	cmd := exec.Command("coder", "ssh", containerID, "--", "tmux", "capture-pane", "-t", tmuxSession, "-p")
+	target := b.resolveSSHTarget(containerID)
+	cmd := exec.Command("coder", sshArgs(target, []string{"tmux", "capture-pane", "-t", tmuxSession, "-p"})...)
 	out, err := cmd.Output()
 	if err != nil {
 		return backend.ScreenCapture{}
@@ -237,7 +269,8 @@ func (b *CoderBackend) CaptureScreen(containerID, tmuxSession string) backend.Sc
 func (b *CoderBackend) AgentToolProbe(containerID string) (string, bool) {
 	// coder ssh wraps everything after -- in a shell invocation, so we
 	// pass the script directly rather than via sh -c.
-	cmd := exec.Command("coder", "ssh", containerID, "--", toolProbeScript)
+	target := b.resolveSSHTarget(containerID)
+	cmd := exec.Command("coder", sshArgs(target, []string{toolProbeScript})...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", false
@@ -277,11 +310,94 @@ func (b *CoderBackend) getWorkspace(name string) (*coderWorkspace, error) {
 	return nil, fmt.Errorf("workspace %q not found", name)
 }
 
+// waitForAgent polls until the coder agent is connected and its startup
+// script has finished (lifecycle_state == "ready"). Returns the agent's
+// working directory. Times out after 5 minutes.
+func (b *CoderBackend) waitForAgent(wsName string) (string, error) {
+	deadline := time.Now().Add(5 * time.Minute)
+	remoteDir := "/workspaces"
+
+	for time.Now().Before(deadline) {
+		ws, err := b.getWorkspace(wsName)
+		if err == nil {
+			for _, r := range ws.LatestBuild.Resources {
+				for _, a := range r.Agents {
+					if a.ExpandedDirectory != "" {
+						remoteDir = a.ExpandedDirectory
+					}
+					if a.Status == "connected" && a.LifecycleState == "ready" {
+						return remoteDir, nil
+					}
+				}
+			}
+		}
+		time.Sleep(3 * time.Second)
+	}
+
+	// Timed out but return what we have — the workspace may still be usable
+	return remoteDir, nil
+}
+
+// maybeDevcontainerUp checks if a .devcontainer directory exists under the
+// workspace folder and runs `devcontainer up` inside the coder workspace if
+// found. This handles the common "nested devcontainer" pattern where a coder
+// template provisions a VM/pod and the repo inside contains a devcontainer.
+func (b *CoderBackend) maybeDevcontainerUp(wsName, remoteDir string) {
+	// Find repos with .devcontainer under the workspace directory.
+	// Use 2>/dev/null to suppress permission errors (e.g. lost+found)
+	// that would cause a non-zero exit despite valid output.
+	findCmd := exec.Command("coder", sshArgs(wsName, []string{
+		"find", remoteDir, "-maxdepth", "2", "-name", ".devcontainer", "-type", "d", "-print", "-quit",
+	})...)
+	out, _ := findCmd.Output() // ignore exit code — permission errors are expected
+
+	dcPath := strings.TrimSpace(string(out))
+	if dcPath == "" {
+		return
+	}
+
+	// Take the first match and derive the workspace folder (parent of .devcontainer)
+	lines := strings.Split(dcPath, "\n")
+	wsFolder := strings.TrimSuffix(strings.TrimSpace(lines[0]), "/.devcontainer")
+	if wsFolder == "" {
+		return
+	}
+
+	// Run devcontainer up inside the coder workspace
+	dcUp := exec.Command("coder", sshArgs(wsName, []string{
+		"devcontainer", "up", "--workspace-folder", wsFolder,
+	})...)
+	if b.verbose {
+		dcUp.Stdout = os.Stdout
+		dcUp.Stderr = os.Stderr
+	}
+	_ = dcUp.Run()
+}
+
+// findDevcontainerAgent checks if the workspace has a connected devcontainer
+// agent (identified by having a non-nil parent_id). Returns the agent name
+// or empty string if none found.
+func (b *CoderBackend) findDevcontainerAgent(wsName string) string {
+	ws, err := b.getWorkspace(wsName)
+	if err != nil {
+		return ""
+	}
+	for _, r := range ws.LatestBuild.Resources {
+		for _, a := range r.Agents {
+			if a.ParentID != nil && a.Status == "connected" {
+				return a.Name
+			}
+		}
+	}
+	return ""
+}
+
 // fetchWorkspaceStats reads CPU and memory stats from a workspace via SSH.
 func (b *CoderBackend) fetchWorkspaceStats(wsName string) (*backend.ContainerStats, error) {
 	// Simple approach: use ps output piped through awk, but run as
 	// a single shell command to avoid escaping issues.
-	cmd := exec.Command("coder", "ssh", wsName, "--", "ps", "-eo", "pcpu=,rss=", "--no-headers")
+	target := b.resolveSSHTarget(wsName)
+	cmd := exec.Command("coder", sshArgs(target, []string{"ps", "-eo", "pcpu=,rss=", "--no-headers"})...)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
