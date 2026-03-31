@@ -24,6 +24,7 @@ const (
 	viewConfirmDeleteFleetWarn
 	viewAddInstance
 	viewAddFleet
+	viewTagInstance
 )
 
 type pageMode int
@@ -337,6 +338,8 @@ func (m model) updateByMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateAddInstance(msg)
 	case viewAddFleet:
 		return m.updateAddFleet(msg)
+	case viewTagInstance:
+		return m.updateTagInstance(msg)
 	default:
 		return m.updateNormal(msg)
 	}

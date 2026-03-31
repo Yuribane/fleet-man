@@ -9,6 +9,7 @@ import (
 	"github.com/BenjaminBenetti/fleet-man/internal/gitutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/instanceops"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 var toggleInstanceStatus = instanceops.ToggleInstance
@@ -181,6 +182,21 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = fmt.Sprintf("Opened VS Code for %s", inst.Name)
 			}
 
+		case "t":
+			_, inst := m.selectedInstance()
+			if inst == nil {
+				m.message = "Select an instance"
+				break
+			}
+			m.mode = viewTagInstance
+			m.dialogFleet = m.currentFleetName()
+			m.dialogInst = inst.Name
+			m.textInput.SetValue(inst.Tag)
+			m.textInput.Placeholder = "short description"
+			m.textInput.CharLimit = 128
+			m.textInput.Focus()
+			return m, m.textInput.Cursor.BlinkCmd()
+
 		case "l":
 			_, inst := m.selectedInstance()
 			if inst == nil {
@@ -319,6 +335,37 @@ func (m model) viewFleetList() string {
 					cursor, paddedName, status, agentStr, statsStr,
 				))
 				listContent.WriteString(branchItem)
+
+				// Show tag, truncated with ellipsis if it would overflow
+				if inst.Tag != "" {
+					tagPrefix := "  # "
+					tagText := tagPrefix + inst.Tag
+					// lipgloss.Width measures visible (printed) width
+					lineWidth := lipgloss.Width(
+						fmt.Sprintf("%s    %s %s%s%s%s",
+							cursor, fmt.Sprintf("%-24s", inst.Name), renderStatus(inst.Status), agentStr, statsStr, branchItem,
+						),
+					)
+					// Account for list box border (1) + padding (1) on each side = 4
+					maxWidth := m.width - 4
+					if maxWidth > 0 {
+						available := maxWidth - lineWidth - len(tagPrefix)
+						if available <= 0 {
+							// No room at all — skip the tag
+						} else if available < len(inst.Tag) {
+							if available <= 3 {
+								listContent.WriteString(dimStyle.Render(tagPrefix + "..."))
+							} else {
+								listContent.WriteString(dimStyle.Render(tagPrefix + inst.Tag[:available-3] + "..."))
+							}
+						} else {
+							listContent.WriteString(dimStyle.Render(tagText))
+						}
+					} else {
+						// No terminal width info — show full tag
+						listContent.WriteString(dimStyle.Render(tagText))
+					}
+				}
 			}
 			listContent.WriteString("\n")
 		} else {
@@ -423,6 +470,20 @@ func (m model) viewFleetList() string {
 		)
 		b.WriteString(dialogBox.Render(dialog))
 		b.WriteString("\n")
+
+	case viewTagInstance:
+		b.WriteString("\n")
+		dialog := fmt.Sprintf(
+			"%s\n\n%s %s\n%s %s\n\n%s",
+			dialogTitle.Render("Tag instance"),
+			dialogLabel.Render("Instance:"),
+			fleetExpandedStyle.Render(m.dialogFleet+"/"+m.dialogInst),
+			dialogLabel.Render("Tag:     "),
+			m.textInput.View(),
+			dialogHint.Render("[enter] Save  [esc] Cancel"),
+		)
+		b.WriteString(dialogBox.Render(dialog))
+		b.WriteString("\n")
 	}
 
 	// Message
@@ -434,7 +495,7 @@ func (m model) viewFleetList() string {
 	b.WriteString(renderHelp(m.width, []string{
 		"j/k: navigate", "space: expand/collapse", "enter/e: exec or open",
 		"s: stop/start", "o: open terminal", "n: new fleet", "a: add instance", "d: delete",
-		"c: code", "l: logs", "r: refresh", "q: quit",
+		"t: tag", "c: code", "l: logs", "r: refresh", "q: quit",
 	}))
 
 	return b.String()

@@ -19,4 +19,5 @@ type Instance struct {
 	CreatedAt   time.Time      `json:"created_at"`
 	Status      InstanceStatus `json:"status"`
 	Error       string         `json:"error,omitempty"`
+	Tag         string         `json:"tag,omitempty"`
 }
