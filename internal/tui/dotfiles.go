@@ -41,7 +41,7 @@ func dotfilesSetup(cfg *state.Config) string {
 	// the docker-exec pty's process group and receive SIGHUP when the
 	// user detaches from tmux, killing SSHFS mounts.
 	return fmt.Sprintf(
-		`if [ ! -d ~/dotfiles ]; then echo '==> Cloning dotfiles...'; git clone %s ~/dotfiles && (cd ~/dotfiles && setsid sh %s); fi; `,
+		`if [ ! -d ~/dotfiles ]; then echo '==> Cloning dotfiles...'; GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new' git clone %s ~/dotfiles && (cd ~/dotfiles && setsid sh %s); fi; `,
 		shQuote(repo), shQuote(script),
 	)
 }
