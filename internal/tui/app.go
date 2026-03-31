@@ -81,6 +81,7 @@ type model struct {
 	message  string
 	quitting bool
 	width    int
+	height   int
 }
 
 func newModel() model {
@@ -341,6 +342,7 @@ func (m model) fetchAllStatsCmd(delay bool) tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if ws, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = ws.Width
+		m.height = ws.Height
 	}
 
 	// Handle background results

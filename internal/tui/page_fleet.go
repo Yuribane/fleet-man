@@ -143,7 +143,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			banner := renderGradient(nameToBanner(inst.Name))
 			banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
-			cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, shellCommand(m.cfg, inst.Name))
+			cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, shellCommand(m.cfg, inst.Name, m.width, m.height))
 			return m, tea.ExecProcess(
 				execWithBannerCmd(banner, cmd),
 				func(err error) tea.Msg { return execDoneMsg{err} },

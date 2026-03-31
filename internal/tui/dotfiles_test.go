@@ -54,7 +54,7 @@ func TestSanitizeSessionName(t *testing.T) {
 
 func TestShellCommandProducesTmux(t *testing.T) {
 	cfg := state.DefaultConfig()
-	got := shellCommand(cfg, "agent-1")
+	got := shellCommand(cfg, "agent-1", 0, 0)
 	if len(got) != 3 || got[0] != "sh" || got[1] != "-c" {
 		t.Fatalf("shellCommand() = %v, want [sh -c ...]", got)
 	}
@@ -78,7 +78,7 @@ func TestShellCommandWithDotfilesAndTmux(t *testing.T) {
 	cfg.DotfilesSettings.RepoURL = "https://github.com/user/dots"
 	cfg.DotfilesSettings.InstallScript = "install.sh"
 
-	got := shellCommand(cfg, "worker-2")
+	got := shellCommand(cfg, "worker-2", 0, 0)
 	script := got[2]
 
 	// Dotfiles setup should come before tmux
@@ -103,7 +103,7 @@ func TestShellCommandWithDotfilesAndTmux(t *testing.T) {
 
 func TestShellCommandSanitizesSessionName(t *testing.T) {
 	cfg := state.DefaultConfig()
-	got := shellCommand(cfg, "my.instance:1")
+	got := shellCommand(cfg, "my.instance:1", 0, 0)
 	script := got[2]
 	if !strings.Contains(script, "tmux -u new-session -A -s 'my-instance-1'") {
 		t.Errorf("script should sanitize session name: %s", script)

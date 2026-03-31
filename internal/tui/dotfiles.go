@@ -56,12 +56,33 @@ func dotfilesSetup(cfg *state.Config) string {
 //   - Session exists: attaches to it.
 //
 // Ctrl+Q or Ctrl+O detaches and keeps processes running.
-func shellCommand(cfg *state.Config, instanceName string) []string {
+//
+// cols/rows are the caller's terminal dimensions. When non-zero, stty
+// is used to correct the remote PTY size before tmux starts. This is
+// needed for backends like coder ssh that may report incorrect sizes
+// (e.g. 128x128).
+func shellCommand(cfg *state.Config, instanceName string, cols, rows int) []string {
 	setup := dotfilesSetup(cfg)
 	session := sanitizeSessionName(instanceName)
 	tmuxInstall := `command -v tmux >/dev/null 2>&1 || { echo '==> Installing tmux...'; (sudo apt-get update -qq && sudo apt-get install -y -qq tmux) 2>/dev/null || (sudo apk add tmux) 2>/dev/null || (sudo dnf install -y tmux) 2>/dev/null; }; `
-	inner := setup + tmuxInstall + fmt.Sprintf(
-		`exec tmux -u new-session -A -s %s \; set -g mouse on \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client \; set status-right ' ctrl+q/ctrl+o: detach '`,
+	// coder ssh may report incorrect terminal dimensions (e.g. 128x128).
+	// We fix the PTY size with stty before tmux starts, pass -x/-y for
+	// new session creation, and set a client-attached hook to force
+	// the correct size on every reattach. The hook uses aggressive-resize
+	// and resize-window to override tmux's stale client dimensions.
+	sizefix := ""
+	tmuxSize := ""
+	resizeHook := ""
+	if cols > 0 && rows > 0 {
+		sizefix = fmt.Sprintf(`stty cols %d rows %d 2>/dev/null; `, cols, rows)
+		tmuxSize = fmt.Sprintf(` -x %d -y %d`, cols, rows-1)
+		resizeHook = fmt.Sprintf(
+			` \; set -g aggressive-resize on \; set-hook -g client-attached 'resize-window -x %d -y %d'`,
+			cols, rows-1,
+		)
+	}
+	inner := setup + tmuxInstall + sizefix + fmt.Sprintf(
+		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client \; set status-right ' ctrl+q/ctrl+o: detach '`+resizeHook,
 		shQuote(session),
 	)
 	return []string{"sh", "-c", inner}
