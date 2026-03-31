@@ -12,6 +12,7 @@ const (
 	settingsItemToolSelection = iota
 	settingsItemDotfilesRepo
 	settingsItemDotfilesScript
+	settingsItemDotfilesAutoInstall
 	settingsItemCount
 )
 
@@ -71,6 +72,25 @@ func (m *model) cycleAgentTool(direction int) {
 	m.message = fmt.Sprintf("Preferred tool set to %s", agentToolLabel(next))
 }
 
+func (m *model) toggleAutoInstall() {
+	if m.cfg == nil {
+		m.cfg = state.DefaultConfig()
+	}
+
+	m.cfg.DotfilesSettings.AutoInstall = !m.cfg.DotfilesSettings.AutoInstall
+	if err := state.SaveConfig(m.cfg); err != nil {
+		m.cfg.DotfilesSettings.AutoInstall = !m.cfg.DotfilesSettings.AutoInstall
+		m.message = fmt.Sprintf("Failed to save settings: %v", err)
+		return
+	}
+
+	label := "off"
+	if m.cfg.DotfilesSettings.AutoInstall {
+		label = "on"
+	}
+	m.message = fmt.Sprintf("Auto install dotfiles set to %s", label)
+}
+
 func (m model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.settingsEditing {
 		return m.updateSettingsEditing(msg)
@@ -103,18 +123,26 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "left", "h":
 			if m.settingsCursor == settingsItemToolSelection {
 				m.cycleAgentTool(-1)
+			} else if m.settingsCursor == settingsItemDotfilesAutoInstall {
+				m.toggleAutoInstall()
 			}
 			return m, nil
 
 		case "right", "l":
 			if m.settingsCursor == settingsItemToolSelection {
 				m.cycleAgentTool(1)
+			} else if m.settingsCursor == settingsItemDotfilesAutoInstall {
+				m.toggleAutoInstall()
 			}
 			return m, nil
 
 		case "enter", " ":
 			if m.settingsCursor == settingsItemToolSelection {
 				m.cycleAgentTool(1)
+				return m, nil
+			}
+			if m.settingsCursor == settingsItemDotfilesAutoInstall {
+				m.toggleAutoInstall()
 				return m, nil
 			}
 			return m.enterSettingsEditing()
@@ -238,6 +266,13 @@ func (m model) viewSettings() string {
 		scriptValue = dimStyle.Render("(not set)")
 	}
 	listContent.WriteString(m.renderSettingsRow(settingsItemDotfilesScript, "Install script", scriptValue))
+	listContent.WriteString("\n")
+
+	autoInstallValue := "[ off ]"
+	if cfg.DotfilesSettings.AutoInstall {
+		autoInstallValue = "[ on ]"
+	}
+	listContent.WriteString(m.renderSettingsRow(settingsItemDotfilesAutoInstall, "Auto install", autoInstallValue))
 
 	b.WriteString(box.Render(strings.TrimRight(listContent.String(), "\n")))
 	b.WriteString("\n")

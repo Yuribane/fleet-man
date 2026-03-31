@@ -203,6 +203,34 @@ func TestSaveConfigRoundTripDotfiles(t *testing.T) {
 	}
 }
 
+func TestSaveConfigRoundTripAutoInstall(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	want := &Config{
+		AgentSettings: AgentSettings{
+			ToolSelection: AgentToolClaude,
+		},
+		DotfilesSettings: DotfilesSettings{
+			RepoURL:       "https://github.com/user/dotfiles",
+			InstallScript: "install.sh",
+			AutoInstall:   true,
+		},
+	}
+
+	if err := SaveConfig(want); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	if !got.DotfilesSettings.AutoInstall {
+		t.Fatal("AutoInstall = false, want true")
+	}
+}
+
 func TestApplyDefaultsTrimsDotfilesWhitespace(t *testing.T) {
 	cfg := &Config{
 		DotfilesSettings: DotfilesSettings{

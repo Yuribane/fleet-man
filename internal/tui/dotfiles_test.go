@@ -173,6 +173,49 @@ func TestFreshShellCommandBothSet(t *testing.T) {
 	}
 }
 
+func TestShellCommandAutoInstallSkipsDotfiles(t *testing.T) {
+	cfg := state.DefaultConfig()
+	cfg.DotfilesSettings.RepoURL = "https://github.com/user/dots"
+	cfg.DotfilesSettings.InstallScript = "install.sh"
+	cfg.DotfilesSettings.AutoInstall = true
+
+	got := shellCommand(cfg, "agent-1")
+	script := got[2]
+	if strings.Contains(script, "dotfiles") {
+		t.Errorf("script should not contain dotfiles setup when auto-install is on: %s", script)
+	}
+	if !strings.Contains(script, "exec tmux") {
+		t.Errorf("script should still contain tmux: %s", script)
+	}
+}
+
+func TestFreshShellCommandAutoInstallSkipsDotfiles(t *testing.T) {
+	cfg := state.DefaultConfig()
+	cfg.DotfilesSettings.RepoURL = "https://github.com/user/dots"
+	cfg.DotfilesSettings.InstallScript = "install.sh"
+	cfg.DotfilesSettings.AutoInstall = true
+
+	got := freshShellCommand(cfg)
+	if len(got) != 1 || got[0] != "bash" {
+		t.Fatalf("freshShellCommand(auto-install) = %v, want [bash]", got)
+	}
+}
+
+func TestDotfilesSetupScriptIgnoresAutoInstall(t *testing.T) {
+	cfg := state.DefaultConfig()
+	cfg.DotfilesSettings.RepoURL = "https://github.com/user/dots"
+	cfg.DotfilesSettings.InstallScript = "install.sh"
+	cfg.DotfilesSettings.AutoInstall = true
+
+	got := dotfilesSetupScript(cfg)
+	if got == "" {
+		t.Fatal("dotfilesSetupScript should return script regardless of auto-install")
+	}
+	if !strings.Contains(got, "git clone") {
+		t.Errorf("script missing git clone: %s", got)
+	}
+}
+
 func TestFreshShellCommandQuotesSpecialCharacters(t *testing.T) {
 	cfg := state.DefaultConfig()
 	cfg.DotfilesSettings.RepoURL = "https://github.com/user/it's-dots"

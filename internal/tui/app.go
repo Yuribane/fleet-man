@@ -273,11 +273,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.message = fmt.Sprintf("Failed to create %s: %v", key, msg.err)
 		return m, nil
 
+	case dotfilesAutoInstallDoneMsg:
+		if msg.err != nil {
+			m.message = fmt.Sprintf("Auto-install dotfiles failed on %s: %v", msg.instance, msg.err)
+		}
+		return m, nil
+
 	case pollCreatingTickMsg:
 		if len(m.creating) == 0 {
 			return m, nil
 		}
 		m.reload()
+		var cmds []tea.Cmd
 		for key := range m.creating {
 			parts := strings.SplitN(key, "/", 2)
 			if len(parts) != 2 {
@@ -291,6 +298,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						delete(m.creating, key)
 						m.message = fmt.Sprintf("Instance %s is running (container: %s)",
 							key, inst.ContainerID[:min(12, len(inst.ContainerID))])
+						if m.cfg != nil && m.cfg.DotfilesSettings.AutoInstall {
+							cmds = append(cmds, autoInstallDotfilesCmd(m.dc, inst.WorkspaceDir, key, m.cfg))
+						}
 					case fleet.StatusFailed:
 						delete(m.creating, key)
 						m.message = fmt.Sprintf("Failed to create %s: %s", key, inst.Error)
@@ -299,9 +309,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if len(m.creating) > 0 {
-			return m, pollCreatingCmd()
+			cmds = append(cmds, pollCreatingCmd())
 		}
-		return m, nil
+		return m, tea.Batch(cmds...)
 	}
 
 	// Always update spinner and batch its tick cmd with the mode cmd

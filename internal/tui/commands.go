@@ -61,6 +61,22 @@ func fetchStatsCmd(dc backend.Backend, ids []string, sessions map[string]string,
 	}
 }
 
+type dotfilesAutoInstallDoneMsg struct {
+	instance string
+	err      error
+}
+
+func autoInstallDotfilesCmd(dc backend.Backend, workspaceDir, instanceKey string, cfg *state.Config) tea.Cmd {
+	return func() tea.Msg {
+		setup := dotfilesSetupScript(cfg)
+		if setup == "" {
+			return dotfilesAutoInstallDoneMsg{instance: instanceKey}
+		}
+		cmd := dc.ExecCommand(workspaceDir, []string{"sh", "-c", setup})
+		return dotfilesAutoInstallDoneMsg{instance: instanceKey, err: cmd.Run()}
+	}
+}
+
 func createInstanceCmd(fleetName, instanceName, remoteURL string) tea.Cmd {
 	return func() tea.Msg {
 		self, err := os.Executable()
