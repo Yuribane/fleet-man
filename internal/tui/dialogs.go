@@ -156,6 +156,12 @@ func (m model) updateAddInstance(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_ = f.AddInstance(inst)
 			_ = state.Save(m.st)
 
+			// Remember the backend choice for next time
+			if m.cfg != nil {
+				m.cfg.DefaultBackend = string(bt)
+				_ = state.SaveConfig(m.cfg)
+			}
+
 			key := fleetName + "/" + name
 			m.creating[key] = true
 			m.buildRows()
@@ -165,11 +171,7 @@ func (m model) updateAddInstance(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			return m, createInstanceCmd(fleetName, name, f.Remote, bt)
 
-		case "left", "h":
-			m.dialogBackend = nextBackendType(m.dialogBackend, -1)
-			return m, nil
-
-		case "right", "l":
+		case "tab":
 			m.dialogBackend = nextBackendType(m.dialogBackend, 1)
 			return m, nil
 

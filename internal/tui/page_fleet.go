@@ -96,6 +96,9 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = viewAddInstance
 			m.dialogFleet = fleetName
 			m.dialogBackend = fleet.BackendDevcontainer
+			if m.cfg != nil && m.cfg.DefaultBackend == string(fleet.BackendCoder) {
+				m.dialogBackend = fleet.BackendCoder
+			}
 			m.textInput.SetValue("")
 			m.textInput.Placeholder = "instance-name"
 			m.textInput.CharLimit = 64
@@ -403,7 +406,7 @@ func (m model) viewFleetList() string {
 			m.textInput.View(),
 			dialogLabel.Render("Deploy: "),
 			backendTypeLabel(bt),
-			dialogHint.Render("[enter] Create  [left/right] Change deploy target  [esc] Cancel"),
+			dialogHint.Render("[enter] Create  [tab] Change deploy target  [esc] Cancel"),
 		)
 		b.WriteString(dialogBox.Render(dialog))
 		b.WriteString("\n")

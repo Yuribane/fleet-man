@@ -57,6 +57,7 @@ type Config struct {
 	AgentSettings    AgentSettings    `json:"agent_settings"`
 	DotfilesSettings DotfilesSettings `json:"dotfiles_settings"`
 	CoderSettings    CoderSettings    `json:"coder_settings"`
+	DefaultBackend   string           `json:"default_backend,omitempty"` // "devcontainer" or "coder"
 }
 
 // DefaultConfig returns a config with default values applied.
