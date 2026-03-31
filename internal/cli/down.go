@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	devcontainerbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/devcontainer"
+	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/spf13/cobra"
@@ -13,7 +13,7 @@ import (
 func newDownCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "down <name>",
-		Short: "Stop and remove a devcontainer instance",
+		Short: "Stop and remove an instance",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := fleet.Resolve(args[0], "")
@@ -38,7 +38,7 @@ func newDownCmd() *cobra.Command {
 
 			// Stop the container
 			fmt.Printf("Stopping %s/%s...\n", target.Fleet, target.Instance)
-			dc := devcontainerbackend.New()
+			dc := backendutil.New(inst.Backend, false)
 			if err := dc.Down(inst.ContainerID); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: failed to remove container: %v\n", err)
 			}

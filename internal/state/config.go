@@ -35,10 +35,28 @@ type DotfilesSettings struct {
 	InstallScript string `json:"install_script"`
 }
 
+// CoderParameter holds a single Coder template parameter binding.
+type CoderParameter struct {
+	Name         string `json:"name"`
+	Value        string `json:"value"`                    // may contain ${GIT_URL}, ${INSTANCE_NAME}
+	DefaultValue string `json:"default_value,omitempty"`  // from template
+	DisplayName  string `json:"display_name,omitempty"`   // from template
+	Description  string `json:"description,omitempty"`    // from template
+	Type         string `json:"type,omitempty"`           // "string", "number"
+}
+
+// CoderSettings holds Coder deployment preferences.
+type CoderSettings struct {
+	Template   string           `json:"template"`
+	Preset     string           `json:"preset,omitempty"`
+	Parameters []CoderParameter `json:"parameters,omitempty"`
+}
+
 // Config holds user preferences.
 type Config struct {
 	AgentSettings    AgentSettings    `json:"agent_settings"`
 	DotfilesSettings DotfilesSettings `json:"dotfiles_settings"`
+	CoderSettings    CoderSettings    `json:"coder_settings"`
 }
 
 // DefaultConfig returns a config with default values applied.
@@ -61,6 +79,9 @@ func (c *Config) applyDefaults() {
 
 	c.DotfilesSettings.RepoURL = strings.TrimSpace(c.DotfilesSettings.RepoURL)
 	c.DotfilesSettings.InstallScript = strings.TrimSpace(c.DotfilesSettings.InstallScript)
+
+	c.CoderSettings.Template = strings.TrimSpace(c.CoderSettings.Template)
+	c.CoderSettings.Preset = strings.TrimSpace(c.CoderSettings.Preset)
 }
 
 // ConfigPath returns the path to the config file.

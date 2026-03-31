@@ -12,8 +12,19 @@ const (
 	settingsItemToolSelection = iota
 	settingsItemDotfilesRepo
 	settingsItemDotfilesScript
-	settingsItemCount
+	settingsItemCoderTemplate
+	settingsItemCoderPreset
+	settingsItemCoderParamBase // parameters are at index base + i
 )
+
+// settingsItemCount returns the total number of navigable settings rows.
+func (m model) settingsItemCount() int {
+	n := settingsItemCoderParamBase
+	if m.cfg != nil {
+		n += len(m.cfg.CoderSettings.Parameters)
+	}
+	return n
+}
 
 var agentToolOptions = []state.AgentTool{
 	state.AgentToolCodex,
@@ -71,6 +82,31 @@ func (m *model) cycleAgentTool(direction int) {
 	m.message = fmt.Sprintf("Preferred tool set to %s", agentToolLabel(next))
 }
 
+func (m *model) cycleCoderPreset(direction int) {
+	if m.cfg == nil || len(m.coderPresets) == 0 {
+		return
+	}
+
+	current := m.cfg.CoderSettings.Preset
+	idx := 0
+	for i, p := range m.coderPresets {
+		if p == current {
+			idx = i
+			break
+		}
+	}
+
+	idx = (idx + direction + len(m.coderPresets)) % len(m.coderPresets)
+	m.cfg.CoderSettings.Preset = m.coderPresets[idx]
+	if err := state.SaveConfig(m.cfg); err != nil {
+		m.cfg.CoderSettings.Preset = current
+		m.message = fmt.Sprintf("Failed to save settings: %v", err)
+		return
+	}
+
+	m.message = fmt.Sprintf("Preset set to %s", m.cfg.CoderSettings.Preset)
+}
+
 func (m model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.settingsEditing {
 		return m.updateSettingsEditing(msg)
@@ -79,6 +115,8 @@ func (m model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
+	count := m.settingsItemCount()
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		m.message = ""
@@ -93,28 +131,36 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "up", "k":
-			m.settingsCursor = (m.settingsCursor - 1 + settingsItemCount) % settingsItemCount
+			m.settingsCursor = (m.settingsCursor - 1 + count) % count
 			return m, nil
 
 		case "down", "j":
-			m.settingsCursor = (m.settingsCursor + 1) % settingsItemCount
+			m.settingsCursor = (m.settingsCursor + 1) % count
 			return m, nil
 
 		case "left", "h":
 			if m.settingsCursor == settingsItemToolSelection {
 				m.cycleAgentTool(-1)
+			} else if m.settingsCursor == settingsItemCoderPreset {
+				m.cycleCoderPreset(-1)
 			}
 			return m, nil
 
 		case "right", "l":
 			if m.settingsCursor == settingsItemToolSelection {
 				m.cycleAgentTool(1)
+			} else if m.settingsCursor == settingsItemCoderPreset {
+				m.cycleCoderPreset(1)
 			}
 			return m, nil
 
 		case "enter", " ":
 			if m.settingsCursor == settingsItemToolSelection {
 				m.cycleAgentTool(1)
+				return m, nil
+			}
+			if m.settingsCursor == settingsItemCoderPreset {
+				m.cycleCoderPreset(1)
 				return m, nil
 			}
 			return m.enterSettingsEditing()
@@ -130,13 +176,29 @@ func (m model) enterSettingsEditing() (tea.Model, tea.Cmd) {
 	}
 
 	var current string
-	switch m.settingsCursor {
-	case settingsItemDotfilesRepo:
+	switch {
+	case m.settingsCursor == settingsItemDotfilesRepo:
 		current = m.cfg.DotfilesSettings.RepoURL
 		m.settingsInput.Placeholder = "https://github.com/user/dotfiles"
-	case settingsItemDotfilesScript:
+	case m.settingsCursor == settingsItemDotfilesScript:
 		current = m.cfg.DotfilesSettings.InstallScript
 		m.settingsInput.Placeholder = "install.sh"
+	case m.settingsCursor == settingsItemCoderTemplate:
+		current = m.cfg.CoderSettings.Template
+		m.settingsInput.Placeholder = "template-name"
+	case m.settingsCursor >= settingsItemCoderParamBase:
+		idx := m.settingsCursor - settingsItemCoderParamBase
+		if idx < len(m.cfg.CoderSettings.Parameters) {
+			current = m.cfg.CoderSettings.Parameters[idx].Value
+			p := m.cfg.CoderSettings.Parameters[idx]
+			if p.DefaultValue != "" {
+				m.settingsInput.Placeholder = p.DefaultValue
+			} else {
+				m.settingsInput.Placeholder = "value"
+			}
+		}
+	default:
+		return m, nil
 	}
 
 	m.settingsEditing = true
@@ -155,20 +217,37 @@ func (m model) updateSettingsEditing(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cfg == nil {
 				m.cfg = state.DefaultConfig()
 			}
-			switch m.settingsCursor {
-			case settingsItemDotfilesRepo:
+
+			var cmd tea.Cmd
+			switch {
+			case m.settingsCursor == settingsItemDotfilesRepo:
 				m.cfg.DotfilesSettings.RepoURL = value
-			case settingsItemDotfilesScript:
+			case m.settingsCursor == settingsItemDotfilesScript:
 				m.cfg.DotfilesSettings.InstallScript = value
+			case m.settingsCursor == settingsItemCoderTemplate:
+				oldTemplate := m.cfg.CoderSettings.Template
+				m.cfg.CoderSettings.Template = value
+				// If template changed, trigger parameter fetch
+				if value != "" && value != oldTemplate {
+					m.coderFetchingParams = true
+					m.message = "Fetching template parameters..."
+					cmd = fetchCoderParamsCmd(value)
+				}
+			case m.settingsCursor >= settingsItemCoderParamBase:
+				idx := m.settingsCursor - settingsItemCoderParamBase
+				if idx < len(m.cfg.CoderSettings.Parameters) {
+					m.cfg.CoderSettings.Parameters[idx].Value = value
+				}
 			}
+
 			if err := state.SaveConfig(m.cfg); err != nil {
 				m.message = fmt.Sprintf("Failed to save settings: %v", err)
-			} else {
+			} else if cmd == nil {
 				m.message = "Saved"
 			}
 			m.settingsEditing = false
 			m.settingsInput.Blur()
-			return m, nil
+			return m, cmd
 
 		case tea.KeyEsc:
 			m.settingsEditing = false
@@ -238,9 +317,59 @@ func (m model) viewSettings() string {
 		scriptValue = dimStyle.Render("(not set)")
 	}
 	listContent.WriteString(m.renderSettingsRow(settingsItemDotfilesScript, "Install script", scriptValue))
+	listContent.WriteString("\n\n")
+
+	// Coder section
+	listContent.WriteString(fleetExpandedStyle.Render("Coder"))
+	listContent.WriteString("\n")
+	listContent.WriteString(dimStyle.Render(strings.Repeat("─", ruleWidth)))
+	listContent.WriteString("\n\n")
+
+	templateValue := cfg.CoderSettings.Template
+	if templateValue == "" && !(m.settingsEditing && m.settingsCursor == settingsItemCoderTemplate) {
+		templateValue = dimStyle.Render("(not set)")
+	}
+	if m.coderFetchingParams {
+		templateValue += "  " + m.spinner.View() + " fetching..."
+	}
+	listContent.WriteString(m.renderSettingsRow(settingsItemCoderTemplate, "Template", templateValue))
+	listContent.WriteString("\n")
+
+	presetValue := cfg.CoderSettings.Preset
+	if presetValue == "" {
+		presetValue = dimStyle.Render("(none)")
+	} else {
+		presetValue = fmt.Sprintf("[ %s ]", presetValue)
+	}
+	listContent.WriteString(m.renderSettingsRow(settingsItemCoderPreset, "Preset", presetValue))
+
+	// Dynamic parameter rows
+	for i, p := range cfg.CoderSettings.Parameters {
+		listContent.WriteString("\n")
+		idx := settingsItemCoderParamBase + i
+		value := p.Value
+		if value == "" && !(m.settingsEditing && m.settingsCursor == idx) {
+			if p.DefaultValue != "" {
+				value = dimStyle.Render(p.DefaultValue + " (default)")
+			} else {
+				value = dimStyle.Render("(not set)")
+			}
+		}
+		label := p.Name
+		if p.DisplayName != "" {
+			label = p.DisplayName
+		}
+		listContent.WriteString(m.renderSettingsRow(idx, label, value))
+	}
 
 	b.WriteString(box.Render(strings.TrimRight(listContent.String(), "\n")))
 	b.WriteString("\n")
+
+	// Substitution variable hint
+	if m.settingsCursor >= settingsItemCoderParamBase {
+		b.WriteString(dimStyle.Render("  Variables: ${GIT_URL} = fleet repo URL, ${INSTANCE_NAME} = workspace name"))
+		b.WriteString("\n")
+	}
 
 	if m.message != "" {
 		b.WriteString(messageStyle.Render(m.message))
@@ -253,7 +382,7 @@ func (m model) viewSettings() string {
 		}))
 	} else {
 		b.WriteString(renderHelp(m.width, []string{
-			"j/k: navigate", "left/right: change tool", "enter: edit", "esc: back", "ctrl+c: quit",
+			"j/k: navigate", "left/right: cycle", "enter: edit", "esc: back", "ctrl+c: quit",
 		}))
 	}
 

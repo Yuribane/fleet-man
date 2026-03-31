@@ -3,7 +3,7 @@ package instanceops
 import (
 	"fmt"
 
-	devcontainerbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/devcontainer"
+	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 )
@@ -13,8 +13,8 @@ type containerController interface {
 	Stop(containerID string) error
 }
 
-var newClient = func() containerController {
-	return devcontainerbackend.New()
+var newClient = func(bt fleet.BackendType) containerController {
+	return backendutil.New(bt, false)
 }
 
 type Result struct {
@@ -74,7 +74,7 @@ func transitionLoadedInstance(st *state.State, inst *fleet.Instance, fleetName, 
 		return nil, fmt.Errorf("instance %s/%s has no container ID", fleetName, instanceName)
 	}
 
-	dc := newClient()
+	dc := newClient(inst.Backend)
 
 	switch targetStatus {
 	case fleet.StatusStopped:

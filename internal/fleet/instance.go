@@ -11,6 +11,14 @@ const (
 	StatusFailed   InstanceStatus = "failed"
 )
 
+// BackendType identifies which backend an instance uses.
+type BackendType string
+
+const (
+	BackendDevcontainer BackendType = "devcontainer"
+	BackendCoder        BackendType = "coder"
+)
+
 type Instance struct {
 	Name        string         `json:"name"`
 	ContainerID string         `json:"container_id"`
@@ -19,4 +27,5 @@ type Instance struct {
 	CreatedAt   time.Time      `json:"created_at"`
 	Status      InstanceStatus `json:"status"`
 	Error       string         `json:"error,omitempty"`
+	Backend     BackendType    `json:"backend,omitempty"`
 }

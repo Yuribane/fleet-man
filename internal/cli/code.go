@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 
-	devcontainerbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/devcontainer"
+	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/spf13/cobra"
@@ -36,7 +36,15 @@ func newCodeCmd() *cobra.Command {
 				return err
 			}
 
-			dc := devcontainerbackend.New()
+			dc := backendutil.New(inst.Backend, false)
+
+			// For coder backend, use `coder open vscode` directly
+			if inst.Backend == fleet.BackendCoder {
+				fmt.Printf("Opening VS Code for %s/%s...\n", target.Fleet, target.Instance)
+				coderCmd := exec.Command("coder", "open", "vscode", inst.ContainerID)
+				return coderCmd.Run()
+			}
+
 			uri, ok := dc.EditorURI(inst.WorkspaceDir, target.Fleet)
 			if !ok {
 				return fmt.Errorf("editor integration not supported by this backend")

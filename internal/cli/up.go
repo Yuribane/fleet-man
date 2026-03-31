@@ -13,13 +13,19 @@ import (
 
 func newUpCmd() *cobra.Command {
 	var repoFlag string
+	var backendFlag string
 
 	cmd := &cobra.Command{
 		Use:   "up <name>",
-		Short: "Spawn a new devcontainer instance",
+		Short: "Spawn a new instance",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
+
+			bt := fleet.BackendDevcontainer
+			if backendFlag == "coder" {
+				bt = fleet.BackendCoder
+			}
 
 			target, err := fleet.Resolve(name, repoFlag)
 			if err != nil {
@@ -59,6 +65,7 @@ func newUpCmd() *cobra.Command {
 				WorkspaceDir: wsDir,
 				CreatedAt:    time.Now(),
 				Status:       fleet.StatusCreating,
+				Backend:      bt,
 			}
 			if err := f.AddInstance(inst); err != nil {
 				return err
@@ -67,8 +74,8 @@ func newUpCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("Creating %s/%s...\n", target.Fleet, target.Instance)
-			if err := create.Run(target.Fleet, target.Instance, remoteURL, true); err != nil {
+			fmt.Printf("Creating %s/%s (backend: %s)...\n", target.Fleet, target.Instance, bt)
+			if err := create.Run(target.Fleet, target.Instance, remoteURL, true, bt); err != nil {
 				return err
 			}
 
@@ -87,5 +94,6 @@ func newUpCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&repoFlag, "repo", "", "Git remote URL to clone from")
+	cmd.Flags().StringVar(&backendFlag, "backend", "devcontainer", "Backend type: devcontainer or coder")
 	return cmd
 }

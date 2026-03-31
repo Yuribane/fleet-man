@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backend"
-	devcontainerbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/devcontainer"
+	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -57,22 +57,26 @@ type model struct {
 	cfg *state.Config
 	err error
 
-	page        pageMode
-	mode        viewMode
-	dialogFleet string
-	dialogInst  string
-	textInput   textinput.Model
+	page          pageMode
+	mode          viewMode
+	dialogFleet   string
+	dialogInst    string
+	dialogBackend fleet.BackendType // selected backend in add-instance dialog
+	textInput     textinput.Model
 
 	spinner  spinner.Model
 	creating map[string]bool // "fleet/instance" keys currently being created
 
-	dc       backend.Backend                    // shared backend (caches container user)
-	stats    map[string]*backend.ContainerStats // containerID → stats
-	activity *ActivityTracker                        // agent working/waiting/idle detection
+	backends map[fleet.BackendType]backend.Backend // one per backend type, lazily created
+	stats    map[string]*backend.ContainerStats    // containerID → stats
+	activity *ActivityTracker                      // agent working/waiting/idle detection
 
-	settingsCursor  int             // 0=tool, 1=repo URL, 2=install script
+	settingsCursor  int             // index into settings rows
 	settingsEditing bool            // true when editing a text field
 	settingsInput   textinput.Model // dedicated text input for settings page
+
+	coderPresets       []string // available preset names (in-memory, from API)
+	coderFetchingParams bool    // true while fetching template parameters
 
 	message  string
 	quitting bool
@@ -94,9 +98,9 @@ func newModel() model {
 	m := model{
 		collapsed:     make(map[string]bool),
 		creating:      make(map[string]bool),
-		dc:       devcontainerbackend.New(),
-		stats:    make(map[string]*backend.ContainerStats),
-		activity: NewActivityTracker(),
+		backends:      make(map[fleet.BackendType]backend.Backend),
+		stats:         make(map[string]*backend.ContainerStats),
+		activity:      NewActivityTracker(),
 		textInput:     ti,
 		spinner:       sp,
 		settingsInput: si,
@@ -201,38 +205,137 @@ func (m *model) selectedInstance() (*fleet.Fleet, *fleet.Instance) {
 	return f, r.instance
 }
 
-func (m *model) containerIDs() []string {
-	var ids []string
-	for _, f := range m.st.Fleets {
-		for _, inst := range f.Instances {
-			if inst.ContainerID != "" && inst.Status == fleet.StatusRunning {
-				ids = append(ids, inst.ContainerID)
-			}
-		}
+// backendFor returns the cached backend for the given type, creating it lazily.
+func (m *model) backendFor(bt fleet.BackendType) backend.Backend {
+	if bt == "" {
+		bt = fleet.BackendDevcontainer
 	}
-	return ids
+	if b, ok := m.backends[bt]; ok {
+		return b
+	}
+	b := backendutil.New(bt, false)
+	m.backends[bt] = b
+	return b
 }
 
-// containerSessions returns a map of containerID → tmux session name
-// for all running instances.
-func (m *model) containerSessions() map[string]string {
-	sessions := make(map[string]string)
+// instanceBackend returns the backend for the given instance's backend type.
+func (m *model) instanceBackend(inst *fleet.Instance) backend.Backend {
+	return m.backendFor(inst.Backend)
+}
+
+// backendGroup holds container IDs and sessions grouped by backend type.
+type backendGroup struct {
+	ids      []string
+	sessions map[string]string
+}
+
+// containersByBackend groups running instances by their backend type.
+func (m *model) containersByBackend() map[fleet.BackendType]*backendGroup {
+	groups := make(map[fleet.BackendType]*backendGroup)
 	for _, f := range m.st.Fleets {
 		for _, inst := range f.Instances {
-			if inst.ContainerID != "" && inst.Status == fleet.StatusRunning {
-				sessions[inst.ContainerID] = sanitizeSessionName(inst.Name)
+			if inst.ContainerID == "" || inst.Status != fleet.StatusRunning {
+				continue
 			}
+			bt := inst.Backend
+			if bt == "" {
+				bt = fleet.BackendDevcontainer
+			}
+			g, ok := groups[bt]
+			if !ok {
+				g = &backendGroup{sessions: make(map[string]string)}
+				groups[bt] = g
+			}
+			g.ids = append(g.ids, inst.ContainerID)
+			g.sessions[inst.ContainerID] = sanitizeSessionName(inst.Name)
 		}
 	}
-	return sessions
+	return groups
 }
 
 func (m model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.spinner.Tick, fetchStatsCmd(m.dc, m.containerIDs(), m.containerSessions(), false)}
+	cmds := []tea.Cmd{m.spinner.Tick, m.fetchAllStatsCmd(false)}
 	if len(m.creating) > 0 {
 		cmds = append(cmds, pollCreatingCmd())
 	}
+	// Auto-fetch coder template parameters if template is configured
+	if m.cfg != nil && m.cfg.CoderSettings.Template != "" {
+		m.coderFetchingParams = true
+		cmds = append(cmds, fetchCoderParamsCmd(m.cfg.CoderSettings.Template))
+	}
 	return tea.Batch(cmds...)
+}
+
+// fetchAllStatsCmd creates a command that fetches stats from all backends concurrently.
+func (m model) fetchAllStatsCmd(delay bool) tea.Cmd {
+	groups := m.containersByBackend()
+	if len(groups) == 0 {
+		return fetchStatsCmd(nil, nil, nil, delay)
+	}
+
+	type fetchInput struct {
+		dc       backend.Backend
+		ids      []string
+		sessions map[string]string
+	}
+	var inputs []fetchInput
+	for bt, g := range groups {
+		inputs = append(inputs, fetchInput{
+			dc:       m.backendFor(bt),
+			ids:      g.ids,
+			sessions: g.sessions,
+		})
+	}
+
+	// If only one backend type, use the simple path
+	if len(inputs) == 1 {
+		return fetchStatsCmd(inputs[0].dc, inputs[0].ids, inputs[0].sessions, delay)
+	}
+
+	// Multiple backend types: fetch concurrently and merge
+	return func() tea.Msg {
+		if delay {
+			time.Sleep(3 * time.Second)
+		}
+
+		allStats := make(map[string]*backend.ContainerStats)
+		allScreens := make(map[string]backend.ScreenCapture)
+		allProbes := make(map[string]string)
+		var allIDs []string
+
+		type result struct {
+			stats   map[string]*backend.ContainerStats
+			screens map[string]backend.ScreenCapture
+			probes  map[string]string
+			ids     []string
+		}
+
+		ch := make(chan result, len(inputs))
+		for _, inp := range inputs {
+			go func(dc backend.Backend, ids []string, sessions map[string]string) {
+				stats, _ := dc.Stats(ids)
+				screens := backend.CaptureScreens(dc, sessions)
+				probes := backend.AgentToolProbes(dc, ids)
+				ch <- result{stats, screens, probes, ids}
+			}(inp.dc, inp.ids, inp.sessions)
+		}
+
+		for range inputs {
+			r := <-ch
+			for k, v := range r.stats {
+				allStats[k] = v
+			}
+			for k, v := range r.screens {
+				allScreens[k] = v
+			}
+			for k, v := range r.probes {
+				allProbes[k] = v
+			}
+			allIDs = append(allIDs, r.ids...)
+		}
+
+		return statsMsg{stats: allStats, screens: allScreens, probes: allProbes, containerIDs: allIDs}
+	}
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -249,7 +352,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.screens != nil {
 			m.activity.Update(msg.screens, msg.probes, msg.containerIDs, time.Now())
 		}
-		return m, fetchStatsCmd(m.dc, m.containerIDs(), m.containerSessions(), true)
+		return m, m.fetchAllStatsCmd(true)
 
 	case instanceSpawnedMsg:
 		// Background process launched; start polling for completion
@@ -271,6 +374,51 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.reload()
 		m.message = fmt.Sprintf("Failed to create %s: %v", key, msg.err)
+		return m, nil
+
+	case coderParamsFetchedMsg:
+		m.coderFetchingParams = false
+		if msg.err != nil {
+			m.message = fmt.Sprintf("Failed to fetch parameters: %v", msg.err)
+			return m, nil
+		}
+		if m.cfg == nil {
+			m.cfg = state.DefaultConfig()
+		}
+
+		// Merge parameters: keep existing user-set values, add new ones with defaults
+		existing := make(map[string]string)
+		for _, p := range m.cfg.CoderSettings.Parameters {
+			if p.Value != "" {
+				existing[p.Name] = p.Value
+			}
+		}
+		var newParams []state.CoderParameter
+		for _, rp := range msg.params {
+			val := existing[rp.Name] // preserve user value if set
+			newParams = append(newParams, state.CoderParameter{
+				Name:         rp.Name,
+				Value:        val,
+				DefaultValue: rp.DefaultValue,
+				DisplayName:  rp.DisplayName,
+				Description:  rp.Description,
+				Type:         rp.Type,
+			})
+		}
+		m.cfg.CoderSettings.Parameters = newParams
+
+		// Collect preset names
+		m.coderPresets = nil
+		for _, p := range msg.presets {
+			m.coderPresets = append(m.coderPresets, p.Name)
+		}
+		// If no preset selected yet and presets exist, select the first one
+		if m.cfg.CoderSettings.Preset == "" && len(m.coderPresets) > 0 {
+			m.cfg.CoderSettings.Preset = m.coderPresets[0]
+		}
+
+		_ = state.SaveConfig(m.cfg)
+		m.message = fmt.Sprintf("Loaded %d parameters, %d presets", len(newParams), len(m.coderPresets))
 		return m, nil
 
 	case pollCreatingTickMsg:

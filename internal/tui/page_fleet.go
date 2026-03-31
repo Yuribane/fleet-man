@@ -106,6 +106,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.mode = viewAddInstance
 			m.dialogFleet = fleetName
+			m.dialogBackend = fleet.BackendDevcontainer
 			m.textInput.SetValue("")
 			m.textInput.Placeholder = "instance-name"
 			m.textInput.CharLimit = 64
@@ -142,7 +143,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			banner := renderGradient(nameToBanner(inst.Name))
 			banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
-			cmd := m.dc.ExecCommand(inst.WorkspaceDir, shellCommand(m.cfg, inst.Name))
+			cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, shellCommand(m.cfg, inst.Name))
 			return m, tea.ExecProcess(
 				execWithBannerCmd(banner, cmd),
 				func(err error) tea.Msg { return execDoneMsg{err} },
@@ -154,7 +155,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = "Select an instance"
 				break
 			}
-			cmd := m.dc.ExecCommand(inst.WorkspaceDir, freshShellCommand(m.cfg))
+			cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, freshShellCommand(m.cfg))
 			err := openInTerminal(cmd.Args)
 			if err != nil {
 				m.message = fmt.Sprintf("Could not open terminal: %v", err)
@@ -169,7 +170,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			r := m.rows[m.cursor]
-			uri, ok := m.dc.EditorURI(inst.WorkspaceDir, r.fleetName)
+			uri, ok := m.instanceBackend(inst).EditorURI(inst.WorkspaceDir, r.fleetName)
 			if !ok {
 				m.message = "Editor integration not supported by this backend"
 				break
@@ -188,7 +189,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			return m, tea.ExecProcess(
-				m.dc.LogsCommand(inst.ContainerID, false),
+				m.instanceBackend(inst).LogsCommand(inst.ContainerID, false),
 				func(err error) tea.Msg { return execDoneMsg{err} },
 			)
 		}
@@ -400,14 +401,20 @@ func (m model) viewFleetList() string {
 
 	case viewAddInstance:
 		b.WriteString("\n")
+		bt := m.dialogBackend
+		if bt == "" {
+			bt = fleet.BackendDevcontainer
+		}
 		dialog := fmt.Sprintf(
-			"%s\n\n%s %s\n%s %s\n\n%s",
+			"%s\n\n%s %s\n%s %s\n%s [ %s ]\n\n%s",
 			dialogTitle.Render("New instance"),
-			dialogLabel.Render("Fleet:"),
+			dialogLabel.Render("Fleet:  "),
 			fleetExpandedStyle.Render(m.dialogFleet),
-			dialogLabel.Render("Name: "),
+			dialogLabel.Render("Name:   "),
 			m.textInput.View(),
-			dialogHint.Render("[enter] Create  [esc] Cancel"),
+			dialogLabel.Render("Deploy: "),
+			backendTypeLabel(bt),
+			dialogHint.Render("[enter] Create  [left/right] Change deploy target  [esc] Cancel"),
 		)
 		b.WriteString(dialogBox.Render(dialog))
 		b.WriteString("\n")

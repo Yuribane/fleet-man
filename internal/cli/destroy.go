@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	devcontainerbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/devcontainer"
+	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -27,9 +27,9 @@ func newDestroyCmd() *cobra.Command {
 				return fmt.Errorf("fleet %q not found", fleetName)
 			}
 
-			dc := devcontainerbackend.New()
 			for _, inst := range f.Instances {
 				fmt.Printf("Stopping %s/%s...\n", fleetName, inst.Name)
+				dc := backendutil.New(inst.Backend, false)
 				if err := dc.Down(inst.ContainerID); err != nil {
 					fmt.Fprintf(os.Stderr, "warning: failed to remove container for %s: %v\n", inst.Name, err)
 				}

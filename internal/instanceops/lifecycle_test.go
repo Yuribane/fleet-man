@@ -134,7 +134,7 @@ func TestStartInstanceNoOpsWhenAlreadyRunning(t *testing.T) {
 
 func stubLifecycleClient(client containerController) func() {
 	prev := newClient
-	newClient = func() containerController { return client }
+	newClient = func(bt fleet.BackendType) containerController { return client }
 	return func() {
 		newClient = prev
 	}

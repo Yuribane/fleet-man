@@ -35,7 +35,7 @@ func (m model) updateConfirmDelete(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if ok {
 					inst, err := f.GetInstance(m.dialogInst)
 					if err == nil {
-						_ = m.dc.Down(inst.ContainerID)
+						_ = m.instanceBackend(inst).Down(inst.ContainerID)
 						if inst.WorkspaceDir != "" {
 							_ = os.RemoveAll(inst.WorkspaceDir)
 						}
@@ -64,7 +64,7 @@ func (m model) updateConfirmDeleteFleetWarn(msg tea.Msg) (tea.Model, tea.Cmd) {
 			f, ok := m.st.Fleets[m.dialogFleet]
 			if ok {
 				for _, inst := range f.Instances {
-					_ = m.dc.Down(inst.ContainerID)
+					_ = m.instanceBackend(inst).Down(inst.ContainerID)
 					if inst.WorkspaceDir != "" {
 						_ = os.RemoveAll(inst.WorkspaceDir)
 					}
@@ -83,6 +83,32 @@ func (m model) updateConfirmDeleteFleetWarn(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+var backendTypeOptions = []fleet.BackendType{
+	fleet.BackendDevcontainer,
+	fleet.BackendCoder,
+}
+
+func nextBackendType(current fleet.BackendType, direction int) fleet.BackendType {
+	idx := 0
+	for i, bt := range backendTypeOptions {
+		if bt == current {
+			idx = i
+			break
+		}
+	}
+	idx = (idx + direction + len(backendTypeOptions)) % len(backendTypeOptions)
+	return backendTypeOptions[idx]
+}
+
+func backendTypeLabel(bt fleet.BackendType) string {
+	switch bt {
+	case fleet.BackendCoder:
+		return "Coder"
+	default:
+		return "Devcontainer"
+	}
 }
 
 func (m model) updateAddInstance(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -112,6 +138,11 @@ func (m model) updateAddInstance(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			bt := m.dialogBackend
+			if bt == "" {
+				bt = fleet.BackendDevcontainer
+			}
+
 			// Add instance immediately with "creating" status
 			wsDir := filepath.Join(state.WorkspacesDir(), fleetName, name, fleetName)
 			inst := &fleet.Instance{
@@ -120,6 +151,7 @@ func (m model) updateAddInstance(msg tea.Msg) (tea.Model, tea.Cmd) {
 				WorkspaceDir: wsDir,
 				CreatedAt:    time.Now(),
 				Status:       fleet.StatusCreating,
+				Backend:      bt,
 			}
 			_ = f.AddInstance(inst)
 			_ = state.Save(m.st)
@@ -129,9 +161,17 @@ func (m model) updateAddInstance(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.buildRows()
 			m.mode = viewNormal
 			m.textInput.Blur()
-			m.message = fmt.Sprintf("Creating %s...", key)
+			m.message = fmt.Sprintf("Creating %s (%s)...", key, backendTypeLabel(bt))
 
-			return m, createInstanceCmd(fleetName, name, f.Remote)
+			return m, createInstanceCmd(fleetName, name, f.Remote, bt)
+
+		case "left", "h":
+			m.dialogBackend = nextBackendType(m.dialogBackend, -1)
+			return m, nil
+
+		case "right", "l":
+			m.dialogBackend = nextBackendType(m.dialogBackend, 1)
+			return m, nil
 
 		case "esc", "ctrl+c":
 			m.mode = viewNormal

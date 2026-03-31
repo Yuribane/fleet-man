@@ -106,14 +106,27 @@ func TestUpdateSettingsNavUpDown(t *testing.T) {
 
 	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
 	got = updated.(model)
+	if got.settingsCursor != settingsItemCoderTemplate {
+		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemCoderTemplate)
+	}
+
+	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
+	got = updated.(model)
+	if got.settingsCursor != settingsItemCoderPreset {
+		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemCoderPreset)
+	}
+
+	// Wrap past last item back to first
+	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
+	got = updated.(model)
 	if got.settingsCursor != settingsItemToolSelection {
 		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemToolSelection)
 	}
 
 	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyUp})
 	got = updated.(model)
-	if got.settingsCursor != settingsItemDotfilesScript {
-		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemDotfilesScript)
+	if got.settingsCursor != settingsItemCoderPreset {
+		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemCoderPreset)
 	}
 }
 

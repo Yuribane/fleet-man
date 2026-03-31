@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backend"
+	coderbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/coder"
+	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -61,14 +63,39 @@ func fetchStatsCmd(dc backend.Backend, ids []string, sessions map[string]string,
 	}
 }
 
-func createInstanceCmd(fleetName, instanceName, remoteURL string) tea.Cmd {
+// coderParamsFetchedMsg is sent when template parameter fetching completes.
+type coderParamsFetchedMsg struct {
+	params  []coderbackend.RichParameter
+	presets []coderbackend.Preset
+	err     error
+}
+
+// fetchCoderParamsCmd fetches template parameters and presets asynchronously.
+func fetchCoderParamsCmd(templateName string) tea.Cmd {
+	return func() tea.Msg {
+		versionID, err := coderbackend.FetchActiveVersionID(templateName)
+		if err != nil {
+			return coderParamsFetchedMsg{err: err}
+		}
+
+		params, err := coderbackend.FetchRichParameters(versionID)
+		if err != nil {
+			return coderParamsFetchedMsg{err: err}
+		}
+
+		presets, _ := coderbackend.FetchPresets(versionID)
+		return coderParamsFetchedMsg{params: params, presets: presets}
+	}
+}
+
+func createInstanceCmd(fleetName, instanceName, remoteURL string, bt fleet.BackendType) tea.Cmd {
 	return func() tea.Msg {
 		self, err := os.Executable()
 		if err != nil {
 			return instanceCreateErrMsg{fleetName, instanceName, fmt.Errorf("os.Executable: %w", err)}
 		}
 
-		cmd := exec.Command(self, "_create-instance", fleetName, instanceName, remoteURL)
+		cmd := exec.Command(self, "_create-instance", fleetName, instanceName, remoteURL, string(bt))
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 		// Log output for debugging
