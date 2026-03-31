@@ -41,11 +41,27 @@ func renderStatus(s fleet.InstanceStatus) string {
 		return statusStoppedStyle.Render("stopped")
 	case fleet.StatusCreating:
 		return statusCreatingStyle.Render("creating")
+	case fleet.StatusStopping:
+		return statusCreatingStyle.Render("stopping")
+	case fleet.StatusStarting:
+		return statusCreatingStyle.Render("starting")
+	case fleet.StatusDeleting:
+		return statusCreatingStyle.Render("deleting")
 	case fleet.StatusFailed:
 		return errorStyle.Render("failed")
 	default:
 		return dimStyle.Render(string(s))
 	}
+}
+
+// isTransitional returns true for statuses that indicate an in-progress
+// background operation (shown with a spinner on the instance row).
+func isTransitional(s fleet.InstanceStatus) bool {
+	switch s {
+	case fleet.StatusCreating, fleet.StatusStopping, fleet.StatusStarting, fleet.StatusDeleting:
+		return true
+	}
+	return false
 }
 
 func renderGradient(text string) string {

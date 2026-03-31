@@ -378,6 +378,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.message = fmt.Sprintf("Failed to create %s: %v", key, msg.err)
 		return m, nil
 
+	case operationDoneMsg:
+		m.reload()
+		if msg.err != nil {
+			m.message = fmt.Sprintf("Error: %v", msg.err)
+		} else {
+			m.message = msg.message
+		}
+		return m, nil
+
 	case coderParamsFetchedMsg:
 		m.coderFetchingParams = false
 		if msg.err != nil {

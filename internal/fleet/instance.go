@@ -9,6 +9,9 @@ const (
 	StatusRunning  InstanceStatus = "running"
 	StatusStopped  InstanceStatus = "stopped"
 	StatusFailed   InstanceStatus = "failed"
+	StatusStopping InstanceStatus = "stopping"
+	StatusStarting InstanceStatus = "starting"
+	StatusDeleting InstanceStatus = "deleting"
 )
 
 // BackendType identifies which backend an instance uses.

@@ -50,14 +50,20 @@ func TestUpdateNormalStopShortcutStopsRunningInstance(t *testing.T) {
 	})
 	defer restore()
 
-	updated, _ := m.updateNormal(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
-	got := updated.(model)
+	_, cmd := m.updateNormal(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 
+	// Instance should be in transitional "stopping" status
+	if inst.Status != fleet.StatusStopping {
+		t.Fatalf("status = %q, want %q", inst.Status, fleet.StatusStopping)
+	}
+
+	// Execute the async command and check the result
+	msg := cmd().(operationDoneMsg)
 	if calledFleet != "alpha" || calledInstance != "agent-1" {
 		t.Fatalf("toggle called with %s/%s, want alpha/agent-1", calledFleet, calledInstance)
 	}
-	if got.message != "Stopped alpha/agent-1" {
-		t.Fatalf("message = %q, want %q", got.message, "Stopped alpha/agent-1")
+	if msg.message != "Stopped alpha/agent-1" {
+		t.Fatalf("message = %q, want %q", msg.message, "Stopped alpha/agent-1")
 	}
 }
 
@@ -84,11 +90,18 @@ func TestUpdateNormalStopShortcutStartsStoppedInstance(t *testing.T) {
 	})
 	defer restore()
 
-	updated, _ := m.updateNormal(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	updated, cmd := m.updateNormal(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 	got := updated.(model)
+	_ = got
 
-	if got.message != "Started alpha/agent-1" {
-		t.Fatalf("message = %q, want %q", got.message, "Started alpha/agent-1")
+	// Instance should be in transitional "starting" status
+	if inst.Status != fleet.StatusStarting {
+		t.Fatalf("status = %q, want %q", inst.Status, fleet.StatusStarting)
+	}
+
+	msg := cmd().(operationDoneMsg)
+	if msg.message != "Started alpha/agent-1" {
+		t.Fatalf("message = %q, want %q", msg.message, "Started alpha/agent-1")
 	}
 }
 
@@ -134,8 +147,8 @@ func TestUpdateNormalStopShortcutSkipsCreatingInstance(t *testing.T) {
 	if called {
 		t.Fatal("toggle should not be called for a creating instance")
 	}
-	if got.message != "Instance alpha/agent-1 is still creating" {
-		t.Fatalf("message = %q, want %q", got.message, "Instance alpha/agent-1 is still creating")
+	if got.message != "Instance alpha/agent-1 is creating" {
+		t.Fatalf("message = %q, want %q", got.message, "Instance alpha/agent-1 is creating")
 	}
 }
 

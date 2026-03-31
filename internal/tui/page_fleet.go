@@ -8,6 +8,7 @@ import (
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/gitutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/instanceops"
+	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -50,8 +51,8 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			key := r.fleetName + "/" + r.instance.Name
-			if r.instance.Status == fleet.StatusCreating {
-				m.message = fmt.Sprintf("Instance %s is still creating", key)
+			if isTransitional(r.instance.Status) {
+				m.message = fmt.Sprintf("Instance %s is %s", key, r.instance.Status)
 				break
 			}
 			if r.instance.Status == fleet.StatusFailed {
@@ -59,29 +60,17 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 
-			result, err := toggleInstanceStatus(r.fleetName, r.instance.Name)
-			if err != nil {
-				m.message = fmt.Sprintf("Could not toggle %s: %v", key, err)
-				break
+			// Set transitional status and save immediately
+			if r.instance.Status == fleet.StatusRunning {
+				r.instance.Status = fleet.StatusStopping
+			} else if r.instance.Status == fleet.StatusStopped {
+				r.instance.Status = fleet.StatusStarting
 			}
+			_ = state.Save(m.st)
+			m.buildRows()
 
-			m.reload()
-			switch result.Status {
-			case fleet.StatusStopped:
-				if result.Changed {
-					m.message = fmt.Sprintf("Stopped %s", key)
-				} else {
-					m.message = fmt.Sprintf("Instance %s is already stopped", key)
-				}
-			case fleet.StatusRunning:
-				if result.Changed {
-					m.message = fmt.Sprintf("Started %s", key)
-				} else {
-					m.message = fmt.Sprintf("Instance %s is already running", key)
-				}
-			default:
-				m.message = fmt.Sprintf("Instance %s is %s", key, result.Status)
-			}
+			fleetName, instName := r.fleetName, r.instance.Name
+			return m, toggleInstanceCmd(fleetName, instName)
 
 		case "d":
 			r := m.currentRow()
@@ -266,11 +255,11 @@ func (m model) viewFleetList() string {
 			listContent.WriteString("\n")
 		} else if r.kind == rowInstance {
 			inst := r.instance
-			key := r.fleetName + "/" + inst.Name
 
+			transitional := isTransitional(inst.Status)
 			var status string
-			if m.creating[key] {
-				status = m.spinner.View() + " " + statusCreatingStyle.Render("creating")
+			if transitional {
+				status = strings.TrimRight(m.spinner.View(), "\n") + " " + statusCreatingStyle.Render(string(inst.Status))
 			} else {
 				status = renderStatus(inst.Status)
 			}
@@ -286,7 +275,7 @@ func (m model) viewFleetList() string {
 				branchItem = dimStyle.Render("  " + branch)
 			}
 
-			if m.creating[key] {
+			if transitional {
 				listContent.WriteString(fmt.Sprintf("%s    %s %s",
 					cursor, paddedName, status,
 				))

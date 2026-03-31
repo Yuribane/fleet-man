@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -30,19 +29,17 @@ func (m model) updateConfirmDelete(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.buildRows()
 				m.message = fmt.Sprintf("Removed fleet %s", m.dialogFleet)
 			} else {
-				// Instance-level delete
+				// Instance-level delete (async with transitional status)
 				f, ok := m.st.Fleets[m.dialogFleet]
 				if ok {
 					inst, err := f.GetInstance(m.dialogInst)
 					if err == nil {
-						_ = m.instanceBackend(inst).Down(inst.ContainerID)
-						if inst.WorkspaceDir != "" {
-							_ = os.RemoveAll(inst.WorkspaceDir)
-						}
-						_ = f.RemoveInstance(inst.Name)
+						inst.Status = fleet.StatusDeleting
 						_ = state.Save(m.st)
 						m.buildRows()
-						m.message = fmt.Sprintf("Removed %s/%s", m.dialogFleet, m.dialogInst)
+						m.mode = viewNormal
+						dc := m.instanceBackend(inst)
+						return m, deleteInstanceCmd(dc, m.dialogFleet, m.dialogInst, inst.ContainerID, inst.WorkspaceDir)
 					}
 				}
 			}
@@ -62,13 +59,16 @@ func (m model) updateConfirmDeleteFleetWarn(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "y", "Y", "enter":
 			f, ok := m.st.Fleets[m.dialogFleet]
-			if ok {
+			if ok && len(f.Instances) > 0 {
+				// Mark all instances as deleting
 				for _, inst := range f.Instances {
-					_ = m.instanceBackend(inst).Down(inst.ContainerID)
-					if inst.WorkspaceDir != "" {
-						_ = os.RemoveAll(inst.WorkspaceDir)
-					}
+					inst.Status = fleet.StatusDeleting
 				}
+				_ = state.Save(m.st)
+				m.buildRows()
+				m.mode = viewNormal
+				return m, deleteFleetCmd(m.backends, m.dialogFleet, f.Instances)
+			} else if ok {
 				delete(m.st.Fleets, m.dialogFleet)
 				delete(m.collapsed, m.dialogFleet)
 				_ = state.Save(m.st)

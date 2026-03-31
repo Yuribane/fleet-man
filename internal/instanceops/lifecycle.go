@@ -40,9 +40,9 @@ func ToggleInstance(fleetName, instanceName string) (*Result, error) {
 	}
 
 	switch inst.Status {
-	case fleet.StatusRunning:
+	case fleet.StatusRunning, fleet.StatusStopping:
 		return transitionLoadedInstance(st, inst, fleetName, instanceName, fleet.StatusStopped)
-	case fleet.StatusStopped:
+	case fleet.StatusStopped, fleet.StatusStarting:
 		return transitionLoadedInstance(st, inst, fleetName, instanceName, fleet.StatusRunning)
 	default:
 		return nil, fmt.Errorf("instance %s/%s cannot be toggled from status %q", fleetName, instanceName, inst.Status)
@@ -78,14 +78,14 @@ func transitionLoadedInstance(st *state.State, inst *fleet.Instance, fleetName, 
 
 	switch targetStatus {
 	case fleet.StatusStopped:
-		if inst.Status != fleet.StatusRunning {
+		if inst.Status != fleet.StatusRunning && inst.Status != fleet.StatusStopping {
 			return nil, fmt.Errorf("instance %s/%s cannot be stopped from status %q", fleetName, instanceName, inst.Status)
 		}
 		if err := dc.Stop(inst.ContainerID); err != nil {
 			return nil, fmt.Errorf("stop instance %s/%s: %w", fleetName, instanceName, err)
 		}
 	case fleet.StatusRunning:
-		if inst.Status != fleet.StatusStopped {
+		if inst.Status != fleet.StatusStopped && inst.Status != fleet.StatusStarting {
 			return nil, fmt.Errorf("instance %s/%s cannot be started from status %q", fleetName, instanceName, inst.Status)
 		}
 		if err := dc.Start(inst.ContainerID); err != nil {

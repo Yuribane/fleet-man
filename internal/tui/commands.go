@@ -63,6 +63,89 @@ func fetchStatsCmd(dc backend.Backend, ids []string, sessions map[string]string,
 	}
 }
 
+// operationDoneMsg is sent when a background instance operation completes.
+type operationDoneMsg struct {
+	fleet    string
+	instance string
+	message  string
+	err      error
+}
+
+// toggleInstanceCmd runs stop/start in the background.
+func toggleInstanceCmd(fleetName, instanceName string) tea.Cmd {
+	toggle := toggleInstanceStatus // capture for goroutine
+	return func() tea.Msg {
+		result, err := toggle(fleetName, instanceName)
+		if err != nil {
+			return operationDoneMsg{fleetName, instanceName, "", err}
+		}
+		key := fleetName + "/" + instanceName
+		var msg string
+		switch result.Status {
+		case fleet.StatusStopped:
+			msg = fmt.Sprintf("Stopped %s", key)
+		case fleet.StatusRunning:
+			msg = fmt.Sprintf("Started %s", key)
+		default:
+			msg = fmt.Sprintf("Instance %s is %s", key, result.Status)
+		}
+		return operationDoneMsg{fleetName, instanceName, msg, nil}
+	}
+}
+
+// deleteInstanceCmd runs instance deletion in the background.
+func deleteInstanceCmd(dc backend.Backend, fleetName, instanceName, containerID, wsDir string) tea.Cmd {
+	return func() tea.Msg {
+		_ = dc.Down(containerID)
+		if wsDir != "" {
+			_ = os.RemoveAll(wsDir)
+		}
+		st, err := state.Load()
+		if err == nil {
+			if f, ok := st.Fleets[fleetName]; ok {
+				_ = f.RemoveInstance(instanceName)
+				_ = state.Save(st)
+			}
+		}
+		key := fleetName + "/" + instanceName
+		return operationDoneMsg{fleetName, instanceName, fmt.Sprintf("Removed %s", key), nil}
+	}
+}
+
+// deleteFleetCmd runs fleet destruction in the background.
+func deleteFleetCmd(backends map[fleet.BackendType]backend.Backend, fleetName string, instances []*fleet.Instance) tea.Cmd {
+	// Snapshot what we need — don't capture model
+	type target struct {
+		dc          backend.Backend
+		containerID string
+		wsDir       string
+	}
+	var targets []target
+	for _, inst := range instances {
+		bt := inst.Backend
+		if bt == "" {
+			bt = fleet.BackendDevcontainer
+		}
+		targets = append(targets, target{backends[bt], inst.ContainerID, inst.WorkspaceDir})
+	}
+	return func() tea.Msg {
+		for _, t := range targets {
+			if t.dc != nil {
+				_ = t.dc.Down(t.containerID)
+			}
+			if t.wsDir != "" {
+				_ = os.RemoveAll(t.wsDir)
+			}
+		}
+		st, err := state.Load()
+		if err == nil {
+			delete(st.Fleets, fleetName)
+			_ = state.Save(st)
+		}
+		return operationDoneMsg{fleetName, "", fmt.Sprintf("Removed fleet %s", fleetName), nil}
+	}
+}
+
 // coderParamsFetchedMsg is sent when template parameter fetching completes.
 type coderParamsFetchedMsg struct {
 	params  []coderbackend.RichParameter
