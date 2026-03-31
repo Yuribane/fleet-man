@@ -1,6 +1,7 @@
 package coder
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -171,12 +172,21 @@ func (b *CoderBackend) Stop(containerID string) error {
 	return cmd.Run()
 }
 
-// Start starts a stopped Coder workspace.
+// Start starts a stopped Coder workspace. If the workspace contains a
+// nested devcontainer, it is re-provisioned after the agent is ready.
 func (b *CoderBackend) Start(containerID string) error {
-	cmd := exec.Command("coder", "start", "--yes", workspaceName(containerID))
+	wsName := workspaceName(containerID)
+	cmd := exec.Command("coder", "start", "--yes", wsName)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	// Wait for agent readiness then restart nested devcontainer if present.
+	remoteDir, _ := b.waitForAgent(wsName)
+	b.maybeDevcontainerUp(wsName, remoteDir)
+	return nil
 }
 
 // Exec runs an interactive command inside a Coder workspace via SSH.
@@ -342,29 +352,57 @@ func (b *CoderBackend) waitForAgent(wsName string) (string, error) {
 // workspace folder and runs `devcontainer up` inside the coder workspace if
 // found. This handles the common "nested devcontainer" pattern where a coder
 // template provisions a VM/pod and the repo inside contains a devcontainer.
+//
+// Each individual SSH probe has a 15s timeout so a hanging connection
+// cannot consume the full retry budget. The overall deadline is 3 minutes.
 func (b *CoderBackend) maybeDevcontainerUp(wsName, remoteDir string) {
-	// Find repos with .devcontainer under the workspace directory.
-	// Use 2>/dev/null to suppress permission errors (e.g. lost+found)
-	// that would cause a non-zero exit despite valid output.
-	findCmd := exec.Command("coder", sshArgs(wsName, []string{
-		"find", remoteDir, "-maxdepth", "2", "-name", ".devcontainer", "-type", "d", "-print", "-quit",
-	})...)
-	out, _ := findCmd.Output() // ignore exit code — permission errors are expected
+	deadline := time.Now().Add(3 * time.Minute)
+	const cmdTimeout = 15 * time.Second
+	var wsFolder string
 
-	dcPath := strings.TrimSpace(string(out))
-	if dcPath == "" {
-		return
+	// Retry finding .devcontainer — the repo clone may still be in progress.
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		findCmd := exec.CommandContext(ctx, "coder", sshArgs(wsName, []string{
+			"find", remoteDir, "-maxdepth", "2", "-name", ".devcontainer", "-type", "d", "-print", "-quit",
+		})...)
+		out, _ := findCmd.Output()
+		cancel()
+
+		// Only trust the output if it looks like an absolute path.
+		// Discard connection messages or error text from coder ssh.
+		dcPath := strings.TrimSpace(string(out))
+		if strings.HasPrefix(dcPath, "/") {
+			lines := strings.Split(dcPath, "\n")
+			candidate := strings.TrimSuffix(strings.TrimSpace(lines[0]), "/.devcontainer")
+			if strings.HasPrefix(candidate, "/") {
+				wsFolder = candidate
+				break
+			}
+		}
+		time.Sleep(3 * time.Second)
 	}
 
-	// Take the first match and derive the workspace folder (parent of .devcontainer)
-	lines := strings.Split(dcPath, "\n")
-	wsFolder := strings.TrimSuffix(strings.TrimSpace(lines[0]), "/.devcontainer")
 	if wsFolder == "" {
 		return
 	}
 
-	// Run devcontainer up inside the coder workspace
-	dcUp := exec.Command("coder", sshArgs(wsName, []string{
+	// Wait for Docker to be ready before running devcontainer up.
+	for time.Now().Before(deadline) {
+		ctx, cancel := context.WithTimeout(context.Background(), cmdTimeout)
+		check := exec.CommandContext(ctx, "coder", sshArgs(wsName, []string{"docker", "info"})...)
+		err := check.Run()
+		cancel()
+		if err == nil {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	// Run devcontainer up inside the coder workspace (longer timeout — build can take a while).
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	dcUp := exec.CommandContext(ctx, "coder", sshArgs(wsName, []string{
 		"devcontainer", "up", "--workspace-folder", wsFolder,
 	})...)
 	if b.verbose {
