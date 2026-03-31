@@ -3,7 +3,7 @@ package tui
 import (
 	"time"
 
-	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
+	"github.com/BenjaminBenetti/fleet-man/internal/backend"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 )
 
@@ -64,7 +64,7 @@ func (t *ActivityTracker) Tool(containerID string) state.AgentTool {
 //     working (≥3 chars changed within 12s) or waiting
 //
 // Containers not in expectedIDs are cleaned up.
-func (t *ActivityTracker) Update(captures map[string]devcontainer.ScreenCapture, probes map[string]string, expectedIDs []string, now time.Time) {
+func (t *ActivityTracker) Update(captures map[string]backend.ScreenCapture, probes map[string]string, expectedIDs []string, now time.Time) {
 	newStates := make(map[string]agentState, len(expectedIDs))
 	newTools := make(map[string]state.AgentTool, len(expectedIDs))
 	newPrev := make(map[string]string, len(expectedIDs))

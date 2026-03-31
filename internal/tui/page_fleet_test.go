@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
+	"github.com/BenjaminBenetti/fleet-man/internal/backend"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/instanceops"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
@@ -222,7 +222,7 @@ func TestViewFleetListShowsAgentWorkingIndicator(t *testing.T) {
 			map[string]agentState{"abc123": agentWorking},
 			map[string]state.AgentTool{"abc123": state.AgentToolClaude},
 		),
-		stats: map[string]*devcontainer.ContainerStats{},
+		stats: map[string]*backend.ContainerStats{},
 		rows: []row{
 			{kind: rowFleetHeader, fleetName: "alpha"},
 			{kind: rowInstance, fleetName: "alpha", instance: inst},
@@ -260,7 +260,7 @@ func TestViewFleetListShowsAgentWaitingIndicator(t *testing.T) {
 			map[string]agentState{"abc123": agentWaiting},
 			map[string]state.AgentTool{"abc123": state.AgentToolClaude},
 		),
-		stats: map[string]*devcontainer.ContainerStats{},
+		stats: map[string]*backend.ContainerStats{},
 		rows: []row{
 			{kind: rowFleetHeader, fleetName: "alpha"},
 			{kind: rowInstance, fleetName: "alpha", instance: inst},
@@ -298,7 +298,7 @@ func TestViewFleetListShowsAgentOffIndicator(t *testing.T) {
 			map[string]agentState{"abc123": agentNotRunning},
 			nil,
 		),
-		stats: map[string]*devcontainer.ContainerStats{},
+		stats: map[string]*backend.ContainerStats{},
 		rows: []row{
 			{kind: rowFleetHeader, fleetName: "alpha"},
 			{kind: rowInstance, fleetName: "alpha", instance: inst},
@@ -336,7 +336,7 @@ func TestViewFleetListNoAgentIndicatorForStoppedInstance(t *testing.T) {
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
 		activity: NewActivityTracker(),
-		stats:    map[string]*devcontainer.ContainerStats{},
+		stats:    map[string]*backend.ContainerStats{},
 		rows: []row{
 			{kind: rowFleetHeader, fleetName: "alpha"},
 			{kind: rowInstance, fleetName: "alpha", instance: inst},

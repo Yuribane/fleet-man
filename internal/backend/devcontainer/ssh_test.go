@@ -107,7 +107,7 @@ func TestSSHExecArgs_NoEnvVar(t *testing.T) {
 
 func TestExecArgs_WithSSH(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "/some/path")
-	args := ExecArgs("/workspace", []string{"bash"})
+	args := execArgs("/workspace", []string{"bash"})
 	expected := []string{
 		"exec", "--workspace-folder", "/workspace",
 		"--remote-env", "SSH_AUTH_SOCK=" + containerSSHSocketPath,
@@ -125,7 +125,7 @@ func TestExecArgs_WithSSH(t *testing.T) {
 
 func TestExecArgs_WithoutSSH(t *testing.T) {
 	t.Setenv("SSH_AUTH_SOCK", "")
-	args := ExecArgs("/workspace", []string{"bash"})
+	args := execArgs("/workspace", []string{"bash"})
 	expected := []string{"exec", "--workspace-folder", "/workspace", "bash"}
 	if len(args) != len(expected) {
 		t.Fatalf("got %v, want %v", args, expected)

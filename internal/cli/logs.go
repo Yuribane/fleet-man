@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
+	devcontainerbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/devcontainer"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/spf13/cobra"
@@ -37,7 +37,7 @@ func newLogsCmd() *cobra.Command {
 				return err
 			}
 
-			dc := devcontainer.NewClient()
+			dc := devcontainerbackend.New()
 			return dc.Logs(inst.ContainerID, follow)
 		},
 	}

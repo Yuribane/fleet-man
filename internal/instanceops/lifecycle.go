@@ -3,7 +3,7 @@ package instanceops
 import (
 	"fmt"
 
-	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
+	devcontainerbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/devcontainer"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 )
@@ -14,7 +14,7 @@ type containerController interface {
 }
 
 var newClient = func() containerController {
-	return devcontainer.NewClient()
+	return devcontainerbackend.New()
 }
 
 type Result struct {

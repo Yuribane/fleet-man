@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	tea "github.com/charmbracelet/bubbletea"
@@ -36,8 +35,7 @@ func (m model) updateConfirmDelete(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if ok {
 					inst, err := f.GetInstance(m.dialogInst)
 					if err == nil {
-						dc := devcontainer.NewClient()
-						_ = dc.Down(inst.ContainerID)
+						_ = m.dc.Down(inst.ContainerID)
 						if inst.WorkspaceDir != "" {
 							_ = os.RemoveAll(inst.WorkspaceDir)
 						}
@@ -65,9 +63,8 @@ func (m model) updateConfirmDeleteFleetWarn(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "y", "Y", "enter":
 			f, ok := m.st.Fleets[m.dialogFleet]
 			if ok {
-				dc := devcontainer.NewClient()
 				for _, inst := range f.Instances {
-					_ = dc.Down(inst.ContainerID)
+					_ = m.dc.Down(inst.ContainerID)
 					if inst.WorkspaceDir != "" {
 						_ = os.RemoveAll(inst.WorkspaceDir)
 					}

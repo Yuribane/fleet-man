@@ -1,10 +1,14 @@
 package devcontainer
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/BenjaminBenetti/fleet-man/internal/backend"
+)
 
 func TestScreenCaptureZeroValue(t *testing.T) {
 	// A zero-value ScreenCapture should indicate failure (OK=false).
-	var sc ScreenCapture
+	var sc backend.ScreenCapture
 	if sc.OK {
 		t.Fatal("zero-value ScreenCapture should have OK=false")
 	}

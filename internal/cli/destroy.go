@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
+	devcontainerbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/devcontainer"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -27,7 +27,7 @@ func newDestroyCmd() *cobra.Command {
 				return fmt.Errorf("fleet %q not found", fleetName)
 			}
 
-			dc := devcontainer.NewClient()
+			dc := devcontainerbackend.New()
 			for _, inst := range f.Instances {
 				fmt.Printf("Stopping %s/%s...\n", fleetName, inst.Name)
 				if err := dc.Down(inst.ContainerID); err != nil {

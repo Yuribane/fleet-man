@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
+	"github.com/BenjaminBenetti/fleet-man/internal/backend"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -32,8 +32,8 @@ type instanceCreateErrMsg struct {
 type pollCreatingTickMsg struct{}
 
 type statsMsg struct {
-	stats        map[string]*devcontainer.ContainerStats
-	screens      map[string]devcontainer.ScreenCapture
+	stats        map[string]*backend.ContainerStats
+	screens      map[string]backend.ScreenCapture
 	probes       map[string]string // containerID → detected tool name (from ps aux)
 	containerIDs []string          // containers that were probed (for staleness detection)
 }
@@ -46,7 +46,7 @@ func pollCreatingCmd() tea.Cmd {
 	})
 }
 
-func fetchStatsCmd(dc *devcontainer.Client, ids []string, sessions map[string]string, delay bool) tea.Cmd {
+func fetchStatsCmd(dc backend.Backend, ids []string, sessions map[string]string, delay bool) tea.Cmd {
 	return func() tea.Msg {
 		if delay {
 			time.Sleep(3 * time.Second)
@@ -55,8 +55,8 @@ func fetchStatsCmd(dc *devcontainer.Client, ids []string, sessions map[string]st
 			return statsMsg{}
 		}
 		stats, _ := dc.Stats(ids)
-		screens := dc.CaptureScreens(sessions)
-		probes := dc.AgentToolProbes(ids)
+		screens := backend.CaptureScreens(dc, sessions)
+		probes := backend.AgentToolProbes(dc, ids)
 		return statsMsg{stats: stats, screens: screens, probes: probes, containerIDs: ids}
 	}
 }

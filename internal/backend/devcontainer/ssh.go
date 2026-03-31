@@ -50,10 +50,9 @@ func sshExecArgs() []string {
 	}
 }
 
-// ExecArgs builds the full argument list for `devcontainer exec` including
-// SSH agent forwarding. Intended for callers that construct devcontainer
-// commands directly rather than through Client.Exec.
-func ExecArgs(workspaceDir string, command []string) []string {
+// execArgs builds the full argument list for `devcontainer exec` including
+// SSH agent forwarding.
+func execArgs(workspaceDir string, command []string) []string {
 	args := []string{"exec", "--workspace-folder", workspaceDir}
 	args = append(args, sshExecArgs()...)
 	args = append(args, command...)

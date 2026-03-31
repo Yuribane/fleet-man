@@ -100,22 +100,20 @@ func descenderFor(ch rune, width int) string {
 	return descender
 }
 
-// execWithBanner returns an *exec.Cmd that clears the screen, prints a banner, then execs the given command.
-func execWithBanner(banner string, name string, args ...string) *exec.Cmd {
+// execWithBannerCmd returns an *exec.Cmd that clears the screen, prints a banner, then execs the given command.
+func execWithBannerCmd(banner string, cmd *exec.Cmd) *exec.Cmd {
 	// Write the banner to a temp file so the shell can cat it
 	f, err := os.CreateTemp("", "fleet-banner-*.txt")
 	if err != nil {
-		return exec.Command(name, args...)
+		return cmd
 	}
 	fmt.Fprintln(f, banner)
 	fmt.Fprintln(f)
 	f.Close()
 
 	// Build a shell command: clear, print banner, exec into container
-	shellArgs := []string{name}
-	shellArgs = append(shellArgs, args...)
-	quoted := make([]string, len(shellArgs))
-	for i, a := range shellArgs {
+	quoted := make([]string, len(cmd.Args))
+	for i, a := range cmd.Args {
 		quoted[i] = "'" + strings.ReplaceAll(a, "'", "'\\''") + "'"
 	}
 

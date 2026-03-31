@@ -5,7 +5,6 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/gitutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/instanceops"
@@ -143,9 +142,9 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			banner := renderGradient(nameToBanner(inst.Name))
 			banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
-			execArgs := devcontainer.ExecArgs(inst.WorkspaceDir, shellCommand(m.cfg, inst.Name))
+			cmd := m.dc.ExecCommand(inst.WorkspaceDir, shellCommand(m.cfg, inst.Name))
 			return m, tea.ExecProcess(
-				execWithBanner(banner, "devcontainer", execArgs...),
+				execWithBannerCmd(banner, cmd),
 				func(err error) tea.Msg { return execDoneMsg{err} },
 			)
 
@@ -155,8 +154,8 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = "Select an instance"
 				break
 			}
-			execArgs := devcontainer.ExecArgs(inst.WorkspaceDir, freshShellCommand(m.cfg))
-			err := openInTerminal(append([]string{"devcontainer"}, execArgs...))
+			cmd := m.dc.ExecCommand(inst.WorkspaceDir, freshShellCommand(m.cfg))
+			err := openInTerminal(cmd.Args)
 			if err != nil {
 				m.message = fmt.Sprintf("Could not open terminal: %v", err)
 			} else {
@@ -170,10 +169,13 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			r := m.rows[m.cursor]
-			hexPath := fmt.Sprintf("%x", inst.WorkspaceDir)
-			folderURI := fmt.Sprintf("vscode-remote://dev-container+%s/workspaces/%s", hexPath, r.fleetName)
-			cmd := exec.Command("code", "--folder-uri", folderURI)
-			if err := cmd.Run(); err != nil {
+			uri, ok := m.dc.EditorURI(inst.WorkspaceDir, r.fleetName)
+			if !ok {
+				m.message = "Editor integration not supported by this backend"
+				break
+			}
+			codeCmd := exec.Command("code", "--folder-uri", uri)
+			if err := codeCmd.Run(); err != nil {
 				m.message = fmt.Sprintf("VS Code error: %v", err)
 			} else {
 				m.message = fmt.Sprintf("Opened VS Code for %s", inst.Name)
@@ -186,7 +188,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			return m, tea.ExecProcess(
-				exec.Command("docker", "logs", inst.ContainerID),
+				m.dc.LogsCommand(inst.ContainerID, false),
 				func(err error) tea.Msg { return execDoneMsg{err} },
 			)
 		}

@@ -1,10 +1,10 @@
 package cli
 
 import (
-	"encoding/hex"
 	"fmt"
 	"os/exec"
 
+	devcontainerbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/devcontainer"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/spf13/cobra"
@@ -36,12 +36,14 @@ func newCodeCmd() *cobra.Command {
 				return err
 			}
 
-			// VS Code remote containers uses hex-encoded path
-			hexPath := hex.EncodeToString([]byte(inst.WorkspaceDir))
-			folderURI := fmt.Sprintf("vscode-remote://dev-container+%s/workspaces/%s", hexPath, target.Fleet)
+			dc := devcontainerbackend.New()
+			uri, ok := dc.EditorURI(inst.WorkspaceDir, target.Fleet)
+			if !ok {
+				return fmt.Errorf("editor integration not supported by this backend")
+			}
 
 			fmt.Printf("Opening VS Code for %s/%s...\n", target.Fleet, target.Instance)
-			vscode := exec.Command("code", "--folder-uri", folderURI)
+			vscode := exec.Command("code", "--folder-uri", uri)
 			return vscode.Run()
 		},
 	}

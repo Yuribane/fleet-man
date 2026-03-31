@@ -6,7 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
+	"github.com/BenjaminBenetti/fleet-man/internal/backend"
+	devcontainerbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/devcontainer"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -65,8 +66,8 @@ type model struct {
 	spinner  spinner.Model
 	creating map[string]bool // "fleet/instance" keys currently being created
 
-	dc       *devcontainer.Client                    // shared client (caches container user)
-	stats    map[string]*devcontainer.ContainerStats // containerID → stats
+	dc       backend.Backend                    // shared backend (caches container user)
+	stats    map[string]*backend.ContainerStats // containerID → stats
 	activity *ActivityTracker                        // agent working/waiting/idle detection
 
 	settingsCursor  int             // 0=tool, 1=repo URL, 2=install script
@@ -93,8 +94,8 @@ func newModel() model {
 	m := model{
 		collapsed:     make(map[string]bool),
 		creating:      make(map[string]bool),
-		dc:       devcontainer.NewClient(),
-		stats:    make(map[string]*devcontainer.ContainerStats),
+		dc:       devcontainerbackend.New(),
+		stats:    make(map[string]*backend.ContainerStats),
 		activity: NewActivityTracker(),
 		textInput:     ti,
 		spinner:       sp,

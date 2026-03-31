@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/BenjaminBenetti/fleet-man/internal/devcontainer"
+	devcontainerbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/devcontainer"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 )
@@ -39,8 +39,7 @@ func Run(fleetName, instanceName, remoteURL string, verbose bool) error {
 		}
 	}
 
-	dc := devcontainer.NewClient()
-	dc.Verbose = verbose
+	dc := devcontainerbackend.New(devcontainerbackend.WithVerbose(verbose))
 	result, err := dc.Up(wsDir)
 	if err != nil {
 		setFailed(fleetName, instanceName, err)
