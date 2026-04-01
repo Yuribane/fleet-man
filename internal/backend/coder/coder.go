@@ -369,16 +369,18 @@ func (b *CoderBackend) maybeDevcontainerUp(wsName, remoteDir string) {
 		out, _ := findCmd.Output()
 		cancel()
 
-		// Only trust the output if it looks like an absolute path.
-		// Discard connection messages or error text from coder ssh.
-		dcPath := strings.TrimSpace(string(out))
-		if strings.HasPrefix(dcPath, "/") {
-			lines := strings.Split(dcPath, "\n")
-			candidate := strings.TrimSuffix(strings.TrimSpace(lines[0]), "/.devcontainer")
-			if strings.HasPrefix(candidate, "/") {
-				wsFolder = candidate
+		// coder ssh may mix remote stderr into stdout (e.g. find's
+		// "Permission denied" on /workspaces/lost+found). Scan all
+		// lines for one that looks like a valid absolute path.
+		for _, line := range strings.Split(string(out), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "/") && strings.HasSuffix(line, "/.devcontainer") {
+				wsFolder = strings.TrimSuffix(line, "/.devcontainer")
 				break
 			}
+		}
+		if wsFolder != "" {
+			break
 		}
 		time.Sleep(3 * time.Second)
 	}
