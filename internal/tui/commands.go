@@ -93,6 +93,22 @@ func toggleInstanceCmd(fleetName, instanceName string) tea.Cmd {
 	}
 }
 
+type dotfilesAutoInstallDoneMsg struct {
+	instance string
+	err      error
+}
+
+func autoInstallDotfilesCmd(dc backend.Backend, workspaceDir, instanceKey string, cfg *state.Config) tea.Cmd {
+	return func() tea.Msg {
+		setup := dotfilesSetupScript(cfg)
+		if setup == "" {
+			return dotfilesAutoInstallDoneMsg{instance: instanceKey}
+		}
+		cmd := dc.ExecCommand(workspaceDir, []string{"sh", "-c", setup})
+		return dotfilesAutoInstallDoneMsg{instance: instanceKey, err: cmd.Run()}
+	}
+}
+
 // deleteInstanceCmd runs instance deletion in the background.
 func deleteInstanceCmd(dc backend.Backend, fleetName, instanceName, containerID, wsDir string) tea.Cmd {
 	return func() tea.Msg {

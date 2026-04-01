@@ -24,9 +24,10 @@ func sanitizeSessionName(name string) string {
 	return s
 }
 
-// dotfilesSetup returns a shell snippet that clones and installs dotfiles,
-// or an empty string if dotfiles are not configured.
-func dotfilesSetup(cfg *state.Config) string {
+// dotfilesSetupScript returns the raw shell snippet for dotfiles installation
+// regardless of the auto-install setting. Returns empty if dotfiles are not
+// configured (repo URL or install script missing).
+func dotfilesSetupScript(cfg *state.Config) string {
 	if cfg == nil {
 		return ""
 	}
@@ -44,6 +45,16 @@ func dotfilesSetup(cfg *state.Config) string {
 		`if [ ! -d ~/dotfiles ]; then echo '==> Cloning dotfiles...'; GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new' git clone %s ~/dotfiles && (cd ~/dotfiles && setsid sh %s); fi; `,
 		shQuote(repo), shQuote(script),
 	)
+}
+
+// dotfilesSetup returns a shell snippet that clones and installs dotfiles,
+// or an empty string if dotfiles are not configured or auto-install is enabled
+// (in which case dotfiles are installed in the background on instance creation).
+func dotfilesSetup(cfg *state.Config) string {
+	if cfg != nil && cfg.DotfilesSettings.AutoInstall {
+		return ""
+	}
+	return dotfilesSetupScript(cfg)
 }
 
 // shellCommand returns the command to run inside a devcontainer with a

@@ -189,6 +189,43 @@ func (m model) updateAddInstance(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m model) updateTagInstance(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter":
+			tag := strings.TrimSpace(m.textInput.Value())
+
+			f, ok := m.st.Fleets[m.dialogFleet]
+			if ok {
+				if inst, err := f.GetInstance(m.dialogInst); err == nil {
+					inst.Tag = tag
+					_ = state.Save(m.st)
+				}
+			}
+
+			m.mode = viewNormal
+			m.textInput.Blur()
+			if tag == "" {
+				m.message = fmt.Sprintf("Cleared tag for %s/%s", m.dialogFleet, m.dialogInst)
+			} else {
+				m.message = fmt.Sprintf("Tagged %s/%s: %s", m.dialogFleet, m.dialogInst, tag)
+			}
+			return m, nil
+
+		case "esc", "ctrl+c":
+			m.mode = viewNormal
+			m.textInput.Blur()
+			m.message = "Cancelled"
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
 func (m model) updateAddFleet(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:

@@ -31,4 +31,5 @@ type Instance struct {
 	Status      InstanceStatus `json:"status"`
 	Error       string         `json:"error,omitempty"`
 	Backend     BackendType    `json:"backend,omitempty"`
+	Tag         string         `json:"tag,omitempty"`
 }
