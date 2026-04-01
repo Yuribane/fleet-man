@@ -116,12 +116,16 @@ func (b *CoderBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 	// Detect and provision nested devcontainer if present.
 	b.maybeDevcontainerUp(name, remoteDir)
 
-	// Check if a devcontainer agent is now available. If so, use
-	// "workspace.agent" as the container ID so all SSH calls route
-	// to the devcontainer instead of the outer workspace.
+	// Wait for the devcontainer agent to register and connect.
+	// After devcontainer up finishes there is a brief delay before
+	// the coder agent appears as "connected" in the API.
 	sshTarget := name
-	if dcAgent := b.findDevcontainerAgent(name); dcAgent != "" {
-		sshTarget = name + "." + dcAgent
+	for i := 0; i < 20; i++ {
+		if dcAgent := b.findDevcontainerAgent(name); dcAgent != "" {
+			sshTarget = name + "." + dcAgent
+			break
+		}
+		time.Sleep(3 * time.Second)
 	}
 
 	return &backend.UpResult{

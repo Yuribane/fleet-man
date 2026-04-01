@@ -459,13 +459,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.message = fmt.Sprintf("Instance %s is running (container: %s)",
 							key, inst.ContainerID[:min(12, len(inst.ContainerID))])
 						if m.cfg != nil && m.cfg.DotfilesSettings.AutoInstall {
-							bt := inst.Backend
-							if bt == "" {
-								bt = fleet.BackendDevcontainer
-							}
-							if dc := m.backends[bt]; dc != nil {
-								cmds = append(cmds, autoInstallDotfilesCmd(dc, inst.WorkspaceDir, key, m.cfg))
-							}
+							dc := m.backendFor(inst.Backend)
+							cmds = append(cmds, autoInstallDotfilesCmd(dc, inst.WorkspaceDir, key, m.cfg))
 						}
 					case fleet.StatusFailed:
 						delete(m.creating, key)
