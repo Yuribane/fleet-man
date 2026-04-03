@@ -10,6 +10,7 @@ import (
 	"github.com/BenjaminBenetti/fleet-man/internal/backend"
 	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	coderbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/coder"
+	"github.com/BenjaminBenetti/fleet-man/internal/dotfiles"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 )
@@ -58,6 +59,19 @@ func Run(fleetName, instanceName, remoteURL string, verbose bool, bt fleet.Backe
 	if err != nil {
 		setFailed(fleetName, instanceName, err)
 		return err
+	}
+
+	// Auto-install dotfiles while still in "creating" state so the
+	// instance does not appear "running" before dotfiles are ready.
+	cfg, _ := state.LoadConfig()
+	if cfg != nil && cfg.DotfilesSettings.AutoInstall {
+		if script := dotfiles.SetupScript(cfg); script != "" {
+			cmd := dc.ExecCommand(wsDir, []string{"sh", "-c", script})
+			if err := cmd.Run(); err != nil {
+				setFailed(fleetName, instanceName, fmt.Errorf("dotfiles install: %w", err))
+				return fmt.Errorf("dotfiles install: %w", err)
+			}
+		}
 	}
 
 	// Success: update state

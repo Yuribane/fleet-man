@@ -433,12 +433,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.message = fmt.Sprintf("Loaded %d parameters, %d presets", len(newParams), len(m.coderPresets))
 		return m, nil
 
-	case dotfilesAutoInstallDoneMsg:
-		if msg.err != nil {
-			m.message = fmt.Sprintf("Auto-install dotfiles failed on %s: %v", msg.instance, msg.err)
-		}
-		return m, nil
-
 	case pollCreatingTickMsg:
 		if len(m.creating) == 0 {
 			return m, nil
@@ -458,10 +452,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						delete(m.creating, key)
 						m.message = fmt.Sprintf("Instance %s is running (container: %s)",
 							key, inst.ContainerID[:min(12, len(inst.ContainerID))])
-						if m.cfg != nil && m.cfg.DotfilesSettings.AutoInstall {
-							dc := m.backendFor(inst.Backend)
-							cmds = append(cmds, autoInstallDotfilesCmd(dc, inst.WorkspaceDir, key, m.cfg))
-						}
 					case fleet.StatusFailed:
 						delete(m.creating, key)
 						m.message = fmt.Sprintf("Failed to create %s: %s", key, inst.Error)
