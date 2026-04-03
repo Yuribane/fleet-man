@@ -291,7 +291,7 @@ func (m model) viewFleetList() string {
 
 			backendIcon := "⬡" // devcontainer
 			if inst.Backend == fleet.BackendCoder {
-				backendIcon = "λ"
+				backendIcon = "⌨"
 			}
 			branchItem := ""
 			if branch := resolveWorkspaceBranch(inst.WorkspaceDir); branch != "" {
