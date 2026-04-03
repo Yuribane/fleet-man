@@ -291,7 +291,11 @@ func (m model) viewFleetList() string {
 
 			branchItem := ""
 			if branch := resolveWorkspaceBranch(inst.WorkspaceDir); branch != "" {
-				branchItem = dimStyle.Render("  " + branch)
+				backendIcon := " ⬡" // devcontainer
+				if inst.Backend == fleet.BackendCoder {
+					backendIcon = " ⌨"
+				}
+				branchItem = dimStyle.Render("  " + branch + backendIcon)
 			}
 
 			if transitional {
