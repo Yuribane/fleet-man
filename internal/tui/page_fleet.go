@@ -289,13 +289,15 @@ func (m model) viewFleetList() string {
 				paddedName = selectedStyle.Render(paddedName)
 			}
 
+			backendIcon := "⬡" // devcontainer
+			if inst.Backend == fleet.BackendCoder {
+				backendIcon = "λ"
+			}
 			branchItem := ""
 			if branch := resolveWorkspaceBranch(inst.WorkspaceDir); branch != "" {
-				backendIcon := " ⬡" // devcontainer
-				if inst.Backend == fleet.BackendCoder {
-					backendIcon = " λ"
-				}
-				branchItem = dimStyle.Render("  " + branch + backendIcon)
+				branchItem = dimStyle.Render("  " + branch + " " + backendIcon)
+			} else {
+				branchItem = dimStyle.Render("  " + backendIcon)
 			}
 
 			if transitional {
