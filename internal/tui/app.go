@@ -2,12 +2,14 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backend"
 	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
+	"github.com/BenjaminBenetti/fleet-man/internal/deps"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -25,6 +27,7 @@ const (
 	viewAddInstance
 	viewAddFleet
 	viewTagInstance
+	viewDepsCheck
 )
 
 type pageMode int
@@ -79,6 +82,8 @@ type model struct {
 	coderPresets       []string // available preset names (in-memory, from API)
 	coderFetchingParams bool    // true while fetching template parameters
 
+	depsResult []deps.Dependency // set on first-ever startup
+
 	message  string
 	quitting bool
 	width    int
@@ -107,6 +112,16 @@ func newModel() model {
 		spinner:       sp,
 		settingsInput: si,
 	}
+	// On first-ever startup, check for required binaries and show results
+	// if anything is missing. "First startup" = the ~/.fleet/ dir doesn't exist.
+	if _, err := os.Stat(state.FleetDir()); os.IsNotExist(err) {
+		result := deps.Check()
+		if deps.HasMissing(result) {
+			m.depsResult = result
+			m.mode = viewDepsCheck
+		}
+	}
+
 	m.reload()
 
 	// Resume tracking any instances still in "creating" state from a previous session
@@ -475,6 +490,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) updateByMode(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.mode == viewDepsCheck {
+		return m.updateDepsCheck(msg)
+	}
+
 	if m.page == pageSettings {
 		return m.updateSettings(msg)
 	}
@@ -498,6 +517,10 @@ func (m model) updateByMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	if m.quitting {
 		return ""
+	}
+
+	if m.mode == viewDepsCheck {
+		return m.viewDepsCheck()
 	}
 
 	if m.page == pageSettings {
