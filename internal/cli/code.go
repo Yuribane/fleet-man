@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
@@ -42,6 +43,8 @@ func newCodeCmd() *cobra.Command {
 			if inst.Backend == fleet.BackendCoder {
 				fmt.Printf("Opening VS Code for %s/%s...\n", target.Fleet, target.Instance)
 				coderCmd := exec.Command("coder", "open", "vscode", inst.ContainerID)
+				coderCmd.Stdout = os.Stdout
+				coderCmd.Stderr = os.Stderr
 				return coderCmd.Run()
 			}
 

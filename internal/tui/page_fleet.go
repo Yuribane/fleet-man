@@ -163,12 +163,17 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			r := m.rows[m.cursor]
-			uri, ok := m.instanceBackend(inst).EditorURI(inst.WorkspaceDir, r.fleetName)
-			if !ok {
-				m.message = "Editor integration not supported by this backend"
-				break
+			var codeCmd *exec.Cmd
+			if inst.Backend == fleet.BackendCoder {
+				codeCmd = exec.Command("coder", "open", "vscode", inst.ContainerID)
+			} else {
+				uri, ok := m.instanceBackend(inst).EditorURI(inst.WorkspaceDir, r.fleetName)
+				if !ok {
+					m.message = "Editor integration not supported by this backend"
+					break
+				}
+				codeCmd = exec.Command("code", "--folder-uri", uri)
 			}
-			codeCmd := exec.Command("code", "--folder-uri", uri)
 			if err := codeCmd.Run(); err != nil {
 				m.message = fmt.Sprintf("VS Code error: %v", err)
 			} else {
