@@ -82,8 +82,8 @@ func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested
 	prefixConf := ""
 	statusRight := ` ctrl+q/ctrl+o: detach `
 	if nested {
-		prefixConf = ` \; set -g prefix C-a \; bind-key C-a send-prefix`
-		statusRight = ` prefix: ctrl+a | ctrl+q/ctrl+o: detach `
+		prefixConf = ` \; set -g prefix C-g \; bind-key C-g send-prefix`
+		statusRight = ` prefix: ctrl+g | ctrl+q/ctrl+o: detach `
 	}
 	inner := setup + tmuxInstall + sizefix + fmt.Sprintf(
 		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client \; set status-right '%s'`+prefixConf+resizeHook,
