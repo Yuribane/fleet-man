@@ -84,6 +84,13 @@ type model struct {
 
 	depsResult []deps.Dependency // set on first-ever startup
 
+	// Split pane mode: when fleet runs inside a host tmux session,
+	// pressing enter opens the instance shell in a right-side pane
+	// instead of suspending the TUI.
+	inHostTmux    bool   // true when TMUX env var is set at startup
+	splitPaneID   string // tmux pane ID of the right pane ("" = no split)
+	splitInstance string // instance name currently in the right pane
+
 	message  string
 	quitting bool
 	width    int
@@ -111,6 +118,7 @@ func newModel() model {
 		textInput:     ti,
 		spinner:       sp,
 		settingsInput: si,
+		inHostTmux:    os.Getenv("TMUX") != "",
 	}
 	// On first-ever startup, check for required binaries and show results
 	// if anything is missing. "First startup" = the ~/.fleet/ dir doesn't exist.
@@ -394,6 +402,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.message = fmt.Sprintf("Failed to create %s: %v", key, msg.err)
 		return m, nil
 
+	case splitPaneMsg:
+		if msg.err != nil {
+			m.message = fmt.Sprintf("Split pane error: %v", msg.err)
+		} else {
+			m.splitPaneID = msg.paneID
+			m.splitInstance = msg.instance
+		}
+		return m, nil
+
 	case operationDoneMsg:
 		m.reload()
 		if msg.err != nil {
@@ -516,6 +533,7 @@ func (m model) updateByMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	if m.quitting {
+		killSplitPane(m.splitPaneID)
 		return ""
 	}
 

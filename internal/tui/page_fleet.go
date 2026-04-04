@@ -12,6 +12,7 @@ import (
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 var toggleInstanceStatus = instanceops.ToggleInstance
@@ -135,9 +136,31 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				break
 			}
+			// Split pane mode: open shell in a right-side tmux pane
+			// instead of suspending the TUI. Toggle: if the same
+			// instance is already open, close the pane.
+			if m.inHostTmux {
+				if m.splitPaneID != "" && m.splitInstance == inst.Name {
+					killSplitPane(m.splitPaneID)
+					m.splitPaneID = ""
+					m.splitInstance = ""
+					return m, nil
+				}
+				// Query the host tmux window size and calculate the
+				// right pane dimensions (70% of the window width).
+				// This ensures the inner tmux session is sized correctly
+				// even when reattaching to a session created at a
+				// different width.
+				cols, rows := tmuxWindowSize()
+				cols = cols * 70 / 100
+				cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, shellCommand(m.cfg, inst.Name, cols, rows))
+				return m, splitPaneCmd(m.splitPaneID, inst.Name, cmd)
+			}
+
+			cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, shellCommand(m.cfg, inst.Name, m.width, m.height))
+
 			banner := renderGradient(nameToBanner(inst.Name))
 			banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
-			cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, shellCommand(m.cfg, inst.Name, m.width, m.height))
 			return m, tea.ExecProcess(
 				execWithBannerCmd(banner, cmd),
 				func(err error) tea.Msg { return execDoneMsg{err} },
@@ -306,11 +329,11 @@ func (m model) viewFleetList() string {
 				branchItem = dimStyle.Render("  " + backendIcon)
 			}
 
+			var line string
 			if transitional {
-				listContent.WriteString(fmt.Sprintf("%s    %s %s",
-					cursor, paddedName, status,
-				))
-				listContent.WriteString(branchItem)
+				line = fmt.Sprintf("%s    %s %s%s",
+					cursor, paddedName, status, branchItem,
+				)
 			} else {
 				// Show agent tool indicator
 				agentStr := ""
@@ -336,42 +359,23 @@ func (m model) viewFleetList() string {
 				if s, ok := m.stats[inst.ContainerID]; ok {
 					statsStr = dimStyle.Render(fmt.Sprintf("  %4.0f mcpu  %6.1f MB", s.CPUMillicores, s.MemoryMB))
 				}
-				listContent.WriteString(fmt.Sprintf("%s    %s %s%s%s",
-					cursor, paddedName, status, agentStr, statsStr,
-				))
-				listContent.WriteString(branchItem)
 
-				// Show tag, truncated with ellipsis if it would overflow
+				line = fmt.Sprintf("%s    %s %s%s%s%s",
+					cursor, paddedName, status, agentStr, statsStr, branchItem,
+				)
+
 				if inst.Tag != "" {
-					tagPrefix := "  # "
-					tagText := tagPrefix + inst.Tag
-					// lipgloss.Width measures visible (printed) width
-					lineWidth := lipgloss.Width(
-						fmt.Sprintf("%s    %s %s%s%s%s",
-							cursor, fmt.Sprintf("%-24s", inst.Name), renderStatus(inst.Status), agentStr, statsStr, branchItem,
-						),
-					)
-					// Account for list box border (1) + padding (1) on each side = 4
-					maxWidth := m.width - 4
-					if maxWidth > 0 {
-						available := maxWidth - lineWidth - len(tagPrefix)
-						if available <= 0 {
-							// No room at all — skip the tag
-						} else if available < len(inst.Tag) {
-							if available <= 3 {
-								listContent.WriteString(dimStyle.Render(tagPrefix + "..."))
-							} else {
-								listContent.WriteString(dimStyle.Render(tagPrefix + inst.Tag[:available-3] + "..."))
-							}
-						} else {
-							listContent.WriteString(dimStyle.Render(tagText))
-						}
-					} else {
-						// No terminal width info — show full tag
-						listContent.WriteString(dimStyle.Render(tagText))
-					}
+					line += dimStyle.Render("  # " + inst.Tag)
 				}
 			}
+
+			// Truncate with ellipsis if the line exceeds the available
+			// width (border + padding = 4 characters).
+			if maxW := m.width - 4; maxW > 0 && lipgloss.Width(line) > maxW {
+				line = ansi.Truncate(line, maxW-1, "…")
+			}
+
+			listContent.WriteString(line)
 			listContent.WriteString("\n")
 		} else {
 			label := "settings"
