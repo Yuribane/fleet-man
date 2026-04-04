@@ -57,7 +57,7 @@ func dotfilesSetup(cfg *state.Config) string {
 // is used to correct the remote PTY size before tmux starts. This is
 // needed for backends like coder ssh that may report incorrect sizes
 // (e.g. 128x128).
-func shellCommand(cfg *state.Config, instanceName string, cols, rows int) []string {
+func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested bool) []string {
 	setup := dotfilesSetup(cfg)
 	session := sanitizeSessionName(instanceName)
 	tmuxInstall := `command -v tmux >/dev/null 2>&1 || { echo '==> Installing tmux...'; (sudo apt-get update -qq && sudo apt-get install -y -qq tmux) 2>/dev/null || (sudo apk add tmux) 2>/dev/null || (sudo dnf install -y tmux) 2>/dev/null; }; `
@@ -77,9 +77,17 @@ func shellCommand(cfg *state.Config, instanceName string, cols, rows int) []stri
 			cols, rows-1,
 		)
 	}
+	// When nested inside a host tmux (split pane mode), use Ctrl+A as
+	// the inner prefix so it doesn't conflict with the outer Ctrl+B.
+	prefixConf := ""
+	statusRight := ` ctrl+q/ctrl+o: detach `
+	if nested {
+		prefixConf = ` \; set -g prefix C-a \; bind-key C-a send-prefix`
+		statusRight = ` prefix: ctrl+a | ctrl+q/ctrl+o: detach `
+	}
 	inner := setup + tmuxInstall + sizefix + fmt.Sprintf(
-		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client \; set status-right ' ctrl+q/ctrl+o: detach '`+resizeHook,
-		shQuote(session),
+		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client \; set status-right '%s'`+prefixConf+resizeHook,
+		shQuote(session), statusRight,
 	)
 	return []string{"sh", "-c", inner}
 }

@@ -153,11 +153,11 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// different width.
 				cols, rows := tmuxWindowSize()
 				cols = cols * 70 / 100
-				cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, shellCommand(m.cfg, inst.Name, cols, rows))
+				cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, shellCommand(m.cfg, inst.Name, cols, rows, true))
 				return m, splitPaneCmd(m.splitPaneID, inst.Name, cmd)
 			}
 
-			cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, shellCommand(m.cfg, inst.Name, m.width, m.height))
+			cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, shellCommand(m.cfg, inst.Name, m.width, m.height, false))
 
 			banner := renderGradient(nameToBanner(inst.Name))
 			banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
