@@ -140,6 +140,12 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// instead of suspending the TUI. Toggle: if the same
 			// instance is already open, close the pane.
 			if m.inHostTmux {
+				// Clear stale pane state if the pane died (e.g. session killed).
+				if m.splitPaneID != "" && !paneAlive(m.splitPaneID) {
+					m.splitPaneID = ""
+					m.splitInstance = ""
+				}
+				// Toggle: if the same instance is already open, close it.
 				if m.splitPaneID != "" && m.splitInstance == inst.Name {
 					killSplitPane(m.splitPaneID)
 					m.splitPaneID = ""

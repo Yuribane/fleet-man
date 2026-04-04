@@ -90,6 +90,14 @@ func splitPaneCmd(existingPaneID string, instanceName string, cmd *exec.Cmd) tea
 	}
 }
 
+// paneAlive checks whether a tmux pane still exists.
+func paneAlive(paneID string) bool {
+	if paneID == "" {
+		return false
+	}
+	return exec.Command("tmux", "display-message", "-t", paneID, "-p", "").Run() == nil
+}
+
 // killSplitPane kills the tracked tmux pane if it exists. Safe to call
 // with an empty paneID (no-op).
 func killSplitPane(paneID string) {
