@@ -24,3 +24,10 @@ func New(bt fleet.BackendType, verbose bool) backend.Backend {
 		return devcontainerbackend.New(opts...)
 	}
 }
+
+// CoderOpenVSCodeArgs builds args for `coder open vscode`.
+// containerID may be "workspace" or "workspace.agent" — both forms
+// are accepted directly by the coder CLI.
+func CoderOpenVSCodeArgs(containerID string) []string {
+	return []string{"open", "vscode", containerID}
+}

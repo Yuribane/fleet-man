@@ -42,7 +42,7 @@ func newCodeCmd() *cobra.Command {
 			// For coder backend, use `coder open vscode` directly
 			if inst.Backend == fleet.BackendCoder {
 				fmt.Printf("Opening VS Code for %s/%s...\n", target.Fleet, target.Instance)
-				coderCmd := exec.Command("coder", "open", "vscode", inst.ContainerID)
+				coderCmd := exec.Command("coder", backendutil.CoderOpenVSCodeArgs(inst.ContainerID)...)
 				coderCmd.Stdout = os.Stdout
 				coderCmd.Stderr = os.Stderr
 				return coderCmd.Run()
@@ -59,3 +59,4 @@ func newCodeCmd() *cobra.Command {
 		},
 	}
 }
+

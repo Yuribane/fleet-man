@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/gitutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/instanceops"
@@ -165,7 +166,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			r := m.rows[m.cursor]
 			var codeCmd *exec.Cmd
 			if inst.Backend == fleet.BackendCoder {
-				codeCmd = exec.Command("coder", "open", "vscode", inst.ContainerID)
+				codeCmd = exec.Command("coder", backendutil.CoderOpenVSCodeArgs(inst.ContainerID)...)
 			} else {
 				uri, ok := m.instanceBackend(inst).EditorURI(inst.WorkspaceDir, r.fleetName)
 				if !ok {
