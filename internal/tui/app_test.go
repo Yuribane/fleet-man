@@ -3,10 +3,21 @@ package tui
 import (
 	"testing"
 
+	"github.com/BenjaminBenetti/fleet-man/internal/deps"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// allToolsFound returns a toolStatus slice where every tool is marked as found,
+// ensuring all settings sections are visible during tests.
+func allToolsFound() []deps.ToolStatus {
+	return []deps.ToolStatus{
+		{Name: "devcontainer", Binary: "devcontainer", Found: true},
+		{Name: "gh", Binary: "gh", Found: true},
+		{Name: "coder", Binary: "coder", Found: true},
+	}
+}
 
 func TestUpdateSettingsCyclesToolAndPersistsConfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
@@ -16,6 +27,7 @@ func TestUpdateSettingsCyclesToolAndPersistsConfig(t *testing.T) {
 		cfg:            state.DefaultConfig(),
 		settingsCursor: settingsItemToolSelection,
 		settingsInput:  textinput.New(),
+		toolStatus:     allToolsFound(),
 	}
 
 	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyRight})
@@ -90,6 +102,7 @@ func TestUpdateSettingsNavUpDown(t *testing.T) {
 		cfg:            state.DefaultConfig(),
 		settingsCursor: settingsItemToolSelection,
 		settingsInput:  textinput.New(),
+		toolStatus:     allToolsFound(),
 	}
 
 	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
@@ -122,17 +135,25 @@ func TestUpdateSettingsNavUpDown(t *testing.T) {
 		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemCoderPreset)
 	}
 
-	// Wrap past last item back to first
-	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
-	got = updated.(model)
-	if got.settingsCursor != settingsItemToolSelection {
-		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemToolSelection)
+	// Navigate through tool status rows
+	for i := 0; i < 3; i++ {
+		updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
+		got = updated.(model)
 	}
 
+	// Wrap past last tool status item back to first
+	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
+	got = updated.(model)
+	if got.settingsCursor != 0 {
+		t.Fatalf("cursor = %d, want 0 (wrap to top)", got.settingsCursor)
+	}
+
+	// Wrap up from first goes to last tool status item
 	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyUp})
 	got = updated.(model)
-	if got.settingsCursor != settingsItemCoderPreset {
-		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemCoderPreset)
+	wantLast := got.settingsItemCount() - 1
+	if got.settingsCursor != wantLast {
+		t.Fatalf("cursor = %d, want %d (wrap to bottom)", got.settingsCursor, wantLast)
 	}
 }
 
@@ -144,6 +165,7 @@ func TestUpdateSettingsEnterEditingDotfiles(t *testing.T) {
 		cfg:            state.DefaultConfig(),
 		settingsCursor: settingsItemDotfilesRepo,
 		settingsInput:  textinput.New(),
+		toolStatus:     allToolsFound(),
 	}
 
 	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
@@ -169,6 +191,7 @@ func TestUpdateSettingsEditingSavesOnEnter(t *testing.T) {
 		settingsCursor:  settingsItemDotfilesRepo,
 		settingsEditing: true,
 		settingsInput:   si,
+		toolStatus:      allToolsFound(),
 	}
 	m.settingsInput.SetValue("https://github.com/user/dotfiles")
 	m.settingsInput.Focus()
@@ -205,6 +228,7 @@ func TestUpdateSettingsEditingCancelsOnEsc(t *testing.T) {
 		settingsCursor:  settingsItemDotfilesRepo,
 		settingsEditing: true,
 		settingsInput:   si,
+		toolStatus:      allToolsFound(),
 	}
 	m.settingsInput.SetValue("changed")
 	m.settingsInput.Focus()

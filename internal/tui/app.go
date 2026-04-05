@@ -82,6 +82,8 @@ type model struct {
 	coderPresets       []string // available preset names (in-memory, from API)
 	coderFetchingParams bool    // true while fetching template parameters
 
+	toolStatus []deps.ToolStatus // cached tool install statuses for settings page
+
 	depsResult []deps.Dependency // set on first-ever startup
 
 	// Split pane mode: when fleet runs inside a host tmux session,

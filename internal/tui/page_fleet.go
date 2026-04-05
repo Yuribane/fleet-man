@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
+	"github.com/BenjaminBenetti/fleet-man/internal/deps"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/gitutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/instanceops"
@@ -123,6 +124,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if r.kind == rowSettings {
 				m.page = pageSettings
+				m.toolStatus = deps.CheckTools()
 				return m, nil
 			}
 

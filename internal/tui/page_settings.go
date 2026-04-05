@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
@@ -16,15 +18,97 @@ const (
 	settingsItemCoderTemplate
 	settingsItemCoderPreset
 	settingsItemCoderParamBase // parameters are at index base + i
+
+	settingsItemToolStatusBase = 1000 // tool status rows start here
 )
+
+// settingsSection defines a titled group of settings rows that can be
+// conditionally shown based on tool availability.
+type settingsSection struct {
+	Title string                          // section header text
+	Tool  string                          // required tool binary; "" = always visible
+	Items func(cfg *state.Config) []int   // returns navigable item IDs for this section
+}
+
+// settingsSections lists all settings sections in display order.
+var settingsSections = []settingsSection{
+	{
+		Title: "Agent Settings",
+		Items: func(_ *state.Config) []int {
+			return []int{settingsItemToolSelection}
+		},
+	},
+	{
+		Title: "Dotfiles",
+		Items: func(_ *state.Config) []int {
+			return []int{settingsItemDotfilesRepo, settingsItemDotfilesScript, settingsItemDotfilesAutoInstall}
+		},
+	},
+	{
+		Title: "Coder",
+		Tool:  "coder",
+		Items: func(cfg *state.Config) []int {
+			items := []int{settingsItemCoderTemplate, settingsItemCoderPreset}
+			if cfg != nil {
+				for i := range cfg.CoderSettings.Parameters {
+					items = append(items, settingsItemCoderParamBase+i)
+				}
+			}
+			return items
+		},
+	},
+	{
+		Title: "Tool Status",
+		Items: func(_ *state.Config) []int {
+			return []int{
+				settingsItemToolStatusBase,
+				settingsItemToolStatusBase + 1,
+				settingsItemToolStatusBase + 2,
+			}
+		},
+	},
+}
+
+// sectionVisible reports whether a settings section should be shown
+// based on the current tool install status.
+func (m model) sectionVisible(s settingsSection) bool {
+	if s.Tool == "" {
+		return true
+	}
+	for _, t := range m.toolStatus {
+		if t.Binary == s.Tool {
+			return t.Found
+		}
+	}
+	return false
+}
+
+// visibleItems returns the flat ordered list of navigable item IDs,
+// skipping items in hidden sections.
+func (m model) visibleItems() []int {
+	var items []int
+	for _, s := range settingsSections {
+		if !m.sectionVisible(s) {
+			continue
+		}
+		items = append(items, s.Items(m.cfg)...)
+	}
+	return items
+}
+
+// settingsCursorItem returns the item ID at the current cursor position,
+// or -1 if the cursor is out of range.
+func (m model) settingsCursorItem() int {
+	items := m.visibleItems()
+	if m.settingsCursor >= 0 && m.settingsCursor < len(items) {
+		return items[m.settingsCursor]
+	}
+	return -1
+}
 
 // settingsItemCount returns the total number of navigable settings rows.
 func (m model) settingsItemCount() int {
-	n := settingsItemCoderParamBase
-	if m.cfg != nil {
-		n += len(m.cfg.CoderSettings.Parameters)
-	}
-	return n
+	return len(m.visibleItems())
 }
 
 var agentToolOptions = []state.AgentTool{
@@ -159,36 +243,47 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "left", "h":
-			if m.settingsCursor == settingsItemToolSelection {
+			item := m.settingsCursorItem()
+			if item == settingsItemToolSelection {
 				m.cycleAgentTool(-1)
-			} else if m.settingsCursor == settingsItemDotfilesAutoInstall {
+			} else if item == settingsItemDotfilesAutoInstall {
 				m.toggleAutoInstall()
-			} else if m.settingsCursor == settingsItemCoderPreset {
+			} else if item == settingsItemCoderPreset {
 				m.cycleCoderPreset(-1)
 			}
 			return m, nil
 
 		case "right", "l":
-			if m.settingsCursor == settingsItemToolSelection {
+			item := m.settingsCursorItem()
+			if item == settingsItemToolSelection {
 				m.cycleAgentTool(1)
-			} else if m.settingsCursor == settingsItemDotfilesAutoInstall {
+			} else if item == settingsItemDotfilesAutoInstall {
 				m.toggleAutoInstall()
-			} else if m.settingsCursor == settingsItemCoderPreset {
+			} else if item == settingsItemCoderPreset {
 				m.cycleCoderPreset(1)
 			}
 			return m, nil
 
 		case "enter", " ":
-			if m.settingsCursor == settingsItemToolSelection {
+			item := m.settingsCursorItem()
+			if item == settingsItemToolSelection {
 				m.cycleAgentTool(1)
 				return m, nil
 			}
-			if m.settingsCursor == settingsItemDotfilesAutoInstall {
+			if item == settingsItemDotfilesAutoInstall {
 				m.toggleAutoInstall()
 				return m, nil
 			}
-			if m.settingsCursor == settingsItemCoderPreset {
+			if item == settingsItemCoderPreset {
 				m.cycleCoderPreset(1)
+				return m, nil
+			}
+			if item >= settingsItemToolStatusBase {
+				idx := item - settingsItemToolStatusBase
+				if idx < len(m.toolStatus) {
+					openURL(m.toolStatus[idx].InstallURL)
+					m.message = fmt.Sprintf("Opening %s", m.toolStatus[idx].InstallURL)
+				}
 				return m, nil
 			}
 			return m.enterSettingsEditing()
@@ -203,19 +298,20 @@ func (m model) enterSettingsEditing() (tea.Model, tea.Cmd) {
 		m.cfg = state.DefaultConfig()
 	}
 
+	item := m.settingsCursorItem()
 	var current string
 	switch {
-	case m.settingsCursor == settingsItemDotfilesRepo:
+	case item == settingsItemDotfilesRepo:
 		current = m.cfg.DotfilesSettings.RepoURL
 		m.settingsInput.Placeholder = "https://github.com/user/dotfiles"
-	case m.settingsCursor == settingsItemDotfilesScript:
+	case item == settingsItemDotfilesScript:
 		current = m.cfg.DotfilesSettings.InstallScript
 		m.settingsInput.Placeholder = "install.sh"
-	case m.settingsCursor == settingsItemCoderTemplate:
+	case item == settingsItemCoderTemplate:
 		current = m.cfg.CoderSettings.Template
 		m.settingsInput.Placeholder = "template-name"
-	case m.settingsCursor >= settingsItemCoderParamBase:
-		idx := m.settingsCursor - settingsItemCoderParamBase
+	case item >= settingsItemCoderParamBase && item < settingsItemToolStatusBase:
+		idx := item - settingsItemCoderParamBase
 		if idx < len(m.cfg.CoderSettings.Parameters) {
 			current = m.cfg.CoderSettings.Parameters[idx].Value
 			p := m.cfg.CoderSettings.Parameters[idx]
@@ -246,13 +342,14 @@ func (m model) updateSettingsEditing(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cfg = state.DefaultConfig()
 			}
 
+			item := m.settingsCursorItem()
 			var cmd tea.Cmd
 			switch {
-			case m.settingsCursor == settingsItemDotfilesRepo:
+			case item == settingsItemDotfilesRepo:
 				m.cfg.DotfilesSettings.RepoURL = value
-			case m.settingsCursor == settingsItemDotfilesScript:
+			case item == settingsItemDotfilesScript:
 				m.cfg.DotfilesSettings.InstallScript = value
-			case m.settingsCursor == settingsItemCoderTemplate:
+			case item == settingsItemCoderTemplate:
 				oldTemplate := m.cfg.CoderSettings.Template
 				m.cfg.CoderSettings.Template = value
 				// If template changed, trigger parameter fetch
@@ -261,8 +358,8 @@ func (m model) updateSettingsEditing(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.message = "Fetching template parameters..."
 					cmd = fetchCoderParamsCmd(value)
 				}
-			case m.settingsCursor >= settingsItemCoderParamBase:
-				idx := m.settingsCursor - settingsItemCoderParamBase
+			case item >= settingsItemCoderParamBase && item < settingsItemToolStatusBase:
+				idx := item - settingsItemCoderParamBase
 				if idx < len(m.cfg.CoderSettings.Parameters) {
 					m.cfg.CoderSettings.Parameters[idx].Value = value
 				}
@@ -317,91 +414,109 @@ func (m model) viewSettings() string {
 	}
 
 	var listContent strings.Builder
+	currentItem := m.settingsCursorItem()
 
-	// Agent Settings section
-	listContent.WriteString(fleetExpandedStyle.Render("Agent Settings"))
-	listContent.WriteString("\n")
-	listContent.WriteString(dimStyle.Render(strings.Repeat("─", ruleWidth)))
-	listContent.WriteString("\n\n")
-	listContent.WriteString(m.renderSettingsRow(settingsItemToolSelection, "Tool selection",
-		fmt.Sprintf("[ %s ]", agentToolLabel(cfg.AgentSettings.ToolSelection))))
-	listContent.WriteString("\n\n")
+	for _, s := range settingsSections {
+		if !m.sectionVisible(s) {
+			continue
+		}
 
-	// Dotfiles section
-	listContent.WriteString(fleetExpandedStyle.Render("Dotfiles"))
-	listContent.WriteString("\n")
-	listContent.WriteString(dimStyle.Render(strings.Repeat("─", ruleWidth)))
-	listContent.WriteString("\n\n")
-
-	repoValue := cfg.DotfilesSettings.RepoURL
-	if repoValue == "" && !(m.settingsEditing && m.settingsCursor == settingsItemDotfilesRepo) {
-		repoValue = dimStyle.Render("(not set)")
-	}
-	listContent.WriteString(m.renderSettingsRow(settingsItemDotfilesRepo, "Repository URL", repoValue))
-	listContent.WriteString("\n")
-
-	scriptValue := cfg.DotfilesSettings.InstallScript
-	if scriptValue == "" && !(m.settingsEditing && m.settingsCursor == settingsItemDotfilesScript) {
-		scriptValue = dimStyle.Render("(not set)")
-	}
-	listContent.WriteString(m.renderSettingsRow(settingsItemDotfilesScript, "Install script", scriptValue))
-	listContent.WriteString("\n")
-
-	autoInstallValue := "[ off ]"
-	if cfg.DotfilesSettings.AutoInstall {
-		autoInstallValue = "[ on ]"
-	}
-	listContent.WriteString(m.renderSettingsRow(settingsItemDotfilesAutoInstall, "Auto install", autoInstallValue))
-	listContent.WriteString("\n\n")
-
-	// Coder section
-	listContent.WriteString(fleetExpandedStyle.Render("Coder"))
-	listContent.WriteString("\n")
-	listContent.WriteString(dimStyle.Render(strings.Repeat("─", ruleWidth)))
-	listContent.WriteString("\n\n")
-
-	templateValue := cfg.CoderSettings.Template
-	if templateValue == "" && !(m.settingsEditing && m.settingsCursor == settingsItemCoderTemplate) {
-		templateValue = dimStyle.Render("(not set)")
-	}
-	if m.coderFetchingParams {
-		templateValue += "  " + m.spinner.View() + " fetching..."
-	}
-	listContent.WriteString(m.renderSettingsRow(settingsItemCoderTemplate, "Template", templateValue))
-	listContent.WriteString("\n")
-
-	presetValue := cfg.CoderSettings.Preset
-	if presetValue == "" {
-		presetValue = dimStyle.Render("(none)")
-	} else {
-		presetValue = fmt.Sprintf("[ %s ]", presetValue)
-	}
-	listContent.WriteString(m.renderSettingsRow(settingsItemCoderPreset, "Preset", presetValue))
-
-	// Dynamic parameter rows
-	for i, p := range cfg.CoderSettings.Parameters {
+		// Section header
+		listContent.WriteString(fleetExpandedStyle.Render(s.Title))
 		listContent.WriteString("\n")
-		idx := settingsItemCoderParamBase + i
-		value := p.Value
-		if value == "" && !(m.settingsEditing && m.settingsCursor == idx) {
-			if p.DefaultValue != "" {
-				value = dimStyle.Render(p.DefaultValue + " (default)")
+		listContent.WriteString(dimStyle.Render(strings.Repeat("─", ruleWidth)))
+		listContent.WriteString("\n\n")
+
+		// Section-specific rows
+		switch s.Title {
+		case "Agent Settings":
+			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemToolSelection,
+				"Tool selection", fmt.Sprintf("[ %s ]", agentToolLabel(cfg.AgentSettings.ToolSelection))))
+
+		case "Dotfiles":
+			repoValue := cfg.DotfilesSettings.RepoURL
+			if repoValue == "" && !(m.settingsEditing && currentItem == settingsItemDotfilesRepo) {
+				repoValue = dimStyle.Render("(not set)")
+			}
+			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemDotfilesRepo, "Repository URL", repoValue))
+			listContent.WriteString("\n")
+
+			scriptValue := cfg.DotfilesSettings.InstallScript
+			if scriptValue == "" && !(m.settingsEditing && currentItem == settingsItemDotfilesScript) {
+				scriptValue = dimStyle.Render("(not set)")
+			}
+			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemDotfilesScript, "Install script", scriptValue))
+			listContent.WriteString("\n")
+
+			autoInstallValue := "[ off ]"
+			if cfg.DotfilesSettings.AutoInstall {
+				autoInstallValue = "[ on ]"
+			}
+			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemDotfilesAutoInstall, "Auto install", autoInstallValue))
+
+		case "Coder":
+			templateValue := cfg.CoderSettings.Template
+			if templateValue == "" && !(m.settingsEditing && currentItem == settingsItemCoderTemplate) {
+				templateValue = dimStyle.Render("(not set)")
+			}
+			if m.coderFetchingParams {
+				templateValue += "  " + m.spinner.View() + " fetching..."
+			}
+			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemCoderTemplate, "Template", templateValue))
+			listContent.WriteString("\n")
+
+			presetValue := cfg.CoderSettings.Preset
+			if presetValue == "" {
+				presetValue = dimStyle.Render("(none)")
 			} else {
-				value = dimStyle.Render("(not set)")
+				presetValue = fmt.Sprintf("[ %s ]", presetValue)
+			}
+			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemCoderPreset, "Preset", presetValue))
+
+			// Dynamic parameter rows
+			for i, p := range cfg.CoderSettings.Parameters {
+				listContent.WriteString("\n")
+				paramItem := settingsItemCoderParamBase + i
+				value := p.Value
+				if value == "" && !(m.settingsEditing && currentItem == paramItem) {
+					if p.DefaultValue != "" {
+						value = dimStyle.Render(p.DefaultValue + " (default)")
+					} else {
+						value = dimStyle.Render("(not set)")
+					}
+				}
+				label := p.Name
+				if p.DisplayName != "" {
+					label = p.DisplayName
+				}
+				listContent.WriteString(m.renderSettingsRow(currentItem == paramItem, label, value))
+			}
+
+		case "Tool Status":
+			for i, t := range m.toolStatus {
+				if i > 0 {
+					listContent.WriteString("\n")
+				}
+				var badge string
+				if t.Found {
+					badge = statusRunningStyle.Render("installed")
+				} else {
+					badge = statusCreatingStyle.Render("not found")
+				}
+				value := badge + "  " + dimStyle.Render(t.Description)
+				itemID := settingsItemToolStatusBase + i
+				listContent.WriteString(m.renderSettingsRow(currentItem == itemID, t.Name, value))
 			}
 		}
-		label := p.Name
-		if p.DisplayName != "" {
-			label = p.DisplayName
-		}
-		listContent.WriteString(m.renderSettingsRow(idx, label, value))
+
+		listContent.WriteString("\n\n")
 	}
 
 	b.WriteString(box.Render(strings.TrimRight(listContent.String(), "\n")))
 	b.WriteString("\n")
 
 	// Substitution variable hint
-	if m.settingsCursor >= settingsItemCoderParamBase {
+	if currentItem >= settingsItemCoderParamBase && currentItem < settingsItemToolStatusBase {
 		b.WriteString(dimStyle.Render("  Variables: ${GIT_URL} = fleet repo URL, ${INSTANCE_NAME} = workspace name"))
 		b.WriteString("\n")
 	}
@@ -424,23 +539,35 @@ func (m model) viewSettings() string {
 	return b.String()
 }
 
-func (m model) renderSettingsRow(idx int, label string, value string) string {
-	isSelected := m.settingsCursor == idx
-
+func (m model) renderSettingsRow(active bool, label string, value string) string {
 	cursor := "  "
-	if isSelected {
+	if active {
 		cursor = cursorStyle.Render("> ")
 	}
 
 	formattedLabel := fmt.Sprintf("%-18s", label)
 
 	// If editing this row, show the text input instead of the static value
-	if m.settingsEditing && isSelected {
+	if m.settingsEditing && active {
 		value = m.settingsInput.View()
 	}
 
-	if isSelected {
+	if active {
 		return fmt.Sprintf("%s%s %s", cursor, selectedStyle.Render(formattedLabel), value)
 	}
 	return fmt.Sprintf("%s%s %s", cursor, formattedLabel, value)
+}
+
+// openURL opens the given URL in the user's default browser.
+func openURL(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	_ = cmd.Start()
 }
