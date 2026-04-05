@@ -11,6 +11,7 @@ import (
 	"github.com/BenjaminBenetti/fleet-man/internal/backend"
 	coderbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/coder"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
+	"github.com/BenjaminBenetti/fleet-man/internal/portforward"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -94,8 +95,9 @@ func toggleInstanceCmd(fleetName, instanceName string) tea.Cmd {
 }
 
 // deleteInstanceCmd runs instance deletion in the background.
-func deleteInstanceCmd(dc backend.Backend, fleetName, instanceName, containerID, wsDir string) tea.Cmd {
+func deleteInstanceCmd(dc backend.Backend, fleetName, instanceName, containerID, wsDir string, pf *portforward.Manager) tea.Cmd {
 	return func() tea.Msg {
+		pf.RemoveAll(fleetName + "/" + instanceName)
 		_ = dc.Down(containerID)
 		if wsDir != "" {
 			_ = os.RemoveAll(wsDir)
@@ -113,10 +115,11 @@ func deleteInstanceCmd(dc backend.Backend, fleetName, instanceName, containerID,
 }
 
 // deleteFleetCmd runs fleet destruction in the background.
-func deleteFleetCmd(backends map[fleet.BackendType]backend.Backend, fleetName string, instances []*fleet.Instance) tea.Cmd {
+func deleteFleetCmd(backends map[fleet.BackendType]backend.Backend, fleetName string, instances []*fleet.Instance, pf *portforward.Manager) tea.Cmd {
 	// Snapshot what we need — don't capture model
 	type target struct {
 		dc          backend.Backend
+		name        string
 		containerID string
 		wsDir       string
 	}
@@ -126,10 +129,11 @@ func deleteFleetCmd(backends map[fleet.BackendType]backend.Backend, fleetName st
 		if bt == "" {
 			bt = fleet.BackendDevcontainer
 		}
-		targets = append(targets, target{backends[bt], inst.ContainerID, inst.WorkspaceDir})
+		targets = append(targets, target{backends[bt], inst.Name, inst.ContainerID, inst.WorkspaceDir})
 	}
 	return func() tea.Msg {
 		for _, t := range targets {
+			pf.RemoveAll(fleetName + "/" + t.name)
 			if t.dc != nil {
 				_ = t.dc.Down(t.containerID)
 			}

@@ -40,7 +40,7 @@ func (m model) updateConfirmDelete(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.buildRows()
 						m.mode = viewNormal
 						dc := m.instanceBackend(inst)
-						return m, deleteInstanceCmd(dc, m.dialogFleet, m.dialogInst, inst.ContainerID, inst.WorkspaceDir)
+						return m, deleteInstanceCmd(dc, m.dialogFleet, m.dialogInst, inst.ContainerID, inst.WorkspaceDir, m.portForwards)
 					}
 				}
 			}
@@ -68,7 +68,7 @@ func (m model) updateConfirmDeleteFleetWarn(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = state.Save(m.st)
 				m.buildRows()
 				m.mode = viewNormal
-				return m, deleteFleetCmd(m.backends, m.dialogFleet, f.Instances)
+				return m, deleteFleetCmd(m.backends, m.dialogFleet, f.Instances, m.portForwards)
 			} else if ok {
 				delete(m.st.Fleets, m.dialogFleet)
 				delete(m.collapsed, m.dialogFleet)

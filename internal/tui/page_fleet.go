@@ -251,7 +251,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				func(err error) tea.Msg { return execDoneMsg{err} },
 			)
 
-		case "p":
+		case "f":
 			_, inst := m.selectedInstance()
 			if inst == nil {
 				m.message = "Select an instance"
@@ -596,7 +596,7 @@ func (m model) viewFleetList() string {
 	b.WriteString(renderHelp(m.width, []string{
 		"j/k: navigate", "space: expand/collapse", "enter/e: exec or open",
 		"s: stop/start", "o: open terminal", "n: new fleet", "a: add instance", "d: delete",
-		"t: tag", "p: port-forward", "c: code", "l: logs", "r: refresh", "q: quit",
+		"t: tag", "f: port-forward", "c: code", "l: logs", "r: refresh", "q: quit",
 	}))
 
 	return b.String()
