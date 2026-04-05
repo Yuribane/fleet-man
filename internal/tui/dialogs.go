@@ -86,21 +86,53 @@ func (m model) updateConfirmDeleteFleetWarn(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-var backendTypeOptions = []fleet.BackendType{
+// backendToolRequirements maps each backend type to the CLI binary it
+// requires.  An empty string means no external tool is needed.
+var backendToolRequirements = map[fleet.BackendType]string{
+	fleet.BackendDevcontainer: "devcontainer",
+	fleet.BackendCoder:        "coder",
+}
+
+// allBackendTypes is the ordered master list of every backend type.
+var allBackendTypes = []fleet.BackendType{
 	fleet.BackendDevcontainer,
 	fleet.BackendCoder,
 }
 
-func nextBackendType(current fleet.BackendType, direction int) fleet.BackendType {
+// availableBackendTypes returns the subset of backend types whose
+// required CLI tool is found on the system.
+func (m model) availableBackendTypes() []fleet.BackendType {
+	var out []fleet.BackendType
+	for _, bt := range allBackendTypes {
+		bin := backendToolRequirements[bt]
+		if bin == "" {
+			out = append(out, bt)
+			continue
+		}
+		for _, t := range m.toolStatus {
+			if t.Binary == bin && t.Found {
+				out = append(out, bt)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// nextBackendType cycles through the given options list from current.
+func nextBackendType(current fleet.BackendType, direction int, options []fleet.BackendType) fleet.BackendType {
+	if len(options) == 0 {
+		return current
+	}
 	idx := 0
-	for i, bt := range backendTypeOptions {
+	for i, bt := range options {
 		if bt == current {
 			idx = i
 			break
 		}
 	}
-	idx = (idx + direction + len(backendTypeOptions)) % len(backendTypeOptions)
-	return backendTypeOptions[idx]
+	idx = (idx + direction + len(options)) % len(options)
+	return options[idx]
 }
 
 func backendTypeLabel(bt fleet.BackendType) string {
@@ -173,7 +205,10 @@ func (m model) updateAddInstance(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, createInstanceCmd(fleetName, name, f.Remote, bt)
 
 		case "tab":
-			m.dialogBackend = nextBackendType(m.dialogBackend, 1)
+			opts := m.availableBackendTypes()
+			if len(opts) > 1 {
+				m.dialogBackend = nextBackendType(m.dialogBackend, 1, opts)
+			}
 			return m, nil
 
 		case "esc", "ctrl+c":

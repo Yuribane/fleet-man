@@ -97,11 +97,23 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = "No fleet selected"
 				break
 			}
+			m.toolStatus = deps.CheckTools()
+			available := m.availableBackendTypes()
+			if len(available) == 0 {
+				m.message = "No deploy targets available – install devcontainer or coder CLI"
+				break
+			}
 			m.mode = viewAddInstance
 			m.dialogFleet = fleetName
-			m.dialogBackend = fleet.BackendDevcontainer
-			if m.cfg != nil && m.cfg.DefaultBackend == string(fleet.BackendCoder) {
-				m.dialogBackend = fleet.BackendCoder
+			m.dialogBackend = available[0]
+			if m.cfg != nil {
+				preferred := fleet.BackendType(m.cfg.DefaultBackend)
+				for _, bt := range available {
+					if bt == preferred {
+						m.dialogBackend = preferred
+						break
+					}
+				}
 			}
 			m.textInput.SetValue("")
 			m.textInput.Placeholder = "instance-name"
@@ -496,6 +508,10 @@ func (m model) viewFleetList() string {
 		if bt == "" {
 			bt = fleet.BackendDevcontainer
 		}
+		hint := "[enter] Create  [esc] Cancel"
+		if len(m.availableBackendTypes()) > 1 {
+			hint = "[enter] Create  [tab] Change deploy target  [esc] Cancel"
+		}
 		dialog := fmt.Sprintf(
 			"%s\n\n%s %s\n%s %s\n%s [ %s ]\n\n%s",
 			dialogTitle.Render("New instance"),
@@ -505,7 +521,7 @@ func (m model) viewFleetList() string {
 			m.textInput.View(),
 			dialogLabel.Render("Deploy: "),
 			backendTypeLabel(bt),
-			dialogHint.Render("[enter] Create  [tab] Change deploy target  [esc] Cancel"),
+			dialogHint.Render(hint),
 		)
 		b.WriteString(dialogBox.Render(dialog))
 		b.WriteString("\n")
