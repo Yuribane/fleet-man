@@ -48,4 +48,9 @@ type Backend interface {
 	// can use to connect to this workspace. Returns ("", false) if
 	// editor integration is not supported by this backend.
 	EditorURI(workspaceDir string, projectName string) (string, bool)
+
+	// PortForwardCommand returns an unstarted *exec.Cmd that tunnels
+	// traffic from localPort on the host to remotePort inside the
+	// container/workspace. The process runs until killed by the caller.
+	PortForwardCommand(containerID string, localPort, remotePort int) *exec.Cmd
 }

@@ -42,6 +42,7 @@ func NewRootCmd() *cobra.Command {
 		newLogsCmd(),
 		newStatusCmd(),
 		newCreateInstanceCmd(),
+		newPortForwardCmd(),
 	)
 
 	return root

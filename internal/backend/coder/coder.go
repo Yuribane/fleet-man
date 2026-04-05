@@ -292,6 +292,14 @@ func (b *CoderBackend) AgentToolProbe(containerID string) (string, bool) {
 	return parseToolProbeOutput(string(out))
 }
 
+// PortForwardCommand returns an unstarted *exec.Cmd that forwards localPort
+// on the host to remotePort inside the Coder workspace using `coder port-forward`.
+func (b *CoderBackend) PortForwardCommand(containerID string, localPort, remotePort int) *exec.Cmd {
+	target := b.resolveSSHTarget(containerID)
+	mapping := fmt.Sprintf("--tcp=%d:%d", localPort, remotePort)
+	return exec.Command("coder", "port-forward", target, mapping)
+}
+
 // EditorURI returns a VS Code URI for connecting to a Coder workspace.
 func (b *CoderBackend) EditorURI(workspaceDir string, projectName string) (string, bool) {
 	name := coderWorkspaceName(workspaceDir)

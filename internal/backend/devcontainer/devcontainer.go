@@ -233,3 +233,24 @@ func (b *DevcontainerBackend) EditorURI(workspaceDir string, projectName string)
 	uri := fmt.Sprintf("vscode-remote://dev-container+%s/workspaces/%s", hexPath, projectName)
 	return uri, true
 }
+
+// PortForwardCommand returns an unstarted *exec.Cmd that forwards localPort
+// on the host to remotePort inside the container using socat via docker exec.
+func (b *DevcontainerBackend) PortForwardCommand(containerID string, localPort, remotePort int) *exec.Cmd {
+	// Use docker's built-in port forwarding via socat: listen on the host
+	// and relay to the container port using docker exec + socat.
+	// A simpler and more reliable approach: use `docker exec` with socat
+	// to bridge a TCP listener on the host to the container's port.
+	//
+	// However, the simplest cross-platform approach is to use a small
+	// socat invocation on the host that connects to the container's IP.
+	// But the most portable approach for devcontainers is to use
+	// `docker exec` combined with a local TCP relay.
+	//
+	// We use: socat TCP-LISTEN:<localPort>,fork,reuseaddr EXEC:"docker exec -i <container> socat STDIO TCP:localhost:<remotePort>"
+	script := fmt.Sprintf(
+		`socat TCP-LISTEN:%d,fork,reuseaddr EXEC:"docker exec -i %s socat STDIO TCP\\:localhost\\:%d"`,
+		localPort, containerID, remotePort,
+	)
+	return exec.Command("sh", "-c", script)
+}

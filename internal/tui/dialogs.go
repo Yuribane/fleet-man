@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -262,4 +263,109 @@ func (m model) updateAddFleet(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.textInput, cmd = m.textInput.Update(msg)
 	return m, cmd
+}
+
+// ===========================================
+// Port Forward Dialog
+// ===========================================
+
+// updatePortForward handles the port forward management dialog.
+// The user can type a "local:remote" mapping and press enter to add,
+// use up/down to select existing forwards, 'd' to delete one, or esc to close.
+func (m model) updatePortForward(msg tea.Msg) (tea.Model, tea.Cmd) {
+	key := m.dialogFleet + "/" + m.dialogInst
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter":
+			raw := strings.TrimSpace(m.textInput.Value())
+			if raw == "" {
+				return m, nil
+			}
+			local, remote, err := parsePortMapping(raw)
+			if err != nil {
+				m.message = err.Error()
+				return m, nil
+			}
+
+			b := m.instanceBackend(&fleet.Instance{Backend: m.instanceBackendType()})
+			if err := m.portForwards.Add(key, local, remote, b.PortForwardCommand, m.pfContainerID); err != nil {
+				m.message = err.Error()
+				return m, nil
+			}
+
+			m.textInput.SetValue("")
+			m.message = fmt.Sprintf("Forwarding localhost:%d -> %s:%d", local, m.dialogInst, remote)
+			return m, nil
+
+		case "d":
+			fwds := m.portForwards.List(key)
+			if len(fwds) > 0 && m.pfCursor < len(fwds) {
+				fwd := fwds[m.pfCursor]
+				_ = m.portForwards.Remove(key, fwd.LocalPort)
+				m.message = fmt.Sprintf("Removed forward %s", fwd.Label())
+				if m.pfCursor >= len(m.portForwards.List(key)) {
+					m.pfCursor = max(0, m.pfCursor-1)
+				}
+				return m, nil
+			}
+
+		case "up", "k":
+			if m.pfCursor > 0 {
+				m.pfCursor--
+			}
+			return m, nil
+
+		case "down", "j":
+			fwds := m.portForwards.List(key)
+			if m.pfCursor < len(fwds)-1 {
+				m.pfCursor++
+			}
+			return m, nil
+
+		case "esc", "ctrl+c":
+			m.mode = viewNormal
+			m.textInput.Blur()
+			fwds := m.portForwards.List(key)
+			if len(fwds) > 0 {
+				m.message = fmt.Sprintf("%d port forward(s) active on %s", len(fwds), m.dialogInst)
+			} else {
+				m.message = ""
+			}
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+// parsePortMapping splits a "local:remote" string into two port numbers.
+func parsePortMapping(raw string) (int, int, error) {
+	parts := strings.SplitN(raw, ":", 2)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("expected local:remote (e.g. 8080:80)")
+	}
+	local, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil || local < 1 || local > 65535 {
+		return 0, 0, fmt.Errorf("invalid local port %q", parts[0])
+	}
+	remote, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil || remote < 1 || remote > 65535 {
+		return 0, 0, fmt.Errorf("invalid remote port %q", parts[1])
+	}
+	return local, remote, nil
+}
+
+// instanceBackendType returns the backend type for the instance currently
+// being managed in the port forward dialog.
+func (m model) instanceBackendType() fleet.BackendType {
+	if f, ok := m.st.Fleets[m.dialogFleet]; ok {
+		if inst, err := f.GetInstance(m.dialogInst); err == nil {
+			return inst.Backend
+		}
+	}
+	return fleet.BackendDevcontainer
 }

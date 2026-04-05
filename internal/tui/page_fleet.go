@@ -238,6 +238,27 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.instanceBackend(inst).LogsCommand(inst.ContainerID, false),
 				func(err error) tea.Msg { return execDoneMsg{err} },
 			)
+
+		case "p":
+			_, inst := m.selectedInstance()
+			if inst == nil {
+				m.message = "Select an instance"
+				break
+			}
+			if inst.Status != fleet.StatusRunning {
+				m.message = fmt.Sprintf("Instance must be running to port-forward (status: %s)", inst.Status)
+				break
+			}
+			m.mode = viewPortForward
+			m.dialogFleet = m.currentFleetName()
+			m.dialogInst = inst.Name
+			m.pfContainerID = inst.ContainerID
+			m.pfCursor = 0
+			m.textInput.SetValue("")
+			m.textInput.Placeholder = "local:remote (e.g. 8080:80)"
+			m.textInput.CharLimit = 11
+			m.textInput.Focus()
+			return m, m.textInput.Cursor.BlinkCmd()
 		}
 
 	case execDoneMsg:
@@ -372,6 +393,12 @@ func (m model) viewFleetList() string {
 				line = fmt.Sprintf("%s    %s %s%s%s%s",
 					cursor, paddedName, status, agentStr, statsStr, branchItem,
 				)
+
+				// Show active port forwards
+				pfKey := r.fleetName + "/" + inst.Name
+				if pfLabel := m.portForwards.FormatLabels(pfKey); pfLabel != "" {
+					line += portForwardStyle.Render("  ⇄ " + pfLabel)
+				}
 
 				if inst.Tag != "" {
 					line += dimStyle.Render("  # " + inst.Tag)
@@ -508,6 +535,40 @@ func (m model) viewFleetList() string {
 		)
 		b.WriteString(dialogBox.Render(dialog))
 		b.WriteString("\n")
+
+	case viewPortForward:
+		b.WriteString("\n")
+		pfKey := m.dialogFleet + "/" + m.dialogInst
+		fwds := m.portForwards.List(pfKey)
+
+		var fwdLines strings.Builder
+		if len(fwds) == 0 {
+			fwdLines.WriteString(dimStyle.Render("  No active forwards"))
+		} else {
+			for i, f := range fwds {
+				cursor := "  "
+				if i == m.pfCursor {
+					cursor = cursorStyle.Render("> ")
+				}
+				fwdLines.WriteString(fmt.Sprintf("%s%s\n",
+					cursor,
+					portForwardStyle.Render(f.Label()),
+				))
+			}
+		}
+
+		dialog := fmt.Sprintf(
+			"%s\n\n%s %s\n\n%s\n\n%s %s\n\n%s",
+			dialogTitle.Render("Port forwards"),
+			dialogLabel.Render("Instance:"),
+			fleetExpandedStyle.Render(m.dialogFleet+"/"+m.dialogInst),
+			strings.TrimRight(fwdLines.String(), "\n"),
+			dialogLabel.Render("Add:"),
+			m.textInput.View(),
+			dialogHint.Render("[enter] Add  [d] Delete selected  [j/k] Navigate  [esc] Close"),
+		)
+		b.WriteString(portForwardBox.Render(dialog))
+		b.WriteString("\n")
 	}
 
 	// Message
@@ -519,7 +580,7 @@ func (m model) viewFleetList() string {
 	b.WriteString(renderHelp(m.width, []string{
 		"j/k: navigate", "space: expand/collapse", "enter/e: exec or open",
 		"s: stop/start", "o: open terminal", "n: new fleet", "a: add instance", "d: delete",
-		"t: tag", "c: code", "l: logs", "r: refresh", "q: quit",
+		"t: tag", "p: port-forward", "c: code", "l: logs", "r: refresh", "q: quit",
 	}))
 
 	return b.String()

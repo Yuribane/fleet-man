@@ -11,6 +11,7 @@ import (
 	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/deps"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
+	"github.com/BenjaminBenetti/fleet-man/internal/portforward"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -27,6 +28,7 @@ const (
 	viewAddInstance
 	viewAddFleet
 	viewTagInstance
+	viewPortForward
 	viewDepsCheck
 )
 
@@ -86,6 +88,11 @@ type model struct {
 
 	depsResult []deps.Dependency // set on first-ever startup
 
+	// Port forwarding
+	portForwards      *portforward.Manager // manages active port forward processes
+	pfCursor          int                  // cursor within the port forward dialog list
+	pfContainerID     string               // container ID for the instance being forwarded
+
 	// Split pane mode: when fleet runs inside a host tmux session,
 	// pressing enter opens the instance shell in a right-side pane
 	// instead of suspending the TUI.
@@ -117,6 +124,7 @@ func newModel() model {
 		backends:      make(map[fleet.BackendType]backend.Backend),
 		stats:         make(map[string]*backend.ContainerStats),
 		activity:      NewActivityTracker(),
+		portForwards:  portforward.NewManager(),
 		textInput:     ti,
 		spinner:       sp,
 		settingsInput: si,
@@ -528,6 +536,8 @@ func (m model) updateByMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateAddFleet(msg)
 	case viewTagInstance:
 		return m.updateTagInstance(msg)
+	case viewPortForward:
+		return m.updatePortForward(msg)
 	default:
 		return m.updateNormal(msg)
 	}
@@ -536,6 +546,7 @@ func (m model) updateByMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	if m.quitting {
 		killSplitPane(m.splitPaneID)
+		m.portForwards.Shutdown()
 		return ""
 	}
 

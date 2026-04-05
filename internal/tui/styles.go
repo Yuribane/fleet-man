@@ -102,4 +102,14 @@ var (
 			Bold(true).
 			Foreground(lipgloss.Color("196")).
 			Background(lipgloss.Color("52"))
+
+	// Port forward dialog
+	portForwardBox = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("39")).
+				Padding(1, 2).
+				Width(55)
+
+	portForwardStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("42"))
 )

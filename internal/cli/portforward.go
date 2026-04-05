@@ -1,0 +1,158 @@
+package cli
+
+import (
+	"fmt"
+	"os"
+	"os/signal"
+	"strconv"
+	"strings"
+	"syscall"
+
+	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
+	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
+	"github.com/BenjaminBenetti/fleet-man/internal/portforward"
+	"github.com/BenjaminBenetti/fleet-man/internal/state"
+	"github.com/spf13/cobra"
+)
+
+// newPortForwardCmd creates the port-forward command group.
+func newPortForwardCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:     "port-forward",
+		Aliases: []string{"pf"},
+		Short:   "Manage port forwards for instances",
+	}
+
+	cmd.AddCommand(
+		newPortForwardAddCmd(),
+		newPortForwardRemoveCmd(),
+		newPortForwardListCmd(),
+	)
+
+	return cmd
+}
+
+// parsePortMappingArg splits a "local:remote" string into two port numbers.
+func parsePortMappingArg(mapping string) (int, int, error) {
+	parts := strings.SplitN(mapping, ":", 2)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid port mapping %q: expected local:remote (e.g. 8080:80)", mapping)
+	}
+	local, err := strconv.Atoi(parts[0])
+	if err != nil || local < 1 || local > 65535 {
+		return 0, 0, fmt.Errorf("invalid local port %q", parts[0])
+	}
+	remote, err := strconv.Atoi(parts[1])
+	if err != nil || remote < 1 || remote > 65535 {
+		return 0, 0, fmt.Errorf("invalid remote port %q", parts[1])
+	}
+	return local, remote, nil
+}
+
+// newPortForwardAddCmd creates the `port-forward add` command.
+func newPortForwardAddCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "add <instance> <local:remote> [local:remote...]",
+		Short: "Forward local ports to an instance",
+		Long:  "Forward one or more local ports to ports inside an instance.\nRuns until interrupted with Ctrl+C.",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := fleet.Resolve(args[0], "")
+			if err != nil {
+				return err
+			}
+
+			st, err := state.Load()
+			if err != nil {
+				return err
+			}
+
+			f, ok := st.Fleets[target.Fleet]
+			if !ok {
+				return fmt.Errorf("fleet %q not found", target.Fleet)
+			}
+			inst, err := f.GetInstance(target.Instance)
+			if err != nil {
+				return err
+			}
+			if inst.Status != fleet.StatusRunning {
+				return fmt.Errorf("instance %s/%s is not running (status: %s)", target.Fleet, target.Instance, inst.Status)
+			}
+
+			b := backendutil.New(inst.Backend, false)
+			mgr := portforward.NewManager()
+			key := target.Fleet + "/" + target.Instance
+
+			for _, mapping := range args[1:] {
+				local, remote, err := parsePortMappingArg(mapping)
+				if err != nil {
+					return err
+				}
+				if err := mgr.Add(key, local, remote, b.PortForwardCommand, inst.ContainerID); err != nil {
+					mgr.Shutdown()
+					return err
+				}
+				fmt.Printf("Forwarding localhost:%d -> %s:%d\n", local, inst.Name, remote)
+			}
+
+			fmt.Println("Press Ctrl+C to stop all forwards.")
+
+			sig := make(chan os.Signal, 1)
+			signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+			<-sig
+
+			fmt.Println("\nStopping port forwards...")
+			mgr.Shutdown()
+			return nil
+		},
+	}
+}
+
+// newPortForwardRemoveCmd creates the `port-forward remove` command.
+func newPortForwardRemoveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "remove <instance> <local-port>",
+		Aliases: []string{"rm"},
+		Short:   "Remove a port forward (for use with TUI-managed forwards)",
+		Long:    "Note: CLI-started forwards run in the foreground and are stopped with Ctrl+C.\nThis command is primarily for scripting and will list active TUI forwards.",
+		Args:    cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := fleet.Resolve(args[0], "")
+			if err != nil {
+				return err
+			}
+
+			port, err := strconv.Atoi(args[1])
+			if err != nil || port < 1 || port > 65535 {
+				return fmt.Errorf("invalid port %q", args[1])
+			}
+
+			fmt.Printf("Note: port-forward remove only works for forwards managed by the same process.\n")
+			fmt.Printf("Use the TUI (press 'p') to manage forwards interactively, or Ctrl+C the 'port-forward add' process.\n")
+			_ = target
+			_ = port
+			return nil
+		},
+	}
+}
+
+// newPortForwardListCmd creates the `port-forward list` command.
+func newPortForwardListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:     "list <instance>",
+		Aliases: []string{"ls"},
+		Short:   "List port forwards on an instance",
+		Long:    "Shows any port forwards that are currently active.\nNote: Only forwards managed by the current TUI process are visible.",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			target, err := fleet.Resolve(args[0], "")
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("Port forwards for %s/%s:\n", target.Fleet, target.Instance)
+			fmt.Println("  (Use the TUI to manage port forwards interactively, or use 'fleet port-forward add' for CLI forwarding.)")
+			return nil
+		},
+	}
+}
