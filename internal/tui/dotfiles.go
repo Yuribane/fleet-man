@@ -81,7 +81,7 @@ func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested
 	prefixConf := ""
 	statusRight := ` ctrl+q/ctrl+o: detach `
 	if nested {
-		prefixConf = ` \; set -g prefix C-x \; bind-key C-x send-prefix \; bind-key j select-pane -D \; bind-key k select-pane -U`
+		prefixConf = ` \; set -g prefix C-x \; bind-key C-x send-prefix \; bind-key j select-pane -D \; bind-key k select-pane -U \; set -g status-right-length 80`
 		statusRight = ` prefix: ctrl+x | j/k: pane down/up | ctrl+q/ctrl+o: detach `
 	}
 	// Clear any stale resize-window hooks from previous sessions before
