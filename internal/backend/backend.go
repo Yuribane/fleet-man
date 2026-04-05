@@ -53,4 +53,11 @@ type Backend interface {
 	// traffic from localPort on the host to remotePort inside the
 	// container/workspace. The process runs until killed by the caller.
 	PortForwardCommand(containerID string, localPort, remotePort int) *exec.Cmd
+
+	// ResolveHostname returns a hostname or IP address that is directly
+	// reachable from the host for the given container/workspace. When
+	// the second return value is true, callers can open direct TCP
+	// connections to hostname:port without spawning external processes.
+	// Returns ("", false) when the container is not directly reachable.
+	ResolveHostname(containerID string) (string, bool)
 }

@@ -237,20 +237,26 @@ func (b *DevcontainerBackend) EditorURI(workspaceDir string, projectName string)
 // PortForwardCommand returns an unstarted *exec.Cmd that forwards localPort
 // on the host to remotePort inside the container using socat via docker exec.
 func (b *DevcontainerBackend) PortForwardCommand(containerID string, localPort, remotePort int) *exec.Cmd {
-	// Use docker's built-in port forwarding via socat: listen on the host
-	// and relay to the container port using docker exec + socat.
-	// A simpler and more reliable approach: use `docker exec` with socat
-	// to bridge a TCP listener on the host to the container's port.
-	//
-	// However, the simplest cross-platform approach is to use a small
-	// socat invocation on the host that connects to the container's IP.
-	// But the most portable approach for devcontainers is to use
-	// `docker exec` combined with a local TCP relay.
-	//
-	// We use: socat TCP-LISTEN:<localPort>,fork,reuseaddr EXEC:"docker exec -i <container> socat STDIO TCP:localhost:<remotePort>"
 	script := fmt.Sprintf(
 		`socat TCP-LISTEN:%d,fork,reuseaddr EXEC:"docker exec -i %s socat STDIO TCP\\:localhost\\:%d"`,
 		localPort, containerID, remotePort,
 	)
 	return exec.Command("sh", "-c", script)
+}
+
+// ResolveHostname returns the container's IP address obtained via
+// `docker inspect`. For local Docker containers this is directly reachable.
+func (b *DevcontainerBackend) ResolveHostname(containerID string) (string, bool) {
+	out, err := exec.Command("docker", "inspect",
+		"--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+		containerID,
+	).Output()
+	if err != nil {
+		return "", false
+	}
+	ip := strings.TrimSpace(string(out))
+	if ip == "" {
+		return "", false
+	}
+	return ip, true
 }

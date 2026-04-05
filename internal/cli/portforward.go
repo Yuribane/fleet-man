@@ -88,7 +88,7 @@ func newPortForwardAddCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := mgr.Add(key, local, remote, b.PortForwardCommand, inst.ContainerID); err != nil {
+				if err := mgr.Add(key, local, remote, b.PortForwardCommand, inst.ContainerID, b.ResolveHostname); err != nil {
 					mgr.Shutdown()
 					return err
 				}

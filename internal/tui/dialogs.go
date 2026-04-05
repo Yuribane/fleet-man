@@ -325,7 +325,7 @@ func (m model) updatePortForward(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			b := m.instanceBackend(&fleet.Instance{Backend: m.instanceBackendType()})
-			if err := m.portForwards.Add(key, local, remote, b.PortForwardCommand, m.pfContainerID); err != nil {
+			if err := m.portForwards.Add(key, local, remote, b.PortForwardCommand, m.pfContainerID, b.ResolveHostname); err != nil {
 				m.message = err.Error()
 				return m, nil
 			}

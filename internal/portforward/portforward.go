@@ -2,6 +2,8 @@ package portforward
 
 import (
 	"fmt"
+	"io"
+	"net"
 	"os/exec"
 	"sync"
 )
@@ -10,7 +12,9 @@ import (
 type Forward struct {
 	LocalPort  int       `json:"local_port"`
 	RemotePort int       `json:"remote_port"`
-	cmd        *exec.Cmd // running process (not serialized)
+	cmd        *exec.Cmd    // running process (external fallback)
+	listener   net.Listener // in-process TCP listener
+	done       chan struct{} // closed when the in-process proxy stops
 }
 
 // Label returns a display string like "8080->80".
@@ -20,6 +24,10 @@ func (f Forward) Label() string {
 
 // CmdFactory builds an unstarted *exec.Cmd for a port forward.
 type CmdFactory func(containerID string, localPort, remotePort int) *exec.Cmd
+
+// ResolveFunc returns a directly-reachable hostname for a container.
+// Returns ("", false) when the container is not directly reachable.
+type ResolveFunc func(containerID string) (string, bool)
 
 // Manager tracks active port forward processes per instance.
 type Manager struct {
@@ -34,9 +42,10 @@ func NewManager() *Manager {
 	}
 }
 
-// Add starts a new port forward for the given instance. Returns an error
-// if the local port is already in use by another forward on this instance.
-func (m *Manager) Add(key string, localPort, remotePort int, factory CmdFactory, containerID string) error {
+// Add starts a new port forward for the given instance. If resolve is
+// non-nil and returns a reachable hostname, an in-process TCP proxy is
+// used. Otherwise it falls back to spawning a process via factory.
+func (m *Manager) Add(key string, localPort, remotePort int, factory CmdFactory, containerID string, resolve ResolveFunc) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -46,6 +55,19 @@ func (m *Manager) Add(key string, localPort, remotePort int, factory CmdFactory,
 		}
 	}
 
+	// Try in-process proxy via ResolveHostname.
+	if resolve != nil {
+		if hostname, ok := resolve(containerID); ok {
+			fwd, err := startProxy(localPort, hostname, remotePort)
+			if err != nil {
+				return fmt.Errorf("start proxy %d->%d: %w", localPort, remotePort, err)
+			}
+			m.forwards[key] = append(m.forwards[key], fwd)
+			return nil
+		}
+	}
+
+	// Fallback: spawn an external process.
 	cmd := factory(containerID, localPort, remotePort)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start port forward %d->%d: %w", localPort, remotePort, err)
@@ -72,9 +94,7 @@ func (m *Manager) Remove(key string, localPort int) error {
 	fwds := m.forwards[key]
 	for i, f := range fwds {
 		if f.LocalPort == localPort {
-			if f.cmd != nil && f.cmd.Process != nil {
-				_ = f.cmd.Process.Kill()
-			}
+			stopForward(f)
 			m.forwards[key] = append(fwds[:i], fwds[i+1:]...)
 			return nil
 		}
@@ -88,9 +108,7 @@ func (m *Manager) RemoveAll(key string) {
 	defer m.mu.Unlock()
 
 	for _, f := range m.forwards[key] {
-		if f.cmd != nil && f.cmd.Process != nil {
-			_ = f.cmd.Process.Kill()
-		}
+		stopForward(f)
 	}
 	delete(m.forwards, key)
 }
@@ -157,10 +175,89 @@ func (m *Manager) Shutdown() {
 
 	for key, fwds := range m.forwards {
 		for _, f := range fwds {
-			if f.cmd != nil && f.cmd.Process != nil {
-				_ = f.cmd.Process.Kill()
-			}
+			stopForward(f)
 		}
 		delete(m.forwards, key)
+	}
+}
+
+// ===========================================
+// In-process TCP proxy
+// ===========================================
+
+// startProxy opens a TCP listener on localPort and proxies each accepted
+// connection to hostname:remotePort. All goroutines stop when the
+// listener is closed.
+func startProxy(localPort int, hostname string, remotePort int) (*Forward, error) {
+	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", localPort))
+	if err != nil {
+		return nil, err
+	}
+
+	target := net.JoinHostPort(hostname, fmt.Sprintf("%d", remotePort))
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return // listener closed
+			}
+			go proxy(conn, target)
+		}
+	}()
+
+	return &Forward{
+		LocalPort:  localPort,
+		RemotePort: remotePort,
+		listener:   ln,
+		done:       done,
+	}, nil
+}
+
+// proxy pipes data between a local connection and a remote target.
+func proxy(local net.Conn, target string) {
+	remote, err := net.Dial("tcp", target)
+	if err != nil {
+		local.Close()
+		return
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		io.Copy(remote, local)
+		if tc, ok := remote.(*net.TCPConn); ok {
+			tc.CloseWrite()
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		io.Copy(local, remote)
+		if tc, ok := local.(*net.TCPConn); ok {
+			tc.CloseWrite()
+		}
+	}()
+
+	wg.Wait()
+	local.Close()
+	remote.Close()
+}
+
+// stopForward cleanly shuts down a forward, whether it uses an
+// in-process listener or an external process.
+func stopForward(f *Forward) {
+	if f.listener != nil {
+		f.listener.Close()
+		if f.done != nil {
+			<-f.done
+		}
+	}
+	if f.cmd != nil && f.cmd.Process != nil {
+		_ = f.cmd.Process.Kill()
 	}
 }

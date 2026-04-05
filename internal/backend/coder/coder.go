@@ -300,6 +300,12 @@ func (b *CoderBackend) PortForwardCommand(containerID string, localPort, remoteP
 	return exec.Command("coder", "port-forward", target, mapping)
 }
 
+// ResolveHostname returns ("", false) for Coder workspaces because they
+// are remote and not directly reachable by IP from the host.
+func (b *CoderBackend) ResolveHostname(containerID string) (string, bool) {
+	return "", false
+}
+
 // EditorURI returns a VS Code URI for connecting to a Coder workspace.
 func (b *CoderBackend) EditorURI(workspaceDir string, projectName string) (string, bool) {
 	name := coderWorkspaceName(workspaceDir)
