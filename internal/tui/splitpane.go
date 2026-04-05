@@ -64,6 +64,7 @@ func splitPaneCmd(existingPaneID string, instanceName string, cmd *exec.Cmd) tea
 				"sh", "-c", shellScript,
 			}
 			if exec.Command("tmux", respawnArgs...).Run() == nil {
+				_ = exec.Command("tmux", "select-pane", "-t", existingPaneID).Run()
 				return splitPaneMsg{paneID: existingPaneID, instance: instanceName}
 			}
 			// Pane is gone — fall through to create a fresh split.
@@ -86,6 +87,7 @@ func splitPaneCmd(existingPaneID string, instanceName string, cmd *exec.Cmd) tea
 		}
 
 		paneID := strings.TrimSpace(string(out))
+		_ = exec.Command("tmux", "select-pane", "-t", paneID).Run()
 		return splitPaneMsg{paneID: paneID, instance: instanceName}
 	}
 }
