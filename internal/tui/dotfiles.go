@@ -62,20 +62,19 @@ func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested
 	session := sanitizeSessionName(instanceName)
 	tmuxInstall := `command -v tmux >/dev/null 2>&1 || { echo '==> Installing tmux...'; (sudo apt-get update -qq && sudo apt-get install -y -qq tmux) 2>/dev/null || (sudo apk add tmux) 2>/dev/null || (sudo dnf install -y tmux) 2>/dev/null; }; `
 	// coder ssh may report incorrect terminal dimensions (e.g. 128x128).
-	// We fix the PTY size with stty before tmux starts, pass -x/-y for
-	// new session creation, and set a client-attached hook to force
-	// the correct size on every reattach. The hook uses aggressive-resize
-	// and resize-window to override tmux's stale client dimensions.
+	// We fix the PTY size with stty before tmux starts and pass -x/-y for
+	// new session creation. "window-size latest" tells tmux to always
+	// track the most recent client's terminal size, so the window
+	// auto-resizes on SIGWINCH (e.g. when the user drags a split divider).
+	// We avoid resize-window hooks because they put the window into
+	// manual-size mode that prevents dynamic resizing.
 	sizefix := ""
 	tmuxSize := ""
 	resizeHook := ""
 	if cols > 0 && rows > 0 {
 		sizefix = fmt.Sprintf(`stty cols %d rows %d 2>/dev/null; `, cols, rows)
 		tmuxSize = fmt.Sprintf(` -x %d -y %d`, cols, rows-1)
-		resizeHook = fmt.Sprintf(
-			` \; set -g aggressive-resize on \; set-hook -g client-attached 'resize-window -x %d -y %d'`,
-			cols, rows-1,
-		)
+		resizeHook = ` \; set -g aggressive-resize on \; set -g window-size latest`
 	}
 	// When nested inside a host tmux (split pane mode), use Ctrl+A as
 	// the inner prefix so it doesn't conflict with the outer Ctrl+B.
