@@ -78,5 +78,7 @@ func relaunchInTmux() error {
 	return syscall.Exec(tmuxBin, []string{
 		"tmux", "new-session", "-s", session, self,
 		";", "set", "-g", "mouse", "on",
+		";", "bind-key", "h", "select-pane", "-L",
+		";", "bind-key", "l", "select-pane", "-R",
 	}, os.Environ())
 }
