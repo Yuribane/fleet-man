@@ -84,7 +84,15 @@ func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested
 		prefixConf = ` \; set -g prefix C-x \; bind-key C-x send-prefix`
 		statusRight = ` prefix: ctrl+x | ctrl+q/ctrl+o: detach `
 	}
-	inner := setup + tmuxInstall + sizefix + fmt.Sprintf(
+	// Clear any stale resize-window hooks from previous sessions before
+	// attaching. The hook puts the window into manual-size mode and
+	// prevents dynamic resizing. We run this as a one-off tmux command
+	// against the existing server (if any) before exec-ing into it.
+	hookClear := fmt.Sprintf(
+		`tmux has-session -t %s 2>/dev/null && tmux set-hook -gu client-attached 2>/dev/null; `,
+		shQuote(session),
+	)
+	inner := setup + tmuxInstall + sizefix + hookClear + fmt.Sprintf(
 		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client \; set status-right '%s'`+prefixConf+resizeHook,
 		shQuote(session), statusRight,
 	)
