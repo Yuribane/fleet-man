@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -66,10 +68,15 @@ func relaunchInTmux() error {
 	// exec into: tmux new-session -s fleet -- <self>
 	// This replaces the current process so the user gets a clean
 	// tmux session running fleet with split pane mode enabled.
+	// Generate a unique session name so multiple fleet instances can coexist.
+	var suffix [3]byte
+	_, _ = rand.Read(suffix[:])
+	session := "fleet-" + hex.EncodeToString(suffix[:])
+
 	// exec into tmux: create a session running fleet, then enable mouse.
 	// tmux processes `;`-separated commands as part of startup.
 	return syscall.Exec(tmuxBin, []string{
-		"tmux", "new-session", "-s", "fleet", self,
+		"tmux", "new-session", "-s", session, self,
 		";", "set", "-g", "mouse", "on",
 	}, os.Environ())
 }
