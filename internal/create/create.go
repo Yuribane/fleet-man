@@ -71,9 +71,11 @@ func Run(fleetName, instanceName, remoteURL string, verbose bool, bt fleet.Backe
 	if cfg != nil && cfg.DotfilesSettings.AutoInstall {
 		if script := dotfiles.SetupScript(cfg); script != "" {
 			cmd := dc.ExecCommand(wsDir, []string{"sh", "-c", script})
-			if err := cmd.Run(); err != nil {
-				setFailed(fleetName, instanceName, fmt.Errorf("dotfiles install: %w", err))
-				return fmt.Errorf("dotfiles install: %w", err)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				detail := strings.TrimSpace(string(out))
+				setFailed(fleetName, instanceName, fmt.Errorf("dotfiles install: %w\n%s", err, detail))
+				return fmt.Errorf("dotfiles install: %w\n%s", err, detail)
 			}
 		}
 	}
