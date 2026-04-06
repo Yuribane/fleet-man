@@ -587,7 +587,10 @@ func (m model) viewSettings() string {
 					machineValue = dimStyle.Render("(none)")
 				}
 			} else {
-				machineValue = fmt.Sprintf("[ %s ]", m.codespacesMachineLabel())
+				machineValue = fmt.Sprintf("[ %s ]", cfg.CodespacesSettings.Machine)
+				if label := m.codespacesMachineLabel(); label != cfg.CodespacesSettings.Machine {
+					machineValue += "\n" + strings.Repeat(" ", 21) + dimStyle.Render(label)
+				}
 			}
 			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemCodespacesMachine, "Machine", machineValue))
 			listContent.WriteString("\n")
