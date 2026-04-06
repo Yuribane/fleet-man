@@ -7,6 +7,43 @@ import (
 	"strings"
 )
 
+// ===========================================
+// Error Detection
+// ===========================================
+
+// ErrPrefixAuthScope is the prefix used in error messages when the gh
+// auth token is missing the "codespace" scope.
+const ErrPrefixAuthScope = "codespaces:auth_scope:"
+
+// ErrPrefixLimit is the prefix used in error messages when the user
+// has reached their codespace limit.
+const ErrPrefixLimit = "codespaces:limit:"
+
+// isAuthScopeError returns true if the stderr output from gh indicates
+// an authentication problem — either not logged in or missing the
+// "codespace" OAuth scope.
+func isAuthScopeError(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	return strings.Contains(lower, "gh auth login") ||
+		strings.Contains(lower, "gh auth refresh") ||
+		strings.Contains(lower, "codespace") && strings.Contains(lower, "scope") ||
+		strings.Contains(lower, "http 403") && strings.Contains(lower, "scope")
+}
+
+// isCodespaceLimitError returns true if the stderr output from gh
+// indicates the user has reached their maximum codespace count.
+func isCodespaceLimitError(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	return strings.Contains(lower, "maximum number") ||
+		strings.Contains(lower, "limit") && strings.Contains(lower, "codespace") ||
+		strings.Contains(lower, "you have already reached") ||
+		strings.Contains(lower, "out of codespaces")
+}
+
+// ===========================================
+// Tool Probe
+// ===========================================
+
 // toolProbeScript is the shell script run inside each codespace to
 // detect which agent tool is running. Formatted as a single line to
 // avoid argument parsing issues with gh codespace ssh.

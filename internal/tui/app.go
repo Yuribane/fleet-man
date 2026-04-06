@@ -9,6 +9,7 @@ import (
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backend"
 	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
+	codespacesbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/codespaces"
 	"github.com/BenjaminBenetti/fleet-man/internal/deps"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/portforward"
@@ -30,6 +31,8 @@ const (
 	viewTagInstance
 	viewPortForward
 	viewDepsCheck
+	viewCodespacesAuth
+	viewCodespacesLimit
 )
 
 type pageMode int
@@ -496,7 +499,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							key, inst.ContainerID[:min(12, len(inst.ContainerID))])
 					case fleet.StatusFailed:
 						delete(m.creating, key)
-						m.message = fmt.Sprintf("Failed to create %s: %s", key, inst.Error)
+						if inst.Backend == fleet.BackendCodespaces && strings.HasPrefix(inst.Error, codespacesbackend.ErrPrefixAuthScope) {
+							m.mode = viewCodespacesAuth
+							m.dialogFleet = fleetName
+							m.dialogInst = instName
+							m.message = ""
+						} else if inst.Backend == fleet.BackendCodespaces && strings.HasPrefix(inst.Error, codespacesbackend.ErrPrefixLimit) {
+							m.mode = viewCodespacesLimit
+							m.dialogFleet = fleetName
+							m.dialogInst = instName
+							m.message = ""
+						} else {
+							m.message = fmt.Sprintf("Failed to create %s: %s", key, inst.Error)
+						}
 					}
 				}
 			}
@@ -538,6 +553,10 @@ func (m model) updateByMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateTagInstance(msg)
 	case viewPortForward:
 		return m.updatePortForward(msg)
+	case viewCodespacesAuth:
+		return m.updateCodespacesAuth(msg)
+	case viewCodespacesLimit:
+		return m.updateCodespacesLimit(msg)
 	default:
 		return m.updateNormal(msg)
 	}

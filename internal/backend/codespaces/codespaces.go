@@ -3,6 +3,7 @@ package codespaces
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -88,12 +89,22 @@ func (b *CodespacesBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 	}
 
 	cmd := exec.Command("gh", args...)
+	var stderrBuf strings.Builder
 	if b.verbose {
-		cmd.Stderr = os.Stderr
+		cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+	} else {
+		cmd.Stderr = &stderrBuf
 	}
 
 	out, err := cmd.Output()
 	if err != nil {
+		stderr := stderrBuf.String()
+		if isAuthScopeError(stderr) {
+			return nil, fmt.Errorf("%s%s", ErrPrefixAuthScope, "gh auth token is missing the \"codespace\" scope")
+		}
+		if isCodespaceLimitError(stderr) {
+			return nil, fmt.Errorf("%s%s", ErrPrefixLimit, "codespace limit reached")
+		}
 		return nil, fmt.Errorf("gh codespace create failed: %w", err)
 	}
 

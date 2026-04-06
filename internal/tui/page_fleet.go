@@ -591,6 +591,36 @@ func (m model) viewFleetList() string {
 		)
 		b.WriteString(portForwardBox.Render(dialog))
 		b.WriteString("\n")
+
+	case viewCodespacesAuth:
+		b.WriteString("\n")
+		dialog := fmt.Sprintf(
+			"%s\n\n%s\n\n%s\n\n%s",
+			warnBanner.Render("  GitHub Auth Required  "),
+			dialogLabel.Render(
+				"GitHub CLI authentication with the \"codespace\" scope is\n"+
+					"required. Press Enter to log in and grant the required scope.",
+			),
+			dimStyle.Render("gh auth login -h github.com -s codespace"),
+			dialogHint.Render("[enter] Authenticate  [esc] Cancel"),
+		)
+		b.WriteString(warnBox.Render(dialog))
+		b.WriteString("\n")
+
+	case viewCodespacesLimit:
+		b.WriteString("\n")
+		dialog := fmt.Sprintf(
+			"%s\n\n%s\n\n%s",
+			warnBanner.Render("  Codespace Limit Reached  "),
+			dialogLabel.Render(
+				"You have started the maximum number of Codespaces.\n"+
+					"Please stop some before creating a new instance,\n"+
+					"or use a different instance backend.",
+			),
+			dialogHint.Render("[enter/esc] Dismiss"),
+		)
+		b.WriteString(warnBox.Render(dialog))
+		b.WriteString("\n")
 	}
 
 	// Message

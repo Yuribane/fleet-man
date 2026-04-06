@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -397,6 +398,54 @@ func parsePortMapping(raw string) (int, int, error) {
 	}
 	return local, remote, nil
 }
+
+// ===========================================
+// Codespaces Auth Scope Dialog
+// ===========================================
+
+// updateCodespacesAuth handles the dialog shown when gh is missing
+// the "codespace" OAuth scope. Enter launches the auth refresh flow.
+func (m model) updateCodespacesAuth(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter":
+			m.mode = viewNormal
+			m.message = "Launching GitHub auth..."
+			return m, tea.ExecProcess(
+				exec.Command("gh", "auth", "login", "-h", "github.com", "-s", "codespace"),
+				func(err error) tea.Msg {
+					if err != nil {
+						return execDoneMsg{fmt.Errorf("gh auth login: %w", err)}
+					}
+					return execDoneMsg{}
+				},
+			)
+		case "esc", "ctrl+c":
+			m.mode = viewNormal
+			m.message = "Auth cancelled — codespace creation requires the codespace scope"
+		}
+	}
+	return m, nil
+}
+
+// updateCodespacesLimit handles the dialog shown when the user has
+// hit the maximum codespace count.
+func (m model) updateCodespacesLimit(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter", "esc", "ctrl+c":
+			m.mode = viewNormal
+			m.message = ""
+		}
+	}
+	return m, nil
+}
+
+// ===========================================
+// Port Forward Helpers
+// ===========================================
 
 // instanceBackendType returns the backend type for the instance currently
 // being managed in the port forward dialog.
