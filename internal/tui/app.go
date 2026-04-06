@@ -88,6 +88,9 @@ type model struct {
 	coderPresets       []string // available preset names (in-memory, from API)
 	coderFetchingParams bool    // true while fetching template parameters
 
+	codespaceMachines         []string // available machine types (from GitHub API)
+	codespaceFetchingMachines bool     // true while fetching machine types
+
 	toolStatus []deps.ToolStatus // cached tool install statuses for settings page
 
 	depsResult []deps.Dependency // set on first-ever startup
@@ -257,6 +260,20 @@ func (m *model) backendFor(bt fleet.BackendType) backend.Backend {
 	return b
 }
 
+// firstFleetRepo returns the "owner/repo" string for the first fleet's
+// remote URL, or "" if no fleets exist. Used to query GitHub APIs.
+func (m *model) firstFleetRepo() string {
+	if m.st == nil {
+		return ""
+	}
+	for _, f := range m.st.Fleets {
+		if f.Remote != "" {
+			return repoFromRemote(f.Remote)
+		}
+	}
+	return ""
+}
+
 // instanceBackend returns the backend for the given instance's backend type.
 func (m *model) instanceBackend(inst *fleet.Instance) backend.Backend {
 	return m.backendFor(inst.Backend)
@@ -301,6 +318,11 @@ func (m model) Init() tea.Cmd {
 	if m.cfg != nil && m.cfg.CoderSettings.Template != "" {
 		m.coderFetchingParams = true
 		cmds = append(cmds, fetchCoderParamsCmd(m.cfg.CoderSettings.Template))
+	}
+	// Auto-fetch codespace machine types from the first fleet's repo
+	if repo := m.firstFleetRepo(); repo != "" {
+		m.codespaceFetchingMachines = true
+		cmds = append(cmds, fetchCodespaceMachinesCmd(repo))
 	}
 	return tea.Batch(cmds...)
 }
@@ -477,6 +499,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		_ = state.SaveConfig(m.cfg)
 		m.message = fmt.Sprintf("Loaded %d parameters, %d presets", len(newParams), len(m.coderPresets))
+		return m, nil
+
+	case codespaceMachinesFetchedMsg:
+		m.codespaceFetchingMachines = false
+		if msg.err != nil {
+			return m, nil // silently ignore — gh may not be authed
+		}
+		m.codespaceMachines = msg.machines
+		// If no machine configured yet and machines exist, select the first one
+		if m.cfg != nil && m.cfg.CodespacesSettings.Machine == "" && len(m.codespaceMachines) > 0 {
+			m.cfg.CodespacesSettings.Machine = m.codespaceMachines[0]
+			_ = state.SaveConfig(m.cfg)
+		}
 		return m, nil
 
 	case pollCreatingTickMsg:

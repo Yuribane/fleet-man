@@ -230,6 +230,31 @@ func (m *model) cycleCoderPreset(direction int) {
 	m.message = fmt.Sprintf("Preset set to %s", m.cfg.CoderSettings.Preset)
 }
 
+func (m *model) cycleCodespacesMachine(direction int) {
+	if m.cfg == nil || len(m.codespaceMachines) == 0 {
+		return
+	}
+
+	current := m.cfg.CodespacesSettings.Machine
+	idx := 0
+	for i, mt := range m.codespaceMachines {
+		if mt == current {
+			idx = i
+			break
+		}
+	}
+
+	idx = (idx + direction + len(m.codespaceMachines)) % len(m.codespaceMachines)
+	m.cfg.CodespacesSettings.Machine = m.codespaceMachines[idx]
+	if err := state.SaveConfig(m.cfg); err != nil {
+		m.cfg.CodespacesSettings.Machine = current
+		m.message = fmt.Sprintf("Failed to save settings: %v", err)
+		return
+	}
+
+	m.message = fmt.Sprintf("Machine set to %s", m.cfg.CodespacesSettings.Machine)
+}
+
 func (m model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.settingsEditing {
 		return m.updateSettingsEditing(msg)
@@ -269,6 +294,8 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.toggleAutoInstall()
 			} else if item == settingsItemCoderPreset {
 				m.cycleCoderPreset(-1)
+			} else if item == settingsItemCodespacesMachine {
+				m.cycleCodespacesMachine(-1)
 			}
 			return m, nil
 
@@ -280,6 +307,8 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.toggleAutoInstall()
 			} else if item == settingsItemCoderPreset {
 				m.cycleCoderPreset(1)
+			} else if item == settingsItemCodespacesMachine {
+				m.cycleCodespacesMachine(1)
 			}
 			return m, nil
 
@@ -295,6 +324,9 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if item == settingsItemCoderPreset {
 				m.cycleCoderPreset(1)
+			}
+			if item == settingsItemCodespacesMachine {
+				m.cycleCodespacesMachine(1)
 				return m, nil
 			}
 			if item == settingsItemDoctor {
@@ -349,8 +381,9 @@ func (m model) enterSettingsEditing() (tea.Model, tea.Cmd) {
 			}
 		}
 	case item == settingsItemCodespacesMachine:
-		current = m.cfg.CodespacesSettings.Machine
-		m.settingsInput.Placeholder = "basicLinux32gb"
+		// Machine is a cycle selector, not a text field
+		m.cycleCodespacesMachine(1)
+		return m, nil
 	case item == settingsItemCodespacesIdle:
 		current = m.cfg.CodespacesSettings.IdleTimeout
 		m.settingsInput.Placeholder = "30m"
@@ -399,8 +432,6 @@ func (m model) updateSettingsEditing(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if idx < len(m.cfg.CoderSettings.Parameters) {
 					m.cfg.CoderSettings.Parameters[idx].Value = value
 				}
-			case item == settingsItemCodespacesMachine:
-				m.cfg.CodespacesSettings.Machine = value
 			case item == settingsItemCodespacesIdle:
 				m.cfg.CodespacesSettings.IdleTimeout = value
 			case item == settingsItemCodespacesDevcontainer:
@@ -536,8 +567,14 @@ func (m model) viewSettings() string {
 
 		case "Codespaces":
 			machineValue := cfg.CodespacesSettings.Machine
-			if machineValue == "" && !(m.settingsEditing && currentItem == settingsItemCodespacesMachine) {
-				machineValue = dimStyle.Render("(not set)")
+			if machineValue == "" {
+				if m.codespaceFetchingMachines {
+					machineValue = m.spinner.View() + " fetching..."
+				} else {
+					machineValue = dimStyle.Render("(none)")
+				}
+			} else {
+				machineValue = fmt.Sprintf("[ %s ]", machineValue)
 			}
 			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemCodespacesMachine, "Machine", machineValue))
 			listContent.WriteString("\n")

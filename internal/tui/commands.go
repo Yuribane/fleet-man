@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -173,6 +174,50 @@ func fetchCoderParamsCmd(templateName string) tea.Cmd {
 		presets, _ := coderbackend.FetchPresets(versionID)
 		return coderParamsFetchedMsg{params: params, presets: presets}
 	}
+}
+
+// codespaceMachinesFetchedMsg is sent when machine type fetching completes.
+type codespaceMachinesFetchedMsg struct {
+	machines []string
+	err      error
+}
+
+// fetchCodespaceMachinesCmd fetches available codespace machine types
+// for the given repo via the GitHub API.
+func fetchCodespaceMachinesCmd(repo string) tea.Cmd {
+	return func() tea.Msg {
+		cmd := exec.Command("gh", "api", "repos/"+repo+"/codespaces/machines", "--jq", ".machines[].name")
+		out, err := cmd.Output()
+		if err != nil {
+			return codespaceMachinesFetchedMsg{err: err}
+		}
+		var machines []string
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" {
+				machines = append(machines, line)
+			}
+		}
+		return codespaceMachinesFetchedMsg{machines: machines}
+	}
+}
+
+// repoFromRemote extracts "owner/repo" from a git remote URL.
+func repoFromRemote(remoteURL string) string {
+	// SSH format: git@github.com:owner/repo.git
+	if strings.Contains(remoteURL, ":") && strings.Contains(remoteURL, "@") {
+		parts := strings.SplitN(remoteURL, ":", 2)
+		if len(parts) == 2 {
+			return strings.TrimSuffix(parts[1], ".git")
+		}
+	}
+	// HTTPS format: https://github.com/owner/repo.git
+	remoteURL = strings.TrimSuffix(remoteURL, ".git")
+	parts := strings.Split(remoteURL, "/")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2] + "/" + parts[len(parts)-1]
+	}
+	return remoteURL
 }
 
 // logsCommand returns an *exec.Cmd for viewing instance logs.
