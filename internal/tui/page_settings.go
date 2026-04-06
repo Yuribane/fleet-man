@@ -23,8 +23,6 @@ const (
 	settingsItemCoderParamBase // parameters are at index base + i
 
 	settingsItemCodespacesMachine = 500 // codespaces settings start here
-	settingsItemCodespacesIdle    = 501
-	settingsItemCodespacesDevcontainer = 502
 
 	settingsItemToolStatusBase = 1000 // tool status rows start here
 	settingsItemDoctor         = 2000 // doctor action row
@@ -73,7 +71,7 @@ var settingsSections = []settingsSection{
 		Title: "Codespaces",
 		Tool:  "gh",
 		Items: func(_ *state.Config) []int {
-			return []int{settingsItemCodespacesMachine, settingsItemCodespacesIdle, settingsItemCodespacesDevcontainer}
+			return []int{settingsItemCodespacesMachine}
 		},
 	},
 	{
@@ -411,12 +409,6 @@ func (m model) enterSettingsEditing() (tea.Model, tea.Cmd) {
 		// Machine is a cycle selector, not a text field
 		m.cycleCodespacesMachine(1)
 		return m, nil
-	case item == settingsItemCodespacesIdle:
-		current = m.cfg.CodespacesSettings.IdleTimeout
-		m.settingsInput.Placeholder = "30m"
-	case item == settingsItemCodespacesDevcontainer:
-		current = m.cfg.CodespacesSettings.DevcontainerPath
-		m.settingsInput.Placeholder = ".devcontainer/devcontainer.json"
 	default:
 		return m, nil
 	}
@@ -459,10 +451,6 @@ func (m model) updateSettingsEditing(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if idx < len(m.cfg.CoderSettings.Parameters) {
 					m.cfg.CoderSettings.Parameters[idx].Value = value
 				}
-			case item == settingsItemCodespacesIdle:
-				m.cfg.CodespacesSettings.IdleTimeout = value
-			case item == settingsItemCodespacesDevcontainer:
-				m.cfg.CodespacesSettings.DevcontainerPath = value
 			}
 
 			if err := state.SaveConfig(m.cfg); err != nil {
@@ -617,20 +605,6 @@ func (m model) viewSettings() string {
 				}
 			}
 			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemCodespacesMachine, "Machine", machineValue))
-			listContent.WriteString("\n")
-
-			idleValue := cfg.CodespacesSettings.IdleTimeout
-			if idleValue == "" && !(m.settingsEditing && currentItem == settingsItemCodespacesIdle) {
-				idleValue = dimStyle.Render("(not set)")
-			}
-			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemCodespacesIdle, "Idle timeout", idleValue))
-			listContent.WriteString("\n")
-
-			dcPathValue := cfg.CodespacesSettings.DevcontainerPath
-			if dcPathValue == "" && !(m.settingsEditing && currentItem == settingsItemCodespacesDevcontainer) {
-				dcPathValue = dimStyle.Render("(not set)")
-			}
-			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemCodespacesDevcontainer, "Devcontainer path", dcPathValue))
 
 		case "Tool Status":
 			for i, t := range m.toolStatus {
