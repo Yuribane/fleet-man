@@ -60,7 +60,7 @@ func dotfilesSetup(cfg *state.Config) string {
 func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested bool) []string {
 	setup := dotfilesSetup(cfg)
 	session := sanitizeSessionName(instanceName)
-	tmuxInstall := `command -v tmux >/dev/null 2>&1 || { echo '==> Installing tmux...'; (sudo apt-get update -qq && sudo apt-get install -y -qq tmux) 2>/dev/null || (sudo apk add tmux) 2>/dev/null || (sudo dnf install -y tmux) 2>/dev/null; }; `
+	tmuxInstall := `command -v tmux >/dev/null 2>&1 || { echo '==> Installing tmux...'; (apt-get update -qq && apt-get install -y -qq tmux) 2>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq tmux) 2>/dev/null || (apk add tmux) 2>/dev/null || (sudo apk add tmux) 2>/dev/null || (dnf install -y tmux) 2>/dev/null || (sudo dnf install -y tmux) 2>/dev/null || echo 'ERROR: failed to install tmux'; }; `
 	// coder ssh may report incorrect terminal dimensions (e.g. 128x128).
 	// We fix the PTY size with stty before tmux starts and pass -x/-y for
 	// new session creation. "window-size latest" tells tmux to always

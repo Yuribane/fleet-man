@@ -53,7 +53,9 @@ func splitPaneCmd(existingPaneID string, instanceName string, cmd *exec.Cmd) tea
 	args := cmd.Args
 
 	return func() tea.Msg {
-		shellScript := quoteArgs(args)
+		// Wrap the command so that on non-zero exit the pane stays open
+		// briefly, giving the user time to read the error message.
+		shellScript := quoteArgs(args) + `; __rc=$?; if [ $__rc -ne 0 ]; then echo; echo "exited with code $__rc — closing in 3s"; sleep 3; fi; exit $__rc`
 
 		// If we have an existing pane, respawn it in-place to avoid
 		// layout changes that cause visual corruption in the fleet TUI.
