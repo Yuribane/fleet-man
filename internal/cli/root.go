@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"syscall"
 
+	"github.com/BenjaminBenetti/fleet-man/internal/doctor"
 	"github.com/BenjaminBenetti/fleet-man/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -15,12 +16,16 @@ import (
 // NewRootCmd creates the root fleet command.
 func NewRootCmd() *cobra.Command {
 	var useTmux bool
+	var runDoctor bool
 
 	root := &cobra.Command{
 		Use:   "fleet",
 		Short: "Manage fleets of devcontainers",
 		Long:  "fleet-man is a CLI/TUI tool for spawning and managing fleets of devcontainers from a repo.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if runDoctor {
+				return doctor.Run()
+			}
 			if useTmux {
 				return relaunchInTmux()
 			}
@@ -29,6 +34,7 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	root.Flags().BoolVar(&useTmux, "tmux", false, "launch fleet inside a tmux session (enables split pane mode)")
+	root.Flags().BoolVar(&runDoctor, "doctor", false, "launch a coding agent to diagnose and fix your setup")
 
 	root.AddCommand(
 		newUpCmd(),

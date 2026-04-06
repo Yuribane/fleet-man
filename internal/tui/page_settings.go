@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/BenjaminBenetti/fleet-man/internal/doctor"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -20,6 +21,7 @@ const (
 	settingsItemCoderParamBase // parameters are at index base + i
 
 	settingsItemToolStatusBase = 1000 // tool status rows start here
+	settingsItemDoctor         = 2000 // doctor action row
 )
 
 // settingsSection defines a titled group of settings rows that can be
@@ -65,6 +67,12 @@ var settingsSections = []settingsSection{
 				settingsItemToolStatusBase + 1,
 				settingsItemToolStatusBase + 2,
 			}
+		},
+	},
+	{
+		Title: "Doctor",
+		Items: func(_ *state.Config) []int {
+			return []int{settingsItemDoctor}
 		},
 	},
 }
@@ -277,6 +285,14 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if item == settingsItemCoderPreset {
 				m.cycleCoderPreset(1)
 				return m, nil
+			}
+			if item == settingsItemDoctor {
+				cmd, err := doctor.Command()
+				if err != nil {
+					m.message = err.Error()
+					return m, nil
+				}
+				return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return execDoneMsg{err} })
 			}
 			if item >= settingsItemToolStatusBase {
 				idx := item - settingsItemToolStatusBase
@@ -507,6 +523,16 @@ func (m model) viewSettings() string {
 				itemID := settingsItemToolStatusBase + i
 				listContent.WriteString(m.renderSettingsRow(currentItem == itemID, t.Name, value))
 			}
+
+		case "Doctor":
+			agentName, _, agentErr := doctor.FindAgent()
+			var value string
+			if agentErr != nil {
+				value = statusCreatingStyle.Render("no agent found") + "  " + dimStyle.Render("install claude, codex, gemini, or copilot")
+			} else {
+				value = statusRunningStyle.Render(agentName) + "  " + dimStyle.Render("press enter to diagnose your setup")
+			}
+			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemDoctor, "Run Doctor", value))
 		}
 
 		listContent.WriteString("\n\n")

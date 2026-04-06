@@ -141,7 +141,11 @@ func TestUpdateSettingsNavUpDown(t *testing.T) {
 		got = updated.(model)
 	}
 
-	// Wrap past last tool status item back to first
+	// Navigate through doctor row
+	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
+	got = updated.(model)
+
+	// Wrap past last item back to first
 	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
 	got = updated.(model)
 	if got.settingsCursor != 0 {
