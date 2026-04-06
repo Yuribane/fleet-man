@@ -369,7 +369,7 @@ func (m model) viewFleetList() string {
 			case fleet.BackendCoder:
 				backendIcon = "⌨"
 			case fleet.BackendCodespaces:
-				backendIcon = "☁"
+				backendIcon = "⏣"
 			}
 			branchItem := ""
 			if branch := resolveWorkspaceBranch(inst.WorkspaceDir); branch != "" {
