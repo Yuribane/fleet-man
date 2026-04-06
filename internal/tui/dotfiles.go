@@ -95,11 +95,17 @@ func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested
 	// attaching. The hook puts the window into manual-size mode and
 	// prevents dynamic resizing. We run this as a one-off tmux command
 	// against the existing server (if any) before exec-ing into it.
+	// Stabilise SSH agent forwarding across tmux detach/reattach cycles.
+	// Each SSH connection creates a new agent socket, but tmux keeps the
+	// old SSH_AUTH_SOCK from the original session. We symlink the current
+	// socket to a fixed path and point SSH_AUTH_SOCK there so it survives
+	// reconnects.
+	sshAgentFix := `if [ -n "$SSH_AUTH_SOCK" ] && [ "$SSH_AUTH_SOCK" != "$HOME/.ssh/ssh_auth_sock" ]; then mkdir -p ~/.ssh && ln -sf "$SSH_AUTH_SOCK" ~/.ssh/ssh_auth_sock && export SSH_AUTH_SOCK="$HOME/.ssh/ssh_auth_sock"; fi; `
 	hookClear := fmt.Sprintf(
 		`tmux has-session -t %s 2>/dev/null && tmux set-hook -gu client-attached 2>/dev/null; `,
 		shQuote(session),
 	)
-	inner := setup + tmuxInstall + sizefix + hookClear + fmt.Sprintf(
+	inner := setup + tmuxInstall + sizefix + sshAgentFix + hookClear + fmt.Sprintf(
 		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client \; set status-right '%s'`+prefixConf+resizeHook,
 		shQuote(session), statusRight,
 	)
