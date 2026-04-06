@@ -62,11 +62,20 @@ type CodespacesBackend struct {
 	// GitHub. Populated by Up() so that subsequent ExecCommand calls on
 	// the same backend instance use the correct name.
 	nameCache map[string]string
+
+	// sshConfigs caches SSH connection info keyed by codespace name.
+	// Populated by Up() (generation) or RegisterName() (loading from disk).
+	// When present, methods use native `ssh` instead of `gh codespace ssh`
+	// for proper PTY allocation.
+	sshConfigs map[string]sshConfig
 }
 
 // New creates a new CodespacesBackend.
 func New(opts ...Option) *CodespacesBackend {
-	b := &CodespacesBackend{nameCache: make(map[string]string)}
+	b := &CodespacesBackend{
+		nameCache:  make(map[string]string),
+		sshConfigs: make(map[string]sshConfig),
+	}
 	for _, o := range opts {
 		o(b)
 	}
@@ -76,8 +85,11 @@ func New(opts ...Option) *CodespacesBackend {
 // RegisterName associates a workspace dir with its real codespace name.
 // This allows ExecCommand and other methods to use the correct name
 // when called from contexts that know the container ID (e.g. the TUI).
+// Also loads any existing SSH config from disk so that native SSH is
+// used for subsequent commands.
 func (b *CodespacesBackend) RegisterName(workspaceDir, codespace string) {
 	b.nameCache[workspaceDir] = codespace
+	b.loadSSHConfig(codespace, workspaceDir)
 }
 
 // resolveCodespaceName returns the real codespace name for a workspace dir.
@@ -146,6 +158,10 @@ func (b *CodespacesBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 		return nil, err
 	}
 
+	// Generate SSH config for native SSH access with proper PTY support.
+	// Non-fatal: methods fall back to gh codespace ssh if this fails.
+	_, _ = b.generateSSHConfig(csName, workspaceDir)
+
 	return &backend.UpResult{
 		Outcome:               "success",
 		ContainerID:           csName,
@@ -156,6 +172,7 @@ func (b *CodespacesBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 
 // Down deletes a codespace permanently.
 func (b *CodespacesBackend) Down(containerID string) error {
+	delete(b.sshConfigs, containerID)
 	cmd := exec.Command("gh", "codespace", "delete", "-c", containerID, "--force")
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
@@ -187,8 +204,7 @@ func (b *CodespacesBackend) Start(containerID string) error {
 // Exec runs an interactive command inside a codespace via SSH.
 func (b *CodespacesBackend) Exec(workspaceDir string, command []string) error {
 	name := b.resolveCodespaceName(workspaceDir)
-	args := sshArgs(name, command)
-	cmd := exec.Command("gh", args...)
+	cmd := b.sshCommand(name, command, true)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -199,8 +215,7 @@ func (b *CodespacesBackend) Exec(workspaceDir string, command []string) error {
 // inside a codespace via SSH.
 func (b *CodespacesBackend) ExecCommand(workspaceDir string, command []string) *exec.Cmd {
 	name := b.resolveCodespaceName(workspaceDir)
-	args := sshArgs(name, command)
-	return exec.Command("gh", args...)
+	return b.sshCommand(name, command, true)
 }
 
 // ===========================================
@@ -263,7 +278,7 @@ func (b *CodespacesBackend) LogsCommand(containerID string, follow bool) *exec.C
 
 // CaptureScreen runs `tmux capture-pane` inside a codespace via SSH.
 func (b *CodespacesBackend) CaptureScreen(containerID, tmuxSession string) backend.ScreenCapture {
-	cmd := exec.Command("gh", sshArgs(containerID, []string{"tmux", "capture-pane", "-t", tmuxSession, "-p"})...)
+	cmd := b.sshCommand(containerID, []string{"tmux", "capture-pane", "-t", tmuxSession, "-p"}, false)
 	out, err := cmd.Output()
 	if err != nil {
 		return backend.ScreenCapture{}
@@ -273,7 +288,7 @@ func (b *CodespacesBackend) CaptureScreen(containerID, tmuxSession string) backe
 
 // AgentToolProbe detects which agent tool is running inside a codespace.
 func (b *CodespacesBackend) AgentToolProbe(containerID string) (string, bool) {
-	cmd := exec.Command("gh", sshArgs(containerID, []string{toolProbeScript})...)
+	cmd := b.sshCommand(containerID, []string{toolProbeScript}, false)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", false
@@ -369,7 +384,7 @@ func (b *CodespacesBackend) waitForState(name, desiredState string, timeout time
 
 // fetchStats reads CPU and memory stats from a codespace via SSH.
 func (b *CodespacesBackend) fetchStats(csName string) (*backend.ContainerStats, error) {
-	cmd := exec.Command("gh", sshArgs(csName, []string{"ps", "-eo", "pcpu=,rss=", "--no-headers"})...)
+	cmd := b.sshCommand(csName, []string{"ps", "-eo", "pcpu=,rss=", "--no-headers"}, false)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
