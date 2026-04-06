@@ -125,6 +125,12 @@ func TestUpdateSettingsNavUpDown(t *testing.T) {
 
 	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
 	got = updated.(model)
+	if got.settingsCursor != settingsItemDotfilesSetup {
+		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemDotfilesSetup)
+	}
+
+	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
+	got = updated.(model)
 	if got.settingsCursor != settingsItemCoderTemplate {
 		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemCoderTemplate)
 	}

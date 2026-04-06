@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/BenjaminBenetti/fleet-man/internal/agent"
 	"github.com/BenjaminBenetti/fleet-man/internal/doctor"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,6 +17,7 @@ const (
 	settingsItemDotfilesRepo
 	settingsItemDotfilesScript
 	settingsItemDotfilesAutoInstall
+	settingsItemDotfilesSetup
 	settingsItemCoderTemplate
 	settingsItemCoderPreset
 	settingsItemCoderParamBase // parameters are at index base + i
@@ -27,6 +29,10 @@ const (
 	settingsItemToolStatusBase = 1000 // tool status rows start here
 	settingsItemDoctor         = 2000 // doctor action row
 )
+
+// dotfilesSetupPrompt is the instruction sent to the coding agent for
+// guided dotfiles setup.
+const dotfilesSetupPrompt = "Follow the instructions in https://raw.githubusercontent.com/BenjaminBenetti/Teeleport/main/SETUP_SKILL.md to help me set up Teeleport."
 
 // settingsSection defines a titled group of settings rows that can be
 // conditionally shown based on tool availability.
@@ -47,7 +53,7 @@ var settingsSections = []settingsSection{
 	{
 		Title: "Dotfiles",
 		Items: func(_ *state.Config) []int {
-			return []int{settingsItemDotfilesRepo, settingsItemDotfilesScript, settingsItemDotfilesAutoInstall}
+			return []int{settingsItemDotfilesRepo, settingsItemDotfilesScript, settingsItemDotfilesAutoInstall, settingsItemDotfilesSetup}
 		},
 	},
 	{
@@ -350,6 +356,14 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return execDoneMsg{err} })
 			}
+			if item == settingsItemDotfilesSetup {
+				cmd, err := agent.CommandWithPrompt(dotfilesSetupPrompt)
+				if err != nil {
+					m.message = err.Error()
+					return m, nil
+				}
+				return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return execDoneMsg{err} })
+			}
 			if item >= settingsItemToolStatusBase {
 				idx := item - settingsItemToolStatusBase
 				if idx < len(m.toolStatus) {
@@ -539,6 +553,16 @@ func (m model) viewSettings() string {
 				autoInstallValue = "[ on ]"
 			}
 			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemDotfilesAutoInstall, "Auto install", autoInstallValue))
+			listContent.WriteString("\n")
+
+			agentName, _, agentErr := agent.FindAgent()
+			var setupValue string
+			if agentErr != nil {
+				setupValue = statusCreatingStyle.Render("no agent found") + "  " + dimStyle.Render("install claude, codex, gemini, or copilot")
+			} else {
+				setupValue = statusRunningStyle.Render(agentName) + "  " + dimStyle.Render("press enter to get help setting up dotfiles")
+			}
+			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemDotfilesSetup, "Help me set this up", setupValue))
 
 		case "Coder":
 			templateValue := cfg.CoderSettings.Template
