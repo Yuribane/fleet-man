@@ -238,21 +238,34 @@ func (m *model) cycleCodespacesMachine(direction int) {
 	current := m.cfg.CodespacesSettings.Machine
 	idx := 0
 	for i, mt := range m.codespaceMachines {
-		if mt == current {
+		if mt.Name == current {
 			idx = i
 			break
 		}
 	}
 
 	idx = (idx + direction + len(m.codespaceMachines)) % len(m.codespaceMachines)
-	m.cfg.CodespacesSettings.Machine = m.codespaceMachines[idx]
+	selected := m.codespaceMachines[idx]
+	m.cfg.CodespacesSettings.Machine = selected.Name
 	if err := state.SaveConfig(m.cfg); err != nil {
 		m.cfg.CodespacesSettings.Machine = current
 		m.message = fmt.Sprintf("Failed to save settings: %v", err)
 		return
 	}
 
-	m.message = fmt.Sprintf("Machine set to %s", m.cfg.CodespacesSettings.Machine)
+	m.message = fmt.Sprintf("Machine set to %s", selected.DisplayName)
+}
+
+// codespacesMachineLabel returns the display label for the currently
+// configured machine. Falls back to the raw name if no match is found.
+func (m *model) codespacesMachineLabel() string {
+	name := m.cfg.CodespacesSettings.Machine
+	for _, mt := range m.codespaceMachines {
+		if mt.Name == name {
+			return mt.DisplayName
+		}
+	}
+	return name
 }
 
 func (m model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -566,15 +579,15 @@ func (m model) viewSettings() string {
 			}
 
 		case "Codespaces":
-			machineValue := cfg.CodespacesSettings.Machine
-			if machineValue == "" {
+			var machineValue string
+			if cfg.CodespacesSettings.Machine == "" {
 				if m.codespaceFetchingMachines {
 					machineValue = m.spinner.View() + " fetching..."
 				} else {
 					machineValue = dimStyle.Render("(none)")
 				}
 			} else {
-				machineValue = fmt.Sprintf("[ %s ]", machineValue)
+				machineValue = fmt.Sprintf("[ %s ]", m.codespacesMachineLabel())
 			}
 			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemCodespacesMachine, "Machine", machineValue))
 			listContent.WriteString("\n")

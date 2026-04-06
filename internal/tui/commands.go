@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -176,9 +177,15 @@ func fetchCoderParamsCmd(templateName string) tea.Cmd {
 	}
 }
 
+// codespaceMachine holds a machine type name and its human-readable label.
+type codespaceMachine struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+}
+
 // codespaceMachinesFetchedMsg is sent when machine type fetching completes.
 type codespaceMachinesFetchedMsg struct {
-	machines []string
+	machines []codespaceMachine
 	err      error
 }
 
@@ -186,19 +193,18 @@ type codespaceMachinesFetchedMsg struct {
 // for the given repo via the GitHub API.
 func fetchCodespaceMachinesCmd(repo string) tea.Cmd {
 	return func() tea.Msg {
-		cmd := exec.Command("gh", "api", "repos/"+repo+"/codespaces/machines", "--jq", ".machines[].name")
+		cmd := exec.Command("gh", "api", "repos/"+repo+"/codespaces/machines")
 		out, err := cmd.Output()
 		if err != nil {
 			return codespaceMachinesFetchedMsg{err: err}
 		}
-		var machines []string
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" {
-				machines = append(machines, line)
-			}
+		var resp struct {
+			Machines []codespaceMachine `json:"machines"`
 		}
-		return codespaceMachinesFetchedMsg{machines: machines}
+		if err := json.Unmarshal(out, &resp); err != nil {
+			return codespaceMachinesFetchedMsg{err: err}
+		}
+		return codespaceMachinesFetchedMsg{machines: resp.Machines}
 	}
 }
 

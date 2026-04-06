@@ -88,7 +88,7 @@ type model struct {
 	coderPresets       []string // available preset names (in-memory, from API)
 	coderFetchingParams bool    // true while fetching template parameters
 
-	codespaceMachines         []string // available machine types (from GitHub API)
+	codespaceMachines         []codespaceMachine // available machine types (from GitHub API)
 	codespaceFetchingMachines bool     // true while fetching machine types
 
 	toolStatus []deps.ToolStatus // cached tool install statuses for settings page
@@ -509,7 +509,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.codespaceMachines = msg.machines
 		// If no machine configured yet and machines exist, select the first one
 		if m.cfg != nil && m.cfg.CodespacesSettings.Machine == "" && len(m.codespaceMachines) > 0 {
-			m.cfg.CodespacesSettings.Machine = m.codespaceMachines[0]
+			m.cfg.CodespacesSettings.Machine = m.codespaceMachines[0].Name
 			_ = state.SaveConfig(m.cfg)
 		}
 		return m, nil
