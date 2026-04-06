@@ -91,12 +91,14 @@ func (m model) updateConfirmDeleteFleetWarn(msg tea.Msg) (tea.Model, tea.Cmd) {
 var backendToolRequirements = map[fleet.BackendType]string{
 	fleet.BackendDevcontainer: "devcontainer",
 	fleet.BackendCoder:        "coder",
+	fleet.BackendCodespaces:   "gh",
 }
 
 // allBackendTypes is the ordered master list of every backend type.
 var allBackendTypes = []fleet.BackendType{
 	fleet.BackendDevcontainer,
 	fleet.BackendCoder,
+	fleet.BackendCodespaces,
 }
 
 // availableBackendTypes returns the subset of backend types whose
@@ -139,6 +141,8 @@ func backendTypeLabel(bt fleet.BackendType) string {
 	switch bt {
 	case fleet.BackendCoder:
 		return "Coder"
+	case fleet.BackendCodespaces:
+		return "Codespaces"
 	default:
 		return "Devcontainer"
 	}

@@ -23,8 +23,11 @@ func newUpCmd() *cobra.Command {
 			name := args[0]
 
 			bt := fleet.BackendDevcontainer
-			if backendFlag == "coder" {
+			switch backendFlag {
+			case "coder":
 				bt = fleet.BackendCoder
+			case "codespaces":
+				bt = fleet.BackendCodespaces
 			}
 
 			target, err := fleet.Resolve(name, repoFlag)
@@ -94,6 +97,6 @@ func newUpCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&repoFlag, "repo", "", "Git remote URL to clone from")
-	cmd.Flags().StringVar(&backendFlag, "backend", "devcontainer", "Backend type: devcontainer or coder")
+	cmd.Flags().StringVar(&backendFlag, "backend", "devcontainer", "Backend type: devcontainer, coder, or codespaces")
 	return cmd
 }

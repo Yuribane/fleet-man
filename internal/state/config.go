@@ -53,12 +53,20 @@ type CoderSettings struct {
 	Parameters []CoderParameter `json:"parameters,omitempty"`
 }
 
+// CodespacesSettings holds GitHub Codespaces preferences.
+type CodespacesSettings struct {
+	Machine          string `json:"machine,omitempty"`           // machine type (e.g. "basicLinux32gb")
+	IdleTimeout      string `json:"idle_timeout,omitempty"`      // duration (e.g. "30m")
+	DevcontainerPath string `json:"devcontainer_path,omitempty"` // path to devcontainer.json in repo
+}
+
 // Config holds user preferences.
 type Config struct {
-	AgentSettings    AgentSettings    `json:"agent_settings"`
-	DotfilesSettings DotfilesSettings `json:"dotfiles_settings"`
-	CoderSettings    CoderSettings    `json:"coder_settings"`
-	DefaultBackend   string           `json:"default_backend,omitempty"` // "devcontainer" or "coder"
+	AgentSettings      AgentSettings      `json:"agent_settings"`
+	DotfilesSettings   DotfilesSettings   `json:"dotfiles_settings"`
+	CoderSettings      CoderSettings      `json:"coder_settings"`
+	CodespacesSettings CodespacesSettings `json:"codespaces_settings"`
+	DefaultBackend     string             `json:"default_backend,omitempty"` // "devcontainer", "coder", or "codespaces"
 }
 
 // DefaultConfig returns a config with default values applied.

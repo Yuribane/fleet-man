@@ -3,6 +3,7 @@ package backendutil
 import (
 	"github.com/BenjaminBenetti/fleet-man/internal/backend"
 	coderbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/coder"
+	codespacesbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/codespaces"
 	devcontainerbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/devcontainer"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 )
@@ -16,6 +17,12 @@ func New(bt fleet.BackendType, verbose bool) backend.Backend {
 			opts = append(opts, coderbackend.WithVerbose(verbose))
 		}
 		return coderbackend.New(opts...)
+	case fleet.BackendCodespaces:
+		opts := []codespacesbackend.Option{}
+		if verbose {
+			opts = append(opts, codespacesbackend.WithVerbose(verbose))
+		}
+		return codespacesbackend.New(opts...)
 	default:
 		opts := []devcontainerbackend.Option{}
 		if verbose {

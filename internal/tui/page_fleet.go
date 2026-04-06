@@ -209,9 +209,12 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			r := m.rows[m.cursor]
 			var codeCmd *exec.Cmd
-			if inst.Backend == fleet.BackendCoder {
+			switch inst.Backend {
+			case fleet.BackendCoder:
 				codeCmd = exec.Command("coder", backendutil.CoderOpenVSCodeArgs(inst.ContainerID)...)
-			} else {
+			case fleet.BackendCodespaces:
+				codeCmd = exec.Command("gh", "codespace", "code", "-c", inst.ContainerID)
+			default:
 				uri, ok := m.instanceBackend(inst).EditorURI(inst.WorkspaceDir, r.fleetName)
 				if !ok {
 					m.message = "Editor integration not supported by this backend"
@@ -361,8 +364,11 @@ func (m model) viewFleetList() string {
 			}
 
 			backendIcon := "⬡" // devcontainer
-			if inst.Backend == fleet.BackendCoder {
+			switch inst.Backend {
+			case fleet.BackendCoder:
 				backendIcon = "⌨"
+			case fleet.BackendCodespaces:
+				backendIcon = "☁"
 			}
 			branchItem := ""
 			if branch := resolveWorkspaceBranch(inst.WorkspaceDir); branch != "" {

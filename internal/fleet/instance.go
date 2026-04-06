@@ -20,6 +20,7 @@ type BackendType string
 const (
 	BackendDevcontainer BackendType = "devcontainer"
 	BackendCoder        BackendType = "coder"
+	BackendCodespaces   BackendType = "codespaces"
 )
 
 type Instance struct {

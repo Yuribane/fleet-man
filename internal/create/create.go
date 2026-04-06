@@ -10,6 +10,7 @@ import (
 	"github.com/BenjaminBenetti/fleet-man/internal/backend"
 	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	coderbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/coder"
+	codespacesbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/codespaces"
 	"github.com/BenjaminBenetti/fleet-man/internal/dotfiles"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
@@ -24,13 +25,16 @@ func Run(fleetName, instanceName, remoteURL string, verbose bool, bt fleet.Backe
 	wsDir := filepath.Join(state.WorkspacesDir(), fleetName, instanceName, fleetName)
 
 	var dc backend.Backend
-	if bt == fleet.BackendCoder {
+	switch bt {
+	case fleet.BackendCoder:
 		dc = buildCoderBackend(fleetName, instanceName, remoteURL, verbose)
-	} else {
+	case fleet.BackendCodespaces:
+		dc = buildCodespacesBackend(remoteURL, verbose)
+	default:
 		dc = backendutil.New(bt, verbose)
 	}
 
-	if bt != fleet.BackendCoder {
+	if bt != fleet.BackendCoder && bt != fleet.BackendCodespaces {
 		// Devcontainer: clone repo first, then provision
 		if err := os.MkdirAll(filepath.Dir(wsDir), 0755); err != nil {
 			setFailed(fleetName, instanceName, err)
@@ -129,6 +133,62 @@ func buildCoderBackend(fleetName, instanceName, remoteURL string, verbose bool) 
 	}
 
 	return coderbackend.New(opts...)
+}
+
+// buildCodespacesBackend creates a CodespacesBackend configured from
+// ~/.fleet/config.json with machine type and other preferences.
+func buildCodespacesBackend(remoteURL string, verbose bool) backend.Backend {
+	opts := []codespacesbackend.Option{}
+	if verbose {
+		opts = append(opts, codespacesbackend.WithVerbose(true))
+	}
+
+	// Convert git SSH URL to owner/repo format for gh CLI.
+	repo := repoFromRemoteURL(remoteURL)
+	if repo != "" {
+		opts = append(opts, codespacesbackend.WithRepo(repo))
+	}
+
+	cfg, err := state.LoadConfig()
+	if err != nil || cfg == nil {
+		return codespacesbackend.New(opts...)
+	}
+
+	cs := cfg.CodespacesSettings
+	if cs.Machine != "" {
+		opts = append(opts, codespacesbackend.WithMachine(cs.Machine))
+	}
+	if cs.IdleTimeout != "" {
+		opts = append(opts, codespacesbackend.WithIdleTimeout(cs.IdleTimeout))
+	}
+	if cs.DevcontainerPath != "" {
+		opts = append(opts, codespacesbackend.WithDevcontainerPath(cs.DevcontainerPath))
+	}
+
+	return codespacesbackend.New(opts...)
+}
+
+// repoFromRemoteURL extracts "owner/repo" from a git remote URL.
+// Supports both SSH (git@github.com:owner/repo.git) and HTTPS
+// (https://github.com/owner/repo.git) formats.
+func repoFromRemoteURL(remoteURL string) string {
+	// SSH format: git@github.com:owner/repo.git
+	if strings.Contains(remoteURL, ":") && strings.Contains(remoteURL, "@") {
+		parts := strings.SplitN(remoteURL, ":", 2)
+		if len(parts) == 2 {
+			repo := strings.TrimSuffix(parts[1], ".git")
+			return repo
+		}
+	}
+
+	// HTTPS format: https://github.com/owner/repo.git
+	remoteURL = strings.TrimSuffix(remoteURL, ".git")
+	parts := strings.Split(remoteURL, "/")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2] + "/" + parts[len(parts)-1]
+	}
+
+	return remoteURL
 }
 
 func setFailed(fleetName, instanceName string, origErr error) {
