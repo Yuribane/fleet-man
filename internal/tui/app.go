@@ -276,8 +276,16 @@ func (m *model) firstFleetRepo() string {
 }
 
 // instanceBackend returns the backend for the given instance's backend type.
+// For codespaces, it registers the real codespace name so that exec calls
+// use the correct name instead of deriving from the workspace path.
 func (m *model) instanceBackend(inst *fleet.Instance) backend.Backend {
-	return m.backendFor(inst.Backend)
+	b := m.backendFor(inst.Backend)
+	if inst.Backend == fleet.BackendCodespaces && inst.ContainerID != "" {
+		if csb, ok := b.(*codespacesbackend.CodespacesBackend); ok {
+			csb.RegisterName(inst.WorkspaceDir, inst.ContainerID)
+		}
+	}
+	return b
 }
 
 // backendGroup holds container IDs and sessions grouped by backend type.

@@ -73,9 +73,16 @@ func New(opts ...Option) *CodespacesBackend {
 	return b
 }
 
+// RegisterName associates a workspace dir with its real codespace name.
+// This allows ExecCommand and other methods to use the correct name
+// when called from contexts that know the container ID (e.g. the TUI).
+func (b *CodespacesBackend) RegisterName(workspaceDir, codespace string) {
+	b.nameCache[workspaceDir] = codespace
+}
+
 // resolveCodespaceName returns the real codespace name for a workspace dir.
-// Checks the cache first (populated by Up), then falls back to deriving
-// from the path.
+// Checks the cache first (populated by Up or RegisterName), then falls
+// back to deriving from the path.
 func (b *CodespacesBackend) resolveCodespaceName(workspaceDir string) string {
 	if name, ok := b.nameCache[workspaceDir]; ok {
 		return name

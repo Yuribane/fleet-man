@@ -32,6 +32,19 @@ func New(bt fleet.BackendType, verbose bool) backend.Backend {
 	}
 }
 
+// NewForInstance creates a Backend for the given instance, pre-registering
+// the codespace name mapping when applicable so that Exec/ExecCommand
+// use the correct container ID.
+func NewForInstance(inst *fleet.Instance, verbose bool) backend.Backend {
+	b := New(inst.Backend, verbose)
+	if inst.Backend == fleet.BackendCodespaces && inst.ContainerID != "" {
+		if csb, ok := b.(*codespacesbackend.CodespacesBackend); ok {
+			csb.RegisterName(inst.WorkspaceDir, inst.ContainerID)
+		}
+	}
+	return b
+}
+
 // CoderOpenVSCodeArgs builds args for `coder open vscode`.
 // containerID may be "workspace" or "workspace.agent" — both forms
 // are accepted directly by the coder CLI.

@@ -35,7 +35,7 @@ func newExecCmd() *cobra.Command {
 				return err
 			}
 
-			dc := backendutil.New(inst.Backend, false)
+			dc := backendutil.NewForInstance(inst, false)
 			return dc.Exec(inst.WorkspaceDir, args[1:])
 		},
 	}

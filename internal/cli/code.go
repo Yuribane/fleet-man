@@ -37,7 +37,7 @@ func newCodeCmd() *cobra.Command {
 				return err
 			}
 
-			dc := backendutil.New(inst.Backend, false)
+			dc := backendutil.NewForInstance(inst, false)
 
 			// For coder backend, use `coder open vscode` directly
 			if inst.Backend == fleet.BackendCoder {
