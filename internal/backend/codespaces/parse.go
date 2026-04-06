@@ -27,7 +27,7 @@ func isAuthScopeError(stderr string) bool {
 	return strings.Contains(lower, "gh auth login") ||
 		strings.Contains(lower, "gh auth refresh") ||
 		strings.Contains(lower, "codespace") && strings.Contains(lower, "scope") ||
-		strings.Contains(lower, "http 403") && strings.Contains(lower, "scope")
+		strings.Contains(lower, "http 403")
 }
 
 // isCodespaceLimitError returns true if the stderr output from gh
