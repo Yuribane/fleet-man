@@ -102,6 +102,9 @@ func (b *CodespacesBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 		if isAuthScopeError(stderr) {
 			return nil, fmt.Errorf("%s%s", ErrPrefixAuthScope, "gh auth token is missing the \"codespace\" scope")
 		}
+		if isMachineSelectionError(stderr) {
+			return nil, fmt.Errorf("%s%s", ErrPrefixMachine, "machine type required — configure one in Settings > Codespaces")
+		}
 		if isCodespaceLimitError(stderr) {
 			return nil, fmt.Errorf("%s%s", ErrPrefixLimit, "codespace limit reached")
 		}

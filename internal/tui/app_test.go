@@ -135,6 +135,12 @@ func TestUpdateSettingsNavUpDown(t *testing.T) {
 		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemCoderPreset)
 	}
 
+	// Navigate through codespaces rows (machine, idle timeout, devcontainer path)
+	for i := 0; i < 3; i++ {
+		updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
+		got = updated.(model)
+	}
+
 	// Navigate through tool status rows
 	for i := 0; i < 3; i++ {
 		updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})

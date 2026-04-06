@@ -429,6 +429,25 @@ func (m model) updateCodespacesAuth(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// updateCodespacesMachine handles the dialog shown when gh needs a
+// machine type but none is configured. Enter navigates to settings.
+func (m model) updateCodespacesMachine(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter":
+			m.mode = viewNormal
+			m.page = pageSettings
+			m.message = "Set the Machine field, then retry instance creation"
+			return m, nil
+		case "esc", "ctrl+c":
+			m.mode = viewNormal
+			m.message = ""
+		}
+	}
+	return m, nil
+}
+
 // updateCodespacesLimit handles the dialog shown when the user has
 // hit the maximum codespace count.
 func (m model) updateCodespacesLimit(msg tea.Msg) (tea.Model, tea.Cmd) {

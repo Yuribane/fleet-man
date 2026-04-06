@@ -33,6 +33,7 @@ const (
 	viewDepsCheck
 	viewCodespacesAuth
 	viewCodespacesLimit
+	viewCodespacesMachine
 )
 
 type pageMode int
@@ -504,6 +505,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.dialogFleet = fleetName
 							m.dialogInst = instName
 							m.message = ""
+						} else if inst.Backend == fleet.BackendCodespaces && strings.HasPrefix(inst.Error, codespacesbackend.ErrPrefixMachine) {
+							m.mode = viewCodespacesMachine
+							m.dialogFleet = fleetName
+							m.dialogInst = instName
+							m.message = ""
 						} else if inst.Backend == fleet.BackendCodespaces && strings.HasPrefix(inst.Error, codespacesbackend.ErrPrefixLimit) {
 							m.mode = viewCodespacesLimit
 							m.dialogFleet = fleetName
@@ -557,6 +563,8 @@ func (m model) updateByMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCodespacesAuth(msg)
 	case viewCodespacesLimit:
 		return m.updateCodespacesLimit(msg)
+	case viewCodespacesMachine:
+		return m.updateCodespacesMachine(msg)
 	default:
 		return m.updateNormal(msg)
 	}

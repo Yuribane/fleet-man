@@ -608,6 +608,20 @@ func (m model) viewFleetList() string {
 		b.WriteString(warnBox.Render(dialog))
 		b.WriteString("\n")
 
+	case viewCodespacesMachine:
+		b.WriteString("\n")
+		dialog := fmt.Sprintf(
+			"%s\n\n%s\n\n%s",
+			warnBanner.Render("  Machine Type Required  "),
+			dialogLabel.Render(
+				"GitHub Codespaces requires a machine type but none is\n"+
+					"configured. Press Enter to open Settings and set one.",
+			),
+			dialogHint.Render("[enter] Open Settings  [esc] Cancel"),
+		)
+		b.WriteString(warnBox.Render(dialog))
+		b.WriteString("\n")
+
 	case viewCodespacesLimit:
 		b.WriteString("\n")
 		dialog := fmt.Sprintf(

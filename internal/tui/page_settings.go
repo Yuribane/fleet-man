@@ -20,6 +20,10 @@ const (
 	settingsItemCoderPreset
 	settingsItemCoderParamBase // parameters are at index base + i
 
+	settingsItemCodespacesMachine = 500 // codespaces settings start here
+	settingsItemCodespacesIdle    = 501
+	settingsItemCodespacesDevcontainer = 502
+
 	settingsItemToolStatusBase = 1000 // tool status rows start here
 	settingsItemDoctor         = 2000 // doctor action row
 )
@@ -57,6 +61,13 @@ var settingsSections = []settingsSection{
 				}
 			}
 			return items
+		},
+	},
+	{
+		Title: "Codespaces",
+		Tool:  "gh",
+		Items: func(_ *state.Config) []int {
+			return []int{settingsItemCodespacesMachine, settingsItemCodespacesIdle, settingsItemCodespacesDevcontainer}
 		},
 	},
 	{
@@ -326,7 +337,7 @@ func (m model) enterSettingsEditing() (tea.Model, tea.Cmd) {
 	case item == settingsItemCoderTemplate:
 		current = m.cfg.CoderSettings.Template
 		m.settingsInput.Placeholder = "template-name"
-	case item >= settingsItemCoderParamBase && item < settingsItemToolStatusBase:
+	case item >= settingsItemCoderParamBase && item < settingsItemCodespacesMachine:
 		idx := item - settingsItemCoderParamBase
 		if idx < len(m.cfg.CoderSettings.Parameters) {
 			current = m.cfg.CoderSettings.Parameters[idx].Value
@@ -337,6 +348,15 @@ func (m model) enterSettingsEditing() (tea.Model, tea.Cmd) {
 				m.settingsInput.Placeholder = "value"
 			}
 		}
+	case item == settingsItemCodespacesMachine:
+		current = m.cfg.CodespacesSettings.Machine
+		m.settingsInput.Placeholder = "basicLinux32gb"
+	case item == settingsItemCodespacesIdle:
+		current = m.cfg.CodespacesSettings.IdleTimeout
+		m.settingsInput.Placeholder = "30m"
+	case item == settingsItemCodespacesDevcontainer:
+		current = m.cfg.CodespacesSettings.DevcontainerPath
+		m.settingsInput.Placeholder = ".devcontainer/devcontainer.json"
 	default:
 		return m, nil
 	}
@@ -374,11 +394,17 @@ func (m model) updateSettingsEditing(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.message = "Fetching template parameters..."
 					cmd = fetchCoderParamsCmd(value)
 				}
-			case item >= settingsItemCoderParamBase && item < settingsItemToolStatusBase:
+			case item >= settingsItemCoderParamBase && item < settingsItemCodespacesMachine:
 				idx := item - settingsItemCoderParamBase
 				if idx < len(m.cfg.CoderSettings.Parameters) {
 					m.cfg.CoderSettings.Parameters[idx].Value = value
 				}
+			case item == settingsItemCodespacesMachine:
+				m.cfg.CodespacesSettings.Machine = value
+			case item == settingsItemCodespacesIdle:
+				m.cfg.CodespacesSettings.IdleTimeout = value
+			case item == settingsItemCodespacesDevcontainer:
+				m.cfg.CodespacesSettings.DevcontainerPath = value
 			}
 
 			if err := state.SaveConfig(m.cfg); err != nil {
@@ -507,6 +533,27 @@ func (m model) viewSettings() string {
 				}
 				listContent.WriteString(m.renderSettingsRow(currentItem == paramItem, label, value))
 			}
+
+		case "Codespaces":
+			machineValue := cfg.CodespacesSettings.Machine
+			if machineValue == "" && !(m.settingsEditing && currentItem == settingsItemCodespacesMachine) {
+				machineValue = dimStyle.Render("(not set)")
+			}
+			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemCodespacesMachine, "Machine", machineValue))
+			listContent.WriteString("\n")
+
+			idleValue := cfg.CodespacesSettings.IdleTimeout
+			if idleValue == "" && !(m.settingsEditing && currentItem == settingsItemCodespacesIdle) {
+				idleValue = dimStyle.Render("(not set)")
+			}
+			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemCodespacesIdle, "Idle timeout", idleValue))
+			listContent.WriteString("\n")
+
+			dcPathValue := cfg.CodespacesSettings.DevcontainerPath
+			if dcPathValue == "" && !(m.settingsEditing && currentItem == settingsItemCodespacesDevcontainer) {
+				dcPathValue = dimStyle.Render("(not set)")
+			}
+			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemCodespacesDevcontainer, "Devcontainer path", dcPathValue))
 
 		case "Tool Status":
 			for i, t := range m.toolStatus {
