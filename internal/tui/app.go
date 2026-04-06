@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -531,9 +532,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					switch inst.Status {
 					case fleet.StatusRunning:
 						delete(m.creating, key)
-						if inst.Error != "" {
-							// Running but with a warning (e.g. dotfiles install failed)
-							m.message = fmt.Sprintf("Instance %s is running — warning: %s", key, inst.Error)
+						// Check for a dotfiles warning file
+						warnPath := filepath.Join(state.FleetDir(), "logs", fleetName+"-"+instName+".warn")
+						if warnData, err := os.ReadFile(warnPath); err == nil {
+							_ = os.Remove(warnPath)
+							firstLine := strings.SplitN(strings.TrimSpace(string(warnData)), "\n", 2)[0]
+							m.message = fmt.Sprintf("Instance %s is running — %s (press l for details)", key, firstLine)
 						} else {
 							m.message = fmt.Sprintf("Instance %s is running (container: %s)",
 								key, inst.ContainerID[:min(12, len(inst.ContainerID))])
