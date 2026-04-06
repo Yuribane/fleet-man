@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+
 // ===========================================
 // SSH Config Types
 // ===========================================
@@ -71,6 +72,10 @@ func nativeSSHArgs(cfg *sshConfig, command []string, allocPTY bool) []string {
 	args := []string{"-F", cfg.configPath}
 	if allocPTY {
 		args = append(args, "-t")
+	}
+	// Forward SSH agent when available on the host.
+	if os.Getenv("SSH_AUTH_SOCK") != "" {
+		args = append(args, "-A")
 	}
 	args = append(args, cfg.host)
 	if len(command) == 0 {
