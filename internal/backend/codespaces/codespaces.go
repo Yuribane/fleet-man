@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -185,10 +186,10 @@ func (b *CodespacesBackend) Start(containerID string) error {
 // ===========================================
 
 // Exec runs an interactive command inside a codespace via SSH.
+// The command is wrapped with `script` to allocate a PTY, which is
+// required for interactive tools like tmux.
 func (b *CodespacesBackend) Exec(workspaceDir string, command []string) error {
-	name := b.resolveCodespaceName(workspaceDir)
-	args := sshArgs(name, command)
-	cmd := exec.Command("gh", args...)
+	cmd := b.ExecCommand(workspaceDir, command)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -196,11 +197,37 @@ func (b *CodespacesBackend) Exec(workspaceDir string, command []string) error {
 }
 
 // ExecCommand returns an unstarted *exec.Cmd for running a command
-// inside a codespace via SSH.
+// inside a codespace via SSH. The invocation is wrapped with `script`
+// to force PTY allocation — gh codespace ssh does not allocate a
+// remote PTY when a command is passed after --, which breaks
+// interactive tools like tmux.
 func (b *CodespacesBackend) ExecCommand(workspaceDir string, command []string) *exec.Cmd {
 	name := b.resolveCodespaceName(workspaceDir)
 	args := sshArgs(name, command)
-	return exec.Command("gh", args...)
+	return wrapWithPTY(exec.Command("gh", args...))
+}
+
+// wrapWithPTY wraps a command in the `script` utility to ensure a PTY
+// is allocated. This is needed because gh codespace ssh does not
+// allocate a remote PTY when running non-interactively.
+func wrapWithPTY(cmd *exec.Cmd) *exec.Cmd {
+	// Build the full command string from the original args.
+	ghCmd := quoteShellArgs(cmd.Args)
+
+	// script syntax differs between Linux and macOS.
+	if runtime.GOOS == "darwin" {
+		return exec.Command("script", "-q", "/dev/null", "sh", "-c", ghCmd)
+	}
+	return exec.Command("script", "-qec", ghCmd, "/dev/null")
+}
+
+// quoteShellArgs joins args into a shell-safe string.
+func quoteShellArgs(args []string) string {
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = "'" + strings.ReplaceAll(a, "'", "'\\''") + "'"
+	}
+	return strings.Join(quoted, " ")
 }
 
 // ===========================================
