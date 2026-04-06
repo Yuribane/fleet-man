@@ -105,7 +105,7 @@ func (b *CodespacesBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 		if isCodespaceLimitError(stderr) {
 			return nil, fmt.Errorf("%s%s", ErrPrefixLimit, "codespace limit reached")
 		}
-		return nil, fmt.Errorf("gh codespace create failed: %w", err)
+		return nil, fmt.Errorf("gh codespace create failed: %w\nstderr: %s", err, strings.TrimSpace(stderr))
 	}
 
 	csName := strings.TrimSpace(string(out))
