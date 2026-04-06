@@ -14,6 +14,7 @@ import (
 
 const (
 	settingsItemToolSelection = iota
+	settingsItemTmuxVimKeys
 	settingsItemDotfilesRepo
 	settingsItemDotfilesScript
 	settingsItemDotfilesAutoInstall
@@ -43,9 +44,9 @@ type settingsSection struct {
 // settingsSections lists all settings sections in display order.
 var settingsSections = []settingsSection{
 	{
-		Title: "Agent Settings",
+		Title: "General",
 		Items: func(_ *state.Config) []int {
-			return []int{settingsItemToolSelection}
+			return []int{settingsItemToolSelection, settingsItemTmuxVimKeys}
 		},
 	},
 	{
@@ -190,6 +191,27 @@ func (m *model) cycleAgentTool(direction int) {
 	m.message = fmt.Sprintf("Preferred tool set to %s", agentToolLabel(next))
 }
 
+func (m *model) toggleTmuxVimKeys() {
+	if m.cfg == nil {
+		m.cfg = state.DefaultConfig()
+	}
+
+	current := m.cfg.GeneralSettings.TmuxVimKeysEnabled()
+	next := !current
+	m.cfg.GeneralSettings.TmuxVimKeys = &next
+	if err := state.SaveConfig(m.cfg); err != nil {
+		m.cfg.GeneralSettings.TmuxVimKeys = &current
+		m.message = fmt.Sprintf("Failed to save settings: %v", err)
+		return
+	}
+
+	label := "off"
+	if next {
+		label = "on"
+	}
+	m.message = fmt.Sprintf("Tmux vim keys set to %s", label)
+}
+
 func (m *model) toggleAutoInstall() {
 	if m.cfg == nil {
 		m.cfg = state.DefaultConfig()
@@ -307,6 +329,8 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 			item := m.settingsCursorItem()
 			if item == settingsItemToolSelection {
 				m.cycleAgentTool(-1)
+			} else if item == settingsItemTmuxVimKeys {
+				m.toggleTmuxVimKeys()
 			} else if item == settingsItemDotfilesAutoInstall {
 				m.toggleAutoInstall()
 			} else if item == settingsItemCoderPreset {
@@ -320,6 +344,8 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 			item := m.settingsCursorItem()
 			if item == settingsItemToolSelection {
 				m.cycleAgentTool(1)
+			} else if item == settingsItemTmuxVimKeys {
+				m.toggleTmuxVimKeys()
 			} else if item == settingsItemDotfilesAutoInstall {
 				m.toggleAutoInstall()
 			} else if item == settingsItemCoderPreset {
@@ -333,6 +359,10 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 			item := m.settingsCursorItem()
 			if item == settingsItemToolSelection {
 				m.cycleAgentTool(1)
+				return m, nil
+			}
+			if item == settingsItemTmuxVimKeys {
+				m.toggleTmuxVimKeys()
 				return m, nil
 			}
 			if item == settingsItemDotfilesAutoInstall {
@@ -517,9 +547,16 @@ func (m model) viewSettings() string {
 
 		// Section-specific rows
 		switch s.Title {
-		case "Agent Settings":
+		case "General":
 			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemToolSelection,
 				"Tool selection", fmt.Sprintf("[ %s ]", agentToolLabel(cfg.AgentSettings.ToolSelection))))
+			listContent.WriteString("\n")
+
+			vimKeysValue := "[ off ]"
+			if cfg.GeneralSettings.TmuxVimKeysEnabled() {
+				vimKeysValue = "[ on ]"
+			}
+			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemTmuxVimKeys, "Tmux vim keys", vimKeysValue))
 
 		case "Dotfiles":
 			repoValue := cfg.DotfilesSettings.RepoURL

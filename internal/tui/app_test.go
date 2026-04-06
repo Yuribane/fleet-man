@@ -107,6 +107,12 @@ func TestUpdateSettingsNavUpDown(t *testing.T) {
 
 	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
 	got := updated.(model)
+	if got.settingsCursor != settingsItemTmuxVimKeys {
+		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemTmuxVimKeys)
+	}
+
+	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
+	got = updated.(model)
 	if got.settingsCursor != settingsItemDotfilesRepo {
 		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemDotfilesRepo)
 	}

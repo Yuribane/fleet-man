@@ -173,6 +173,43 @@ func TestFreshShellCommandBothSet(t *testing.T) {
 	}
 }
 
+func TestShellCommandNestedVimKeysEnabled(t *testing.T) {
+	cfg := state.DefaultConfig()
+	got := shellCommand(cfg, "agent-1", 80, 24, true)
+	script := got[2]
+	if !strings.Contains(script, "bind-key j select-pane -D") {
+		t.Errorf("nested script missing j keybinding when vim keys enabled: %s", script)
+	}
+	if !strings.Contains(script, "bind-key k select-pane -U") {
+		t.Errorf("nested script missing k keybinding when vim keys enabled: %s", script)
+	}
+	if !strings.Contains(script, "j/k: pane down/up") {
+		t.Errorf("nested script missing vim keys help text: %s", script)
+	}
+}
+
+func TestShellCommandNestedVimKeysDisabled(t *testing.T) {
+	cfg := state.DefaultConfig()
+	off := false
+	cfg.GeneralSettings.TmuxVimKeys = &off
+
+	got := shellCommand(cfg, "agent-1", 80, 24, true)
+	script := got[2]
+	if strings.Contains(script, "bind-key j select-pane") {
+		t.Errorf("nested script should not have j keybinding when vim keys disabled: %s", script)
+	}
+	if strings.Contains(script, "bind-key k select-pane") {
+		t.Errorf("nested script should not have k keybinding when vim keys disabled: %s", script)
+	}
+	if strings.Contains(script, "j/k:") {
+		t.Errorf("nested script should not have vim keys help text: %s", script)
+	}
+	// Should still have the prefix override
+	if !strings.Contains(script, "set -g prefix C-x") {
+		t.Errorf("nested script missing prefix override: %s", script)
+	}
+}
+
 func TestShellCommandAutoInstallSkipsDotfiles(t *testing.T) {
 	cfg := state.DefaultConfig()
 	cfg.DotfilesSettings.RepoURL = "https://github.com/user/dots"

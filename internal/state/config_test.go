@@ -231,6 +231,46 @@ func TestSaveConfigRoundTripAutoInstall(t *testing.T) {
 	}
 }
 
+func TestTmuxVimKeysDefaultsToTrue(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	if !cfg.GeneralSettings.TmuxVimKeysEnabled() {
+		t.Fatal("TmuxVimKeysEnabled() = false, want true (default)")
+	}
+}
+
+func TestSaveConfigRoundTripTmuxVimKeys(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	off := false
+	want := &Config{
+		AgentSettings: AgentSettings{
+			ToolSelection: AgentToolClaude,
+		},
+		GeneralSettings: GeneralSettings{
+			TmuxVimKeys: &off,
+		},
+	}
+
+	if err := SaveConfig(want); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	if got.GeneralSettings.TmuxVimKeysEnabled() {
+		t.Fatal("TmuxVimKeysEnabled() = true, want false")
+	}
+}
+
 func TestApplyDefaultsTrimsDotfilesWhitespace(t *testing.T) {
 	cfg := &Config{
 		DotfilesSettings: DotfilesSettings{

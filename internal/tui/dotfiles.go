@@ -76,13 +76,20 @@ func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested
 		tmuxSize = fmt.Sprintf(` -x %d -y %d`, cols, rows-1)
 		resizeHook = ` \; set -g aggressive-resize on \; set -g window-size latest`
 	}
-	// When nested inside a host tmux (split pane mode), use Ctrl+A as
+	// When nested inside a host tmux (split pane mode), use Ctrl+X as
 	// the inner prefix so it doesn't conflict with the outer Ctrl+B.
+	// Vim-style pane navigation (j/k) is injected only when the user
+	// has enabled the "tmux vim keys" setting.
 	prefixConf := ""
 	statusRight := ` ctrl+q/ctrl+o: detach `
 	if nested {
-		prefixConf = ` \; set -g prefix C-x \; bind-key C-x send-prefix \; bind-key j select-pane -D \; bind-key k select-pane -U \; set -g status-right-length 80`
-		statusRight = ` prefix: ctrl+x | j/k: pane down/up | ctrl+q/ctrl+o: detach `
+		vimKeys := cfg != nil && cfg.GeneralSettings.TmuxVimKeysEnabled()
+		prefixConf = ` \; set -g prefix C-x \; bind-key C-x send-prefix \; set -g status-right-length 80`
+		statusRight = ` prefix: ctrl+x | ctrl+q/ctrl+o: detach `
+		if vimKeys {
+			prefixConf += ` \; bind-key j select-pane -D \; bind-key k select-pane -U`
+			statusRight = ` prefix: ctrl+x | j/k: pane down/up | ctrl+q/ctrl+o: detach `
+		}
 	}
 	// Clear any stale resize-window hooks from previous sessions before
 	// attaching. The hook puts the window into manual-size mode and

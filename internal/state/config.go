@@ -24,6 +24,19 @@ var validAgentTools = map[AgentTool]struct{}{
 	AgentToolCopilot: {},
 }
 
+// GeneralSettings holds general user preferences.
+type GeneralSettings struct {
+	TmuxVimKeys *bool `json:"tmux_vim_keys,omitempty"` // nil = true (default on)
+}
+
+// TmuxVimKeysEnabled reports whether vim-style tmux pane navigation is active.
+func (g GeneralSettings) TmuxVimKeysEnabled() bool {
+	if g.TmuxVimKeys == nil {
+		return true
+	}
+	return *g.TmuxVimKeys
+}
+
 // AgentSettings holds AI agent preferences.
 type AgentSettings struct {
 	ToolSelection AgentTool `json:"tool_selection"`
@@ -62,6 +75,7 @@ type CodespacesSettings struct {
 
 // Config holds user preferences.
 type Config struct {
+	GeneralSettings    GeneralSettings    `json:"general_settings"`
 	AgentSettings      AgentSettings      `json:"agent_settings"`
 	DotfilesSettings   DotfilesSettings   `json:"dotfiles_settings"`
 	CoderSettings      CoderSettings      `json:"coder_settings"`

@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/doctor"
+	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/BenjaminBenetti/fleet-man/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -82,10 +83,20 @@ func relaunchInTmux() error {
 
 	// exec into tmux: create a session running fleet, then enable mouse.
 	// tmux processes `;`-separated commands as part of startup.
-	return syscall.Exec(tmuxBin, []string{
+	// Vim-style pane navigation (h/l) is injected only when the user
+	// has enabled the "tmux vim keys" setting.
+	args := []string{
 		"tmux", "new-session", "-s", session, self,
 		";", "set", "-g", "mouse", "on",
-		";", "bind-key", "h", "select-pane", "-L",
-		";", "bind-key", "l", "select-pane", "-R",
-	}, os.Environ())
+	}
+
+	cfg, _ := state.LoadConfig()
+	if cfg == nil || cfg.GeneralSettings.TmuxVimKeysEnabled() {
+		args = append(args,
+			";", "bind-key", "h", "select-pane", "-L",
+			";", "bind-key", "l", "select-pane", "-R",
+		)
+	}
+
+	return syscall.Exec(tmuxBin, args, os.Environ())
 }
