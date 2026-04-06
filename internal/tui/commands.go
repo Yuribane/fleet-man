@@ -175,6 +175,29 @@ func fetchCoderParamsCmd(templateName string) tea.Cmd {
 	}
 }
 
+// logsCommand returns an *exec.Cmd for viewing instance logs.
+// For failed or creating instances it shows the local creation log file.
+// For running instances it delegates to the backend's logs command.
+// Output is always followed by a "press Enter" prompt so the user
+// has time to read before the TUI redraws.
+func logsCommand(b backend.Backend, fleetName string, inst *fleet.Instance) *exec.Cmd {
+	var inner string
+
+	logPath := filepath.Join(state.FleetDir(), "logs", fleetName+"-"+inst.Name+".log")
+	switch inst.Status {
+	case fleet.StatusFailed, fleet.StatusCreating:
+		inner = fmt.Sprintf("cat %q 2>/dev/null || echo 'No creation log found.'", logPath)
+	default:
+		// Build the backend logs command and extract its full invocation.
+		logsCmd := b.LogsCommand(inst.ContainerID, false)
+		inner = logsCmd.String()
+	}
+
+	// Wrap in a shell that pauses after the output.
+	script := fmt.Sprintf(`%s; echo; echo "--- Press Enter to return ---"; read _`, inner)
+	return exec.Command("sh", "-c", script)
+}
+
 func createInstanceCmd(fleetName, instanceName, remoteURL string, bt fleet.BackendType) tea.Cmd {
 	return func() tea.Msg {
 		self, err := os.Executable()

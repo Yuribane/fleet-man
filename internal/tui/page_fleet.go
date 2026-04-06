@@ -249,8 +249,9 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = "Select an instance"
 				break
 			}
+			r := m.rows[m.cursor]
 			return m, tea.ExecProcess(
-				m.instanceBackend(inst).LogsCommand(inst.ContainerID, false),
+				logsCommand(m.instanceBackend(inst), r.fleetName, inst),
 				func(err error) tea.Msg { return execDoneMsg{err} },
 			)
 
