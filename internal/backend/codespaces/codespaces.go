@@ -57,15 +57,30 @@ type CodespacesBackend struct {
 	machine          string // machine type (e.g. "basicLinux32gb")
 	idleTimeout      string // idle timeout (e.g. "30m")
 	devcontainerPath string // path to devcontainer.json in repo
+
+	// nameCache maps workspaceDir to the real codespace name assigned by
+	// GitHub. Populated by Up() so that subsequent ExecCommand calls on
+	// the same backend instance use the correct name.
+	nameCache map[string]string
 }
 
 // New creates a new CodespacesBackend.
 func New(opts ...Option) *CodespacesBackend {
-	b := &CodespacesBackend{}
+	b := &CodespacesBackend{nameCache: make(map[string]string)}
 	for _, o := range opts {
 		o(b)
 	}
 	return b
+}
+
+// resolveCodespaceName returns the real codespace name for a workspace dir.
+// Checks the cache first (populated by Up), then falls back to deriving
+// from the path.
+func (b *CodespacesBackend) resolveCodespaceName(workspaceDir string) string {
+	if name, ok := b.nameCache[workspaceDir]; ok {
+		return name
+	}
+	return codespaceName(workspaceDir)
 }
 
 // ===========================================
@@ -116,6 +131,9 @@ func (b *CodespacesBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 		return nil, fmt.Errorf("gh codespace create returned empty name")
 	}
 
+	// Cache the real name so ExecCommand can find it later.
+	b.nameCache[workspaceDir] = csName
+
 	// Wait for the codespace to become available.
 	if err := b.waitForState(csName, "Available", 5*time.Minute); err != nil {
 		return nil, err
@@ -161,7 +179,7 @@ func (b *CodespacesBackend) Start(containerID string) error {
 
 // Exec runs an interactive command inside a codespace via SSH.
 func (b *CodespacesBackend) Exec(workspaceDir string, command []string) error {
-	name := codespaceName(workspaceDir)
+	name := b.resolveCodespaceName(workspaceDir)
 	args := sshArgs(name, command)
 	cmd := exec.Command("gh", args...)
 	cmd.Stdin = os.Stdin
@@ -173,7 +191,7 @@ func (b *CodespacesBackend) Exec(workspaceDir string, command []string) error {
 // ExecCommand returns an unstarted *exec.Cmd for running a command
 // inside a codespace via SSH.
 func (b *CodespacesBackend) ExecCommand(workspaceDir string, command []string) *exec.Cmd {
-	name := codespaceName(workspaceDir)
+	name := b.resolveCodespaceName(workspaceDir)
 	args := sshArgs(name, command)
 	return exec.Command("gh", args...)
 }
@@ -262,7 +280,7 @@ func (b *CodespacesBackend) AgentToolProbe(containerID string) (string, bool) {
 
 // EditorURI returns a VS Code URI for connecting to a GitHub Codespace.
 func (b *CodespacesBackend) EditorURI(workspaceDir string, projectName string) (string, bool) {
-	name := codespaceName(workspaceDir)
+	name := b.resolveCodespaceName(workspaceDir)
 	uri := fmt.Sprintf("vscode://github.codespaces/connect?name=%s", name)
 	return uri, true
 }
