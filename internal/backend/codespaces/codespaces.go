@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
@@ -211,13 +210,7 @@ func (b *CodespacesBackend) ExecCommand(workspaceDir string, command []string) *
 // is allocated. This is needed because gh codespace ssh does not
 // allocate a remote PTY when running non-interactively.
 func wrapWithPTY(cmd *exec.Cmd) *exec.Cmd {
-	// Build the full command string from the original args.
 	ghCmd := quoteShellArgs(cmd.Args)
-
-	// script syntax differs between Linux and macOS.
-	if runtime.GOOS == "darwin" {
-		return exec.Command("script", "-q", "/dev/null", "sh", "-c", ghCmd)
-	}
 	return exec.Command("script", "-qec", ghCmd, "/dev/null")
 }
 
