@@ -65,8 +65,10 @@ func Run(fleetName, instanceName, remoteURL string, verbose bool, bt fleet.Backe
 		return err
 	}
 
-	// Auto-install dotfiles while still in "creating" state so the
-	// instance does not appear "running" before dotfiles are ready.
+	// Auto-install dotfiles. A failure here is non-fatal — the instance
+	// is still usable, so we mark it running and surface the error as a
+	// warning rather than blocking the whole creation.
+	var dotfilesWarning string
 	cfg, _ := state.LoadConfig()
 	if cfg != nil && cfg.DotfilesSettings.AutoInstall {
 		if script := dotfiles.SetupScript(cfg); script != "" {
@@ -74,13 +76,12 @@ func Run(fleetName, instanceName, remoteURL string, verbose bool, bt fleet.Backe
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				detail := strings.TrimSpace(string(out))
-				setFailed(fleetName, instanceName, fmt.Errorf("dotfiles install: %w\n%s", err, detail))
-				return fmt.Errorf("dotfiles install: %w\n%s", err, detail)
+				dotfilesWarning = fmt.Sprintf("dotfiles install failed: %v\n%s", err, detail)
 			}
 		}
 	}
 
-	// Success: update state
+	// Success: update state (instance is running even if dotfiles failed)
 	st, err := state.Load()
 	if err != nil {
 		return err
@@ -89,7 +90,7 @@ func Run(fleetName, instanceName, remoteURL string, verbose bool, bt fleet.Backe
 		if inst, err := f.GetInstance(instanceName); err == nil {
 			inst.ContainerID = result.ContainerID
 			inst.Status = fleet.StatusRunning
-			inst.Error = ""
+			inst.Error = dotfilesWarning
 		}
 	}
 	return state.Save(st)

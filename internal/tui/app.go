@@ -531,8 +531,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					switch inst.Status {
 					case fleet.StatusRunning:
 						delete(m.creating, key)
-						m.message = fmt.Sprintf("Instance %s is running (container: %s)",
-							key, inst.ContainerID[:min(12, len(inst.ContainerID))])
+						if inst.Error != "" {
+							// Running but with a warning (e.g. dotfiles install failed)
+							m.message = fmt.Sprintf("Instance %s is running — warning: %s", key, inst.Error)
+						} else {
+							m.message = fmt.Sprintf("Instance %s is running (container: %s)",
+								key, inst.ContainerID[:min(12, len(inst.ContainerID))])
+						}
 					case fleet.StatusFailed:
 						delete(m.creating, key)
 						if inst.Backend == fleet.BackendCodespaces && strings.HasPrefix(inst.Error, codespacesbackend.ErrPrefixAuthScope) {
