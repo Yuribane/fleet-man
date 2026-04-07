@@ -100,7 +100,7 @@ func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested
 	// old SSH_AUTH_SOCK from the original session. We symlink the current
 	// socket to a fixed path and point SSH_AUTH_SOCK there so it survives
 	// reconnects.
-	sshAgentFix := `if [ -n "$SSH_AUTH_SOCK" ] && [ "$SSH_AUTH_SOCK" != "$HOME/.ssh/ssh_auth_sock" ]; then mkdir -p ~/.ssh && ln -sf "$SSH_AUTH_SOCK" ~/.ssh/ssh_auth_sock && export SSH_AUTH_SOCK="$HOME/.ssh/ssh_auth_sock"; fi; `
+	sshAgentFix := `if [ -n "$SSH_AUTH_SOCK" ] && [ "$SSH_AUTH_SOCK" != "$HOME/.ssh/ssh_auth_sock" ]; then mkdir -p ~/.ssh && ln -sf "$SSH_AUTH_SOCK" ~/.ssh/ssh_auth_sock; if [ ! -S /run/ssh-agent.sock ]; then ln -sf "$SSH_AUTH_SOCK" /run/ssh-agent.sock; fi; export SSH_AUTH_SOCK="$HOME/.ssh/ssh_auth_sock"; fi; `
 	hookClear := fmt.Sprintf(
 		`tmux has-session -t %s 2>/dev/null && tmux set-hook -gu client-attached 2>/dev/null; `,
 		shQuote(session),
