@@ -153,6 +153,11 @@ func newModel() model {
 		settingsInput:     si,
 		inHostTmux:        os.Getenv("TMUX") != "",
 	}
+	// Unbind C-PPage/C-NPage from the host tmux so they pass through
+	// to inner tmux sessions for session cycling.
+	if m.inHostTmux {
+		unbindHostSessionKeys()
+	}
 	// On first-ever startup, check for required binaries and show results
 	// if anything is missing. "First startup" = the ~/.fleet/ dir doesn't exist.
 	if _, err := os.Stat(state.FleetDir()); os.IsNotExist(err) {
@@ -763,6 +768,9 @@ func (m model) View() string {
 	if m.quitting {
 		killSplitPane(m.splitPaneID)
 		m.portForwards.Shutdown()
+		if m.inHostTmux {
+			rebindHostSessionKeys()
+		}
 		return ""
 	}
 

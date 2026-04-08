@@ -98,8 +98,10 @@ func shellCommandForSession(cfg *state.Config, session string, cols, rows int, n
 			statusRight = ` j/k: pane | pgup/pgdn: sessions | prefix+T: new | ctrl+q: detach `
 		}
 	}
-	// Session navigation hotkeys: Ctrl+PageUp/Down switch between tmux
-	// sessions, Prefix+T creates a new session and switches to it.
+	// Session navigation hotkeys: Ctrl+PageUp/Down cycle sessions,
+	// prefix+T creates a new session and switches to it.
+	// The host tmux must unbind C-PPage/C-NPage so they pass through
+	// to the inner tmux (handled by splitPaneCmd / TUI init).
 	sessionKeys := ` \; bind-key -n C-PPage switch-client -p \; bind-key -n C-NPage switch-client -n \; bind-key T new-session`
 	// Clear any stale resize-window hooks from previous sessions before
 	// attaching. The hook puts the window into manual-size mode and

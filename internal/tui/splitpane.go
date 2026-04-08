@@ -114,3 +114,17 @@ func killSplitPane(paneID string) {
 	}
 	_ = exec.Command("tmux", "kill-pane", "-t", paneID).Run()
 }
+
+// unbindHostSessionKeys removes C-PPage and C-NPage from the host
+// tmux root table so they pass through to inner tmux sessions.
+func unbindHostSessionKeys() {
+	_ = exec.Command("tmux", "unbind", "-T", "root", "C-PPage").Run()
+	_ = exec.Command("tmux", "unbind", "-T", "root", "C-NPage").Run()
+}
+
+// rebindHostSessionKeys restores the default C-PPage/C-NPage bindings
+// on the host tmux (copy-mode related defaults).
+func rebindHostSessionKeys() {
+	_ = exec.Command("tmux", "bind", "-T", "root", "C-PPage", "copy-mode", "-eu").Run()
+	_ = exec.Command("tmux", "bind", "-T", "root", "C-NPage", "send-keys", "PPage").Run()
+}
