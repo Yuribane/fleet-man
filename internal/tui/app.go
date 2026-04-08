@@ -491,7 +491,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.activeSessions != nil {
 			m.activeSessions = msg.activeSessions
 		}
-		return m, m.fetchAllStatsCmd(true)
+		// Re-list sessions for any expanded instances so that killed
+		// sessions disappear from the UI within one poll cycle.
+		cmds := []tea.Cmd{m.fetchAllStatsCmd(true)}
+		for key := range m.expandedInstances {
+			parts := strings.SplitN(key, "/", 2)
+			if len(parts) == 2 {
+				if f, ok := m.st.Fleets[parts[0]]; ok {
+					if inst, err := f.GetInstance(parts[1]); err == nil {
+						cmds = append(cmds, listSessionsCmd(m.instanceBackend(inst), inst.WorkspaceDir, key))
+					}
+				}
+			}
+		}
+		return m, tea.Batch(cmds...)
 
 	case instanceSpawnedMsg:
 		// Background process launched; start polling for completion
