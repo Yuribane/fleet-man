@@ -10,6 +10,7 @@ import (
 	"github.com/BenjaminBenetti/fleet-man/internal/doctor"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 const (
@@ -26,7 +27,8 @@ const (
 	settingsItemCodespacesMachine = 500 // codespaces settings start here
 
 	settingsItemToolStatusBase = 1000 // tool status rows start here
-	settingsItemDoctor         = 2000 // doctor action row
+	settingsItemDoctor      = 2000 // doctor action row
+	settingsItemKeybindings = 2001 // keybindings dialog row
 )
 
 // dotfilesSetupPrompt is the instruction sent to the coding agent for
@@ -86,9 +88,9 @@ var settingsSections = []settingsSection{
 		},
 	},
 	{
-		Title: "Doctor",
+		Title: "Help",
 		Items: func(_ *state.Config) []int {
-			return []int{settingsItemDoctor}
+			return []int{settingsItemDoctor, settingsItemKeybindings}
 		},
 	},
 }
@@ -295,10 +297,25 @@ func (m *model) codespacesMachineLabel() string {
 }
 
 func (m model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.showKeybindings {
+		return m.updateKeybindingsDialog(msg)
+	}
 	if m.settingsEditing {
 		return m.updateSettingsEditing(msg)
 	}
 	return m.updateSettingsNav(msg)
+}
+
+// updateKeybindingsDialog handles input while the keybindings overlay is shown.
+func (m model) updateKeybindingsDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc", "q", "ctrl+c":
+			m.showKeybindings = false
+		}
+	}
+	return m, nil
 }
 
 func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -383,6 +400,10 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return execDoneMsg{err} })
+			}
+			if item == settingsItemKeybindings {
+				m.showKeybindings = true
+				return m, nil
 			}
 			if item == settingsItemDotfilesSetup {
 				cmd, err := agent.CommandWithPrompt(dotfilesSetupPrompt)
@@ -659,7 +680,7 @@ func (m model) viewSettings() string {
 				listContent.WriteString(m.renderSettingsRow(currentItem == itemID, t.Name, value))
 			}
 
-		case "Doctor":
+		case "Help":
 			agentName, _, agentErr := doctor.FindAgent()
 			var value string
 			if agentErr != nil {
@@ -668,6 +689,8 @@ func (m model) viewSettings() string {
 				value = statusRunningStyle.Render(agentName) + "  " + dimStyle.Render("press enter to diagnose your setup")
 			}
 			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemDoctor, "Run Doctor", value))
+			listContent.WriteString("\n")
+			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemKeybindings, "Keybindings", dimStyle.Render("press enter to view all keybindings")))
 		}
 
 		listContent.WriteString("\n\n")
@@ -675,6 +698,13 @@ func (m model) viewSettings() string {
 
 	b.WriteString(box.Render(strings.TrimRight(listContent.String(), "\n")))
 	b.WriteString("\n")
+
+	// Keybindings dialog overlay
+	if m.showKeybindings {
+		b.WriteString("\n")
+		b.WriteString(keybindingsDialogBox.Render(m.renderKeybindingsDialog()))
+		b.WriteString("\n")
+	}
 
 	// Substitution variable hint
 	if currentItem >= settingsItemCoderParamBase && currentItem < settingsItemToolStatusBase {
@@ -717,6 +747,147 @@ func (m model) renderSettingsRow(active bool, label string, value string) string
 		return fmt.Sprintf("%s%s %s", cursor, selectedStyle.Render(formattedLabel), value)
 	}
 	return fmt.Sprintf("%s%s %s", cursor, formattedLabel, value)
+}
+
+// keybindingEntry represents a single key → description row.
+type keybindingEntry struct {
+	Key  string
+	Desc string
+}
+
+// keybindingGroup is a titled group of keybinding entries.
+type keybindingGroup struct {
+	Title   string
+	Entries []keybindingEntry
+}
+
+// keybindingsData returns all application keybindings grouped by context.
+func keybindingsData() []keybindingGroup {
+	return []keybindingGroup{
+		{
+			Title: "Global",
+			Entries: []keybindingEntry{
+				{"ctrl+c / ctrl+q", "Quit application"},
+			},
+		},
+		{
+			Title: "Fleet List",
+			Entries: []keybindingEntry{
+				{"j / k", "Navigate up / down"},
+				{"space / tab", "Expand / collapse"},
+				{"enter / e", "Open shell or settings"},
+				{"s", "Start / stop instance"},
+				{"a", "Add instance"},
+				{"n", "New fleet"},
+				{"d", "Delete fleet / instance"},
+				{"t", "Tag instance"},
+				{"f", "Port forward"},
+				{"c", "Open VS Code"},
+				{"o", "Open external terminal"},
+				{"l", "View logs"},
+				{"r", "Refresh / rename session"},
+			},
+		},
+		{
+			Title: "Settings",
+			Entries: []keybindingEntry{
+				{"j / k", "Navigate up / down"},
+				{"left / right", "Cycle option value"},
+				{"enter", "Edit / toggle setting"},
+				{"esc / q", "Back to fleet list"},
+			},
+		},
+		{
+			Title: "Tmux (inner session)",
+			Entries: []keybindingEntry{
+				{"ctrl+x", "Prefix key (nested)"},
+				{"ctrl+PageUp/Down", "Cycle sessions"},
+				{"prefix + T", "New tmux session"},
+				{"ctrl+q / ctrl+o", "Detach from session"},
+				{"j / k (vim mode)", "Select pane down / up"},
+			},
+		},
+		{
+			Title: "Tmux (outer / host)",
+			Entries: []keybindingEntry{
+				{"ctrl+b", "Prefix key (default)"},
+				{"h / l", "Navigate panes left / right"},
+			},
+		},
+		{
+			Title: "Dialogs",
+			Entries: []keybindingEntry{
+				{"enter", "Confirm action"},
+				{"esc", "Cancel / close"},
+				{"y / n", "Yes / no (delete)"},
+				{"tab", "Cycle backend (add)"},
+			},
+		},
+	}
+}
+
+// renderKeybindingColumn renders a slice of keybinding groups into a
+// single column string.
+func renderKeybindingColumn(groups []keybindingGroup) string {
+	var b strings.Builder
+	for i, g := range groups {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(keybindingSectionStyle.Render(g.Title))
+		b.WriteString("\n")
+		for _, e := range g.Entries {
+			b.WriteString(keybindingKeyStyle.Render(e.Key))
+			b.WriteString(keybindingDescStyle.Render(e.Desc))
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
+// renderKeybindingsDialog builds the content for the keybindings overlay
+// using a two-column layout.
+func (m model) renderKeybindingsDialog() string {
+	var b strings.Builder
+
+	b.WriteString(dialogTitle.Render("Keybindings"))
+	b.WriteString("\n\n")
+
+	groups := keybindingsData()
+
+	// Split groups roughly in half by total line count.
+	type measured struct {
+		lines int
+		idx   int
+	}
+	var totalLines int
+	for _, g := range groups {
+		totalLines += len(g.Entries) + 2 // +2 for title + blank separator
+	}
+	half := totalLines / 2
+	splitAt := len(groups)
+	running := 0
+	for i, g := range groups {
+		running += len(g.Entries) + 2
+		if running >= half {
+			splitAt = i + 1
+			break
+		}
+	}
+
+	left := renderKeybindingColumn(groups[:splitAt])
+	right := renderKeybindingColumn(groups[splitAt:])
+
+	colWidth := 48
+	leftCol := lipgloss.NewStyle().Width(colWidth).Render(left)
+	rightCol := lipgloss.NewStyle().Width(colWidth).Render(right)
+
+	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, leftCol, "  ", rightCol))
+
+	b.WriteString("\n")
+	b.WriteString(dialogHint.Render("[esc] Close"))
+
+	return b.String()
 }
 
 // openURL opens the given URL in the user's default browser.

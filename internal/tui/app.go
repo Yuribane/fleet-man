@@ -97,7 +97,8 @@ type model struct {
 	codespaceMachines         []codespaceMachine // available machine types (from GitHub API)
 	codespaceFetchingMachines bool     // true while fetching machine types
 
-	toolStatus []deps.ToolStatus // cached tool install statuses for settings page
+	toolStatus      []deps.ToolStatus // cached tool install statuses for settings page
+	showKeybindings bool              // true when the keybindings dialog is open
 
 	depsResult []deps.Dependency // set on first-ever startup
 

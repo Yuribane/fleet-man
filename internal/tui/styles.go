@@ -123,4 +123,23 @@ var (
 
 	newSessionStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("241"))
+
+	// Keybindings dialog
+	keybindingsDialogBox = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("39")).
+				Padding(1, 2).
+				Width(106)
+
+	keybindingSectionStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("39"))
+
+	keybindingKeyStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("170")).
+				Bold(true).
+				Width(20)
+
+	keybindingDescStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("252"))
 )
