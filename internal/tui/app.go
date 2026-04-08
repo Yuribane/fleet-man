@@ -107,10 +107,11 @@ type model struct {
 	pfContainerID     string               // container ID for the instance being forwarded
 
 	// Instance expansion: which instances are expanded to show sessions
-	expandedInstances map[string]bool           // key: "fleet/instance"
+	expandedInstances map[string]bool              // key: "fleet/instance"
 	sessions          map[string]*sessionDiscovery // key: "fleet/instance"
-	activeSessions    map[string]string          // containerID → active tmux session name
-	dialogSession     string                     // session being renamed (for viewRenameSession)
+	activeSessions    map[string]string            // containerID → active tmux session name
+	sessionPoller     *sessionPoller               // manages fast 1s session poll loop
+	dialogSession     string                       // session being renamed (for viewRenameSession)
 
 	// Split pane mode: when fleet runs inside a host tmux session,
 	// pressing enter opens the instance shell in a right-side pane
@@ -148,6 +149,7 @@ func newModel() model {
 		expandedInstances: make(map[string]bool),
 		sessions:          make(map[string]*sessionDiscovery),
 		activeSessions:    make(map[string]string),
+		sessionPoller:     newSessionPoller(),
 		textInput:         ti,
 		spinner:           sp,
 		settingsInput:     si,
@@ -383,7 +385,11 @@ func (m *model) containersByBackend() map[fleet.BackendType]*backendGroup {
 }
 
 func (m model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.spinner.Tick, m.fetchAllStatsCmd(false)}
+	cmds := []tea.Cmd{
+		m.spinner.Tick,
+		m.fetchAllStatsCmd(false),
+		m.sessionPollLoop(false),
+	}
 	if len(m.creating) > 0 {
 		cmds = append(cmds, pollCreatingCmd())
 	}
@@ -398,6 +404,13 @@ func (m model) Init() tea.Cmd {
 		cmds = append(cmds, fetchCodespaceMachinesCmd(repo))
 	}
 	return tea.Batch(cmds...)
+}
+
+// sessionPollLoop returns a tea.Cmd that runs the fast 1-second session
+// poll loop. It polls active sessions for all running containers and
+// lists sessions for expanded instances.
+func (m model) sessionPollLoop(delay bool) tea.Cmd {
+	return sessionPollCmd(m.sessionPoller, m.backends, m.expandedInstances, m.st.Fleets, delay)
 }
 
 // fetchAllStatsCmd creates a command that fetches stats from all backends concurrently.
@@ -435,14 +448,12 @@ func (m model) fetchAllStatsCmd(delay bool) tea.Cmd {
 		allStats := make(map[string]*backend.ContainerStats)
 		allScreens := make(map[string]backend.ScreenCapture)
 		allProbes := make(map[string]string)
-		allActive := make(map[string]string)
 		var allIDs []string
 
 		type result struct {
 			stats   map[string]*backend.ContainerStats
 			screens map[string]backend.ScreenCapture
 			probes  map[string]string
-			active  map[string]string
 			ids     []string
 		}
 
@@ -452,8 +463,7 @@ func (m model) fetchAllStatsCmd(delay bool) tea.Cmd {
 				stats, _ := dc.Stats(ids)
 				screens := backend.CaptureScreens(dc, sessions)
 				probes := backend.AgentToolProbes(dc, ids)
-				active := backend.ActiveSessions(dc, ids)
-				ch <- result{stats, screens, probes, active, ids}
+				ch <- result{stats, screens, probes, ids}
 			}(inp.dc, inp.ids, inp.sessions)
 		}
 
@@ -468,13 +478,10 @@ func (m model) fetchAllStatsCmd(delay bool) tea.Cmd {
 			for k, v := range r.probes {
 				allProbes[k] = v
 			}
-			for k, v := range r.active {
-				allActive[k] = v
-			}
 			allIDs = append(allIDs, r.ids...)
 		}
 
-		return statsMsg{stats: allStats, screens: allScreens, probes: allProbes, activeSessions: allActive, containerIDs: allIDs}
+		return statsMsg{stats: allStats, screens: allScreens, probes: allProbes, containerIDs: allIDs}
 	}
 }
 
@@ -493,23 +500,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.screens != nil {
 			m.activity.Update(msg.screens, msg.probes, msg.containerIDs, time.Now())
 		}
+		return m, m.fetchAllStatsCmd(true)
+
+	case sessionPollMsg:
 		if msg.activeSessions != nil {
 			m.activeSessions = msg.activeSessions
 		}
-		// Re-list sessions for any expanded instances so that killed
-		// sessions disappear from the UI within one poll cycle.
-		cmds := []tea.Cmd{m.fetchAllStatsCmd(true)}
-		for key := range m.expandedInstances {
-			parts := strings.SplitN(key, "/", 2)
-			if len(parts) == 2 {
-				if f, ok := m.st.Fleets[parts[0]]; ok {
-					if inst, err := f.GetInstance(parts[1]); err == nil {
-						cmds = append(cmds, listSessionsCmd(m.instanceBackend(inst), inst.WorkspaceDir, key))
-					}
-				}
+		if msg.discovered != nil {
+			for key, sessions := range msg.discovered {
+				m.sessions[key] = &sessionDiscovery{sessions: sessions, fetchedAt: time.Now()}
 			}
+			m.buildRows()
 		}
-		return m, tea.Batch(cmds...)
+		return m, m.sessionPollLoop(true)
 
 	case instanceSpawnedMsg:
 		// Background process launched; start polling for completion
@@ -541,9 +544,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.splitPaneID = msg.paneID
 		m.splitInstance = msg.instance
 		m.splitSession = msg.session
-		// Force an immediate stats refresh so the active session
-		// indicator updates without waiting for the 3-second poll.
-		return m, m.fetchAllStatsCmd(false)
+		// Force an immediate session poll so the active session
+		// indicator updates without waiting for the 1-second cycle.
+		return m, m.sessionPollLoop(false)
 
 	case sessionsMsg:
 		if msg.err != nil {
