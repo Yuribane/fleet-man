@@ -24,6 +24,30 @@ func CaptureScreens(b Backend, sessions map[string]string) map[string]ScreenCapt
 	return result
 }
 
+// ActiveSessions runs ActiveSession concurrently for all containers.
+// Returns a map of containerID → active session name (empty string omitted).
+func ActiveSessions(b Backend, containerIDs []string) map[string]string {
+	result := make(map[string]string, len(containerIDs))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, id := range containerIDs {
+		wg.Add(1)
+		go func(cid string) {
+			defer wg.Done()
+			sess := b.ActiveSession(cid)
+			if sess != "" {
+				mu.Lock()
+				result[cid] = sess
+				mu.Unlock()
+			}
+		}(id)
+	}
+
+	wg.Wait()
+	return result
+}
+
 // AgentToolProbes runs AgentToolProbe concurrently for all containers.
 // Containers whose probe succeeded are in the result (even if no agent
 // was found — stored as empty string). Containers whose probe failed

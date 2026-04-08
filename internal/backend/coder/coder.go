@@ -279,6 +279,19 @@ func (b *CoderBackend) CaptureScreen(containerID, tmuxSession string) backend.Sc
 	return backend.ScreenCapture{Content: string(out), OK: true}
 }
 
+// ActiveSession returns the tmux session with the most recently active client.
+func (b *CoderBackend) ActiveSession(containerID string) string {
+	target := b.resolveSSHTarget(containerID)
+	cmd := exec.Command("coder", sshArgs(target, []string{
+		`tmux list-clients -F "#{client_activity}:#{session_name}" 2>/dev/null | sort -rn | head -1 | cut -d: -f2-`,
+	})...)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // AgentToolProbe detects which agent tool is running inside a Coder workspace.
 func (b *CoderBackend) AgentToolProbe(containerID string) (string, bool) {
 	// coder ssh wraps everything after -- in a shell invocation, so we

@@ -112,4 +112,15 @@ var (
 
 	portForwardStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("42"))
+
+	// Session rows
+	sessionStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("39"))
+
+	sessionActiveStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("42")).
+				Bold(true)
+
+	newSessionStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("241"))
 )

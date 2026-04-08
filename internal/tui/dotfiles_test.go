@@ -183,7 +183,7 @@ func TestShellCommandNestedVimKeysEnabled(t *testing.T) {
 	if !strings.Contains(script, "bind-key k select-pane -U") {
 		t.Errorf("nested script missing k keybinding when vim keys enabled: %s", script)
 	}
-	if !strings.Contains(script, "j/k: pane down/up") {
+	if !strings.Contains(script, "j/k: pane") {
 		t.Errorf("nested script missing vim keys help text: %s", script)
 	}
 }

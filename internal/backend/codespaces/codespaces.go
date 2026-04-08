@@ -286,6 +286,18 @@ func (b *CodespacesBackend) CaptureScreen(containerID, tmuxSession string) backe
 	return backend.ScreenCapture{Content: string(out), OK: true}
 }
 
+// ActiveSession returns the tmux session with the most recently active client.
+func (b *CodespacesBackend) ActiveSession(containerID string) string {
+	cmd := b.sshCommand(containerID, []string{
+		`tmux list-clients -F "#{client_activity}:#{session_name}" 2>/dev/null | sort -rn | head -1 | cut -d: -f2-`,
+	}, false)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // AgentToolProbe detects which agent tool is running inside a codespace.
 func (b *CodespacesBackend) AgentToolProbe(containerID string) (string, bool) {
 	cmd := b.sshCommand(containerID, []string{toolProbeScript}, false)

@@ -35,6 +35,8 @@ const (
 	viewCodespacesAuth
 	viewCodespacesLimit
 	viewCodespacesMachine
+	viewCreateSession
+	viewRenameSession
 )
 
 type pageMode int
@@ -49,14 +51,17 @@ type rowKind int
 const (
 	rowFleetHeader rowKind = iota
 	rowInstance
+	rowSession
+	rowNewSession
 	rowSettings
 )
 
 // row represents a single navigable row in the TUI.
 type row struct {
-	kind      rowKind
-	fleetName string
-	instance  *fleet.Instance
+	kind        rowKind
+	fleetName   string
+	instance    *fleet.Instance
+	sessionName string // set when kind == rowSession or rowNewSession
 }
 
 type model struct {
@@ -101,12 +106,19 @@ type model struct {
 	pfCursor          int                  // cursor within the port forward dialog list
 	pfContainerID     string               // container ID for the instance being forwarded
 
+	// Instance expansion: which instances are expanded to show sessions
+	expandedInstances map[string]bool           // key: "fleet/instance"
+	sessions          map[string]*sessionDiscovery // key: "fleet/instance"
+	activeSessions    map[string]string          // containerID → active tmux session name
+	dialogSession     string                     // session being renamed (for viewRenameSession)
+
 	// Split pane mode: when fleet runs inside a host tmux session,
 	// pressing enter opens the instance shell in a right-side pane
 	// instead of suspending the TUI.
 	inHostTmux    bool   // true when TMUX env var is set at startup
 	splitPaneID   string // tmux pane ID of the right pane ("" = no split)
 	splitInstance string // instance name currently in the right pane
+	splitSession  string // tmux session name in the right pane
 
 	message  string
 	quitting bool
@@ -127,16 +139,19 @@ func newModel() model {
 	si.CharLimit = 256
 
 	m := model{
-		collapsed:     make(map[string]bool),
-		creating:      make(map[string]bool),
-		backends:      make(map[fleet.BackendType]backend.Backend),
-		stats:         make(map[string]*backend.ContainerStats),
-		activity:      NewActivityTracker(),
-		portForwards:  portforward.NewManager(),
-		textInput:     ti,
-		spinner:       sp,
-		settingsInput: si,
-		inHostTmux:    os.Getenv("TMUX") != "",
+		collapsed:         make(map[string]bool),
+		creating:          make(map[string]bool),
+		backends:          make(map[fleet.BackendType]backend.Backend),
+		stats:             make(map[string]*backend.ContainerStats),
+		activity:          NewActivityTracker(),
+		portForwards:      portforward.NewManager(),
+		expandedInstances: make(map[string]bool),
+		sessions:          make(map[string]*sessionDiscovery),
+		activeSessions:    make(map[string]string),
+		textInput:         ti,
+		spinner:           sp,
+		settingsInput:     si,
+		inHostTmux:        os.Getenv("TMUX") != "",
 	}
 	// On first-ever startup, check for required binaries and show results
 	// if anything is missing. "First startup" = the ~/.fleet/ dir doesn't exist.
@@ -180,6 +195,21 @@ func (m *model) reload() {
 	m.st = st
 	m.cfg = cfg
 	m.err = nil
+
+	// Auto-collapse expanded instances that are no longer running
+	for key := range m.expandedInstances {
+		parts := strings.SplitN(key, "/", 2)
+		if len(parts) == 2 {
+			if f, ok := st.Fleets[parts[0]]; ok {
+				if inst, err := f.GetInstance(parts[1]); err == nil && inst.Status == fleet.StatusRunning {
+					continue
+				}
+			}
+		}
+		delete(m.expandedInstances, key)
+		delete(m.sessions, key)
+	}
+
 	m.buildRows()
 }
 
@@ -204,6 +234,24 @@ func (m *model) buildRows() {
 		if !m.collapsed[name] {
 			for _, inst := range f.Instances {
 				m.rows = append(m.rows, row{kind: rowInstance, fleetName: name, instance: inst})
+				instKey := name + "/" + inst.Name
+				if m.expandedInstances[instKey] {
+					if disc, ok := m.sessions[instKey]; ok && disc.err == nil {
+						for _, sess := range disc.sessions {
+							m.rows = append(m.rows, row{
+								kind:        rowSession,
+								fleetName:   name,
+								instance:    inst,
+								sessionName: sess.Name,
+							})
+						}
+					}
+					m.rows = append(m.rows, row{
+						kind:      rowNewSession,
+						fleetName: name,
+						instance:  inst,
+					})
+				}
 			}
 		}
 	}
@@ -246,6 +294,17 @@ func (m *model) selectedInstance() (*fleet.Fleet, *fleet.Instance) {
 	}
 	f := m.st.Fleets[r.fleetName]
 	return f, r.instance
+}
+
+// selectedSession returns the fleet, instance, and session name when
+// the cursor is on a session row.
+func (m *model) selectedSession() (*fleet.Fleet, *fleet.Instance, string) {
+	r := m.currentRow()
+	if r == nil || r.kind != rowSession {
+		return nil, nil, ""
+	}
+	f := m.st.Fleets[r.fleetName]
+	return f, r.instance, r.sessionName
 }
 
 // backendFor returns the cached backend for the given type, creating it lazily.
@@ -371,12 +430,14 @@ func (m model) fetchAllStatsCmd(delay bool) tea.Cmd {
 		allStats := make(map[string]*backend.ContainerStats)
 		allScreens := make(map[string]backend.ScreenCapture)
 		allProbes := make(map[string]string)
+		allActive := make(map[string]string)
 		var allIDs []string
 
 		type result struct {
 			stats   map[string]*backend.ContainerStats
 			screens map[string]backend.ScreenCapture
 			probes  map[string]string
+			active  map[string]string
 			ids     []string
 		}
 
@@ -386,7 +447,8 @@ func (m model) fetchAllStatsCmd(delay bool) tea.Cmd {
 				stats, _ := dc.Stats(ids)
 				screens := backend.CaptureScreens(dc, sessions)
 				probes := backend.AgentToolProbes(dc, ids)
-				ch <- result{stats, screens, probes, ids}
+				active := backend.ActiveSessions(dc, ids)
+				ch <- result{stats, screens, probes, active, ids}
 			}(inp.dc, inp.ids, inp.sessions)
 		}
 
@@ -401,10 +463,13 @@ func (m model) fetchAllStatsCmd(delay bool) tea.Cmd {
 			for k, v := range r.probes {
 				allProbes[k] = v
 			}
+			for k, v := range r.active {
+				allActive[k] = v
+			}
 			allIDs = append(allIDs, r.ids...)
 		}
 
-		return statsMsg{stats: allStats, screens: allScreens, probes: allProbes, containerIDs: allIDs}
+		return statsMsg{stats: allStats, screens: allScreens, probes: allProbes, activeSessions: allActive, containerIDs: allIDs}
 	}
 }
 
@@ -422,6 +487,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.screens != nil {
 			m.activity.Update(msg.screens, msg.probes, msg.containerIDs, time.Now())
+		}
+		if msg.activeSessions != nil {
+			m.activeSessions = msg.activeSessions
 		}
 		return m, m.fetchAllStatsCmd(true)
 
@@ -450,9 +518,61 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case splitPaneMsg:
 		if msg.err != nil {
 			m.message = fmt.Sprintf("Split pane error: %v", msg.err)
+			return m, nil
+		}
+		m.splitPaneID = msg.paneID
+		m.splitInstance = msg.instance
+		m.splitSession = msg.session
+		// Force an immediate stats refresh so the active session
+		// indicator updates without waiting for the 3-second poll.
+		return m, m.fetchAllStatsCmd(false)
+
+	case sessionsMsg:
+		if msg.err != nil {
+			m.sessions[msg.instanceKey] = &sessionDiscovery{err: msg.err, fetchedAt: time.Now()}
 		} else {
-			m.splitPaneID = msg.paneID
-			m.splitInstance = msg.instance
+			m.sessions[msg.instanceKey] = &sessionDiscovery{sessions: msg.sessions, fetchedAt: time.Now()}
+		}
+		m.buildRows()
+		return m, nil
+
+	case sessionCreatedMsg:
+		if msg.err != nil {
+			m.message = fmt.Sprintf("Failed to create session: %v", msg.err)
+		} else {
+			m.message = "Session created"
+		}
+		// Re-list sessions to refresh the UI
+		if m.expandedInstances[msg.instanceKey] {
+			parts := strings.SplitN(msg.instanceKey, "/", 2)
+			if len(parts) == 2 {
+				if f, ok := m.st.Fleets[parts[0]]; ok {
+					if inst, err := f.GetInstance(parts[1]); err == nil {
+						b := m.instanceBackend(inst)
+						return m, listSessionsCmd(b, inst.WorkspaceDir, msg.instanceKey)
+					}
+				}
+			}
+		}
+		return m, nil
+
+	case sessionRenamedMsg:
+		if msg.err != nil {
+			m.message = fmt.Sprintf("Failed to rename session: %v", msg.err)
+		} else {
+			m.message = fmt.Sprintf("Renamed session %s → %s", msg.oldName, msg.newName)
+		}
+		// Re-list sessions to refresh the UI
+		if m.expandedInstances[msg.instanceKey] {
+			parts := strings.SplitN(msg.instanceKey, "/", 2)
+			if len(parts) == 2 {
+				if f, ok := m.st.Fleets[parts[0]]; ok {
+					if inst, err := f.GetInstance(parts[1]); err == nil {
+						b := m.instanceBackend(inst)
+						return m, listSessionsCmd(b, inst.WorkspaceDir, msg.instanceKey)
+					}
+				}
+			}
 		}
 		return m, nil
 
@@ -617,6 +737,10 @@ func (m model) updateByMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCodespacesLimit(msg)
 	case viewCodespacesMachine:
 		return m.updateCodespacesMachine(msg)
+	case viewCreateSession:
+		return m.updateCreateSession(msg)
+	case viewRenameSession:
+		return m.updateRenameSession(msg)
 	default:
 		return m.updateNormal(msg)
 	}

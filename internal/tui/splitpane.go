@@ -13,6 +13,7 @@ import (
 type splitPaneMsg struct {
 	paneID   string // tmux pane ID (e.g. "%3")
 	instance string // instance name occupying the pane
+	session  string // tmux session name in the pane
 	err      error
 }
 
@@ -48,7 +49,7 @@ func quoteArgs(args []string) string {
 // command. When an existing pane ID is provided, it is respawned in-place
 // (via respawn-pane) to avoid layout changes that cause visual corruption.
 // If the pane no longer exists, it falls back to creating a fresh split.
-func splitPaneCmd(existingPaneID string, instanceName string, cmd *exec.Cmd) tea.Cmd {
+func splitPaneCmd(existingPaneID string, instanceName string, sessionName string, cmd *exec.Cmd) tea.Cmd {
 	// Snapshot the args — we must not capture the *exec.Cmd across goroutines.
 	args := cmd.Args
 
@@ -67,7 +68,7 @@ func splitPaneCmd(existingPaneID string, instanceName string, cmd *exec.Cmd) tea
 			}
 			if exec.Command("tmux", respawnArgs...).Run() == nil {
 				_ = exec.Command("tmux", "select-pane", "-t", existingPaneID).Run()
-				return splitPaneMsg{paneID: existingPaneID, instance: instanceName}
+				return splitPaneMsg{paneID: existingPaneID, instance: instanceName, session: sessionName}
 			}
 			// Pane is gone — fall through to create a fresh split.
 		}
@@ -90,7 +91,7 @@ func splitPaneCmd(existingPaneID string, instanceName string, cmd *exec.Cmd) tea
 
 		paneID := strings.TrimSpace(string(out))
 		_ = exec.Command("tmux", "select-pane", "-t", paneID).Run()
-		return splitPaneMsg{paneID: paneID, instance: instanceName}
+		return splitPaneMsg{paneID: paneID, instance: instanceName, session: sessionName}
 	}
 }
 

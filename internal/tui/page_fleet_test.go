@@ -311,7 +311,9 @@ func TestViewFleetListShowsAgentOffIndicator(t *testing.T) {
 			map[string]agentState{"abc123": agentNotRunning},
 			nil,
 		),
-		stats: map[string]*backend.ContainerStats{},
+		expandedInstances: make(map[string]bool),
+		activeSessions:    make(map[string]string),
+		stats:             map[string]*backend.ContainerStats{},
 		rows: []row{
 			{kind: rowFleetHeader, fleetName: "alpha"},
 			{kind: rowInstance, fleetName: "alpha", instance: inst},
@@ -327,7 +329,9 @@ func TestViewFleetListShowsAgentOffIndicator(t *testing.T) {
 	if !strings.Contains(view, "idle") {
 		t.Fatalf("view missing off/idle indicator:\n%s", view)
 	}
-	if strings.Contains(view, "\u25b6") || strings.Contains(view, "\u23f8") {
+	// The working icon (▶ Claude Code) should not appear, but the
+	// expand arrow (▶ agent-1) is expected for running instances.
+	if strings.Contains(view, "\u25b6 Claude Code") || strings.Contains(view, "\u23f8") {
 		t.Fatalf("not-running instance should not show working/waiting icon:\n%s", view)
 	}
 }

@@ -476,3 +476,116 @@ func (m model) instanceBackendType() fleet.BackendType {
 	}
 	return fleet.BackendDevcontainer
 }
+
+// ===========================================
+// Session Dialogs
+// ===========================================
+
+// updateCreateSession handles the dialog for creating a new tmux session
+// inside a running instance. An empty name auto-generates one.
+func (m model) updateCreateSession(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter":
+			name := strings.TrimSpace(m.textInput.Value())
+			instKey := m.dialogFleet + "/" + m.dialogInst
+			if name == "" {
+				var existing []tmuxSession
+				if disc, ok := m.sessions[instKey]; ok && disc.err == nil {
+					existing = disc.sessions
+				}
+				name = nextSessionName(existing)
+			}
+			name = sanitizeSessionName(name)
+
+			f, ok := m.st.Fleets[m.dialogFleet]
+			if !ok {
+				m.mode = viewNormal
+				m.textInput.Blur()
+				return m, nil
+			}
+			inst, err := f.GetInstance(m.dialogInst)
+			if err != nil {
+				m.mode = viewNormal
+				m.textInput.Blur()
+				return m, nil
+			}
+
+			m.mode = viewNormal
+			m.textInput.Blur()
+			m.message = fmt.Sprintf("Creating session %s...", name)
+			b := m.instanceBackend(inst)
+			return m, createSessionCmd(b, inst.WorkspaceDir, instKey, name)
+
+		case "esc", "ctrl+c":
+			m.mode = viewNormal
+			m.textInput.Blur()
+			m.message = "Cancelled"
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}
+
+// updateRenameSession handles the dialog for renaming a tmux session.
+func (m model) updateRenameSession(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter":
+			newName := strings.TrimSpace(m.textInput.Value())
+			if newName == "" {
+				m.message = "Name cannot be empty"
+				m.mode = viewNormal
+				m.textInput.Blur()
+				return m, nil
+			}
+			newName = sanitizeSessionName(newName)
+
+			instKey := m.dialogFleet + "/" + m.dialogInst
+			// Check for duplicate names
+			if disc, ok := m.sessions[instKey]; ok && disc.err == nil {
+				for _, s := range disc.sessions {
+					if s.Name == newName {
+						m.message = fmt.Sprintf("Session %q already exists", newName)
+						m.mode = viewNormal
+						m.textInput.Blur()
+						return m, nil
+					}
+				}
+			}
+
+			f, ok := m.st.Fleets[m.dialogFleet]
+			if !ok {
+				m.mode = viewNormal
+				m.textInput.Blur()
+				return m, nil
+			}
+			inst, err := f.GetInstance(m.dialogInst)
+			if err != nil {
+				m.mode = viewNormal
+				m.textInput.Blur()
+				return m, nil
+			}
+
+			m.mode = viewNormal
+			m.textInput.Blur()
+			b := m.instanceBackend(inst)
+			return m, renameSessionCmd(b, inst.WorkspaceDir, instKey, m.dialogSession, newName)
+
+		case "esc", "ctrl+c":
+			m.mode = viewNormal
+			m.textInput.Blur()
+			m.message = "Cancelled"
+			return m, nil
+		}
+	}
+
+	var cmd tea.Cmd
+	m.textInput, cmd = m.textInput.Update(msg)
+	return m, cmd
+}

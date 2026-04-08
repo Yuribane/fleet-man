@@ -37,10 +37,11 @@ type instanceCreateErrMsg struct {
 type pollCreatingTickMsg struct{}
 
 type statsMsg struct {
-	stats        map[string]*backend.ContainerStats
-	screens      map[string]backend.ScreenCapture
-	probes       map[string]string // containerID → detected tool name (from ps aux)
-	containerIDs []string          // containers that were probed (for staleness detection)
+	stats          map[string]*backend.ContainerStats
+	screens        map[string]backend.ScreenCapture
+	probes         map[string]string // containerID → detected tool name (from ps aux)
+	activeSessions map[string]string // containerID → active tmux session name
+	containerIDs   []string          // containers that were probed (for staleness detection)
 }
 
 // Commands
@@ -62,7 +63,8 @@ func fetchStatsCmd(dc backend.Backend, ids []string, sessions map[string]string,
 		stats, _ := dc.Stats(ids)
 		screens := backend.CaptureScreens(dc, sessions)
 		probes := backend.AgentToolProbes(dc, ids)
-		return statsMsg{stats: stats, screens: screens, probes: probes, containerIDs: ids}
+		active := backend.ActiveSessions(dc, ids)
+		return statsMsg{stats: stats, screens: screens, probes: probes, activeSessions: active, containerIDs: ids}
 	}
 }
 

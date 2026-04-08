@@ -44,6 +44,10 @@ type Backend interface {
 	// ("", false) on probe failure.
 	AgentToolProbe(containerID string) (string, bool)
 
+	// ActiveSession returns the name of the tmux session that currently
+	// has an attached client inside the container, or "" if none.
+	ActiveSession(containerID string) string
+
 	// EditorURI returns a URI string that an editor (e.g. VS Code)
 	// can use to connect to this workspace. Returns ("", false) if
 	// editor integration is not supported by this backend.

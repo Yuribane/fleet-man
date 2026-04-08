@@ -212,6 +212,27 @@ func (b *DevcontainerBackend) CaptureScreen(containerID, tmuxSession string) bac
 	return backend.ScreenCapture{Content: string(out), OK: true}
 }
 
+// activeSessionScript queries the most recently active tmux client and
+// returns its session name. Sorting by client_activity ensures we pick
+// the client the user is currently interacting with, not a stale one
+// left behind by previous split-pane connections.
+const activeSessionScript = `tmux list-clients -F "#{client_activity}:#{session_name}" 2>/dev/null | sort -rn | head -1 | cut -d: -f2-`
+
+// ActiveSession returns the tmux session with the most recently active client.
+func (b *DevcontainerBackend) ActiveSession(containerID string) string {
+	args := []string{"exec"}
+	if u := b.containerUser(containerID); u != "" {
+		args = append(args, "-u", u)
+	}
+	args = append(args, containerID, "sh", "-c", activeSessionScript)
+	cmd := exec.Command("docker", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // AgentToolProbe detects which agent tool is running inside a container.
 func (b *DevcontainerBackend) AgentToolProbe(containerID string) (string, bool) {
 	args := []string{"exec"}

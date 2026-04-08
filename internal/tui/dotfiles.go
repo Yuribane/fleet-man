@@ -58,8 +58,15 @@ func dotfilesSetup(cfg *state.Config) string {
 // needed for backends like coder ssh that may report incorrect sizes
 // (e.g. 128x128).
 func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested bool) []string {
+	return shellCommandForSession(cfg, sanitizeSessionName(instanceName), cols, rows, nested)
+}
+
+// shellCommandForSession returns the command to run inside a devcontainer
+// with a persistent tmux session using the given session name. This allows
+// connecting to a specific named session rather than the default one derived
+// from the instance name.
+func shellCommandForSession(cfg *state.Config, session string, cols, rows int, nested bool) []string {
 	setup := dotfilesSetup(cfg)
-	session := sanitizeSessionName(instanceName)
 	tmuxInstall := `command -v tmux >/dev/null 2>&1 || { echo '==> Installing tmux...'; (apt-get update -qq && apt-get install -y -qq tmux) 2>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq tmux) 2>/dev/null || (apk add tmux) 2>/dev/null || (sudo apk add tmux) 2>/dev/null || (dnf install -y tmux) 2>/dev/null || (sudo dnf install -y tmux) 2>/dev/null || echo 'ERROR: failed to install tmux'; }; `
 	// coder ssh may report incorrect terminal dimensions (e.g. 128x128).
 	// We fix the PTY size with stty before tmux starts and pass -x/-y for
@@ -85,12 +92,15 @@ func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested
 	if nested {
 		vimKeys := cfg != nil && cfg.GeneralSettings.TmuxVimKeysEnabled()
 		prefixConf = ` \; set -g prefix C-x \; bind-key C-x send-prefix \; set -g status-right-length 80`
-		statusRight = ` prefix: ctrl+x | ctrl+q/ctrl+o: detach `
+		statusRight = ` pgup/pgdn: sessions | prefix+T: new | ctrl+q/ctrl+o: detach `
 		if vimKeys {
 			prefixConf += ` \; bind-key j select-pane -D \; bind-key k select-pane -U`
-			statusRight = ` prefix: ctrl+x | j/k: pane down/up | ctrl+q/ctrl+o: detach `
+			statusRight = ` j/k: pane | pgup/pgdn: sessions | prefix+T: new | ctrl+q: detach `
 		}
 	}
+	// Session navigation hotkeys: Ctrl+PageUp/Down switch between tmux
+	// sessions, Prefix+T creates a new session and switches to it.
+	sessionKeys := ` \; bind-key -n C-PPage switch-client -p \; bind-key -n C-NPage switch-client -n \; bind-key T new-session`
 	// Clear any stale resize-window hooks from previous sessions before
 	// attaching. The hook puts the window into manual-size mode and
 	// prevents dynamic resizing. We run this as a one-off tmux command
@@ -106,7 +116,7 @@ func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested
 		shQuote(session),
 	)
 	inner := setup + tmuxInstall + sizefix + sshAgentFix + hookClear + fmt.Sprintf(
-		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client \; set status-right '%s'`+prefixConf+resizeHook,
+		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client \; set status-right '%s'`+prefixConf+sessionKeys+resizeHook,
 		shQuote(session), statusRight,
 	)
 	return []string{"sh", "-c", inner}
