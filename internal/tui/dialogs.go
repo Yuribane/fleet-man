@@ -512,11 +512,16 @@ func (m model) updateCreateSession(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			// Apply group naming convention so the session is
+			// recognized as a group root (instance~name).
+			sanitized := SanitizeSessionName(inst.Name)
+			fullName := groupSessionName(sanitized, name)
+
 			m.mode = viewNormal
 			m.textInput.Blur()
 			m.message = fmt.Sprintf("Creating session %s...", name)
 			b := m.instanceBackend(inst)
-			return m, createSessionCmd(b, inst.WorkspaceDir, instKey, name)
+			return m, createSessionCmd(b, inst.WorkspaceDir, instKey, fullName)
 
 		case "esc", "ctrl+c":
 			m.mode = viewNormal
@@ -547,17 +552,6 @@ func (m model) updateRenameSession(msg tea.Msg) (tea.Model, tea.Cmd) {
 			newName = SanitizeSessionName(newName)
 
 			instKey := m.dialogFleet + "/" + m.dialogInst
-			// Check for duplicate names
-			if disc, ok := m.sessions[instKey]; ok && disc.err == nil {
-				for _, s := range disc.sessions {
-					if s.Name == newName {
-						m.message = fmt.Sprintf("Session %q already exists", newName)
-						m.mode = viewNormal
-						m.textInput.Blur()
-						return m, nil
-					}
-				}
-			}
 
 			f, ok := m.st.Fleets[m.dialogFleet]
 			if !ok {
@@ -572,10 +566,40 @@ func (m model) updateRenameSession(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			// When renaming a grouped session, the user types just
+			// the display name (e.g. "hot-sauce"). We need to rebuild
+			// the full group name. For a group root like instance~oldID,
+			// rename to instance~newName. For a member like
+			// instance~groupID~suffix, only the group root can be
+			// renamed (rename changes the group ID for the whole group).
+			sanitized := SanitizeSessionName(inst.Name)
+			oldName := m.dialogSession
+			oldGID, isGrouped := parseGroupID(sanitized, oldName)
+			if isGrouped {
+				// Rebuild: keep the same structure but swap the group ID.
+				// If old was instance~gid (root), new is instance~newName.
+				// If old was instance~gid~suffix (member), rename the
+				// root portion: instance~newName~suffix.
+				rest := oldName[len(sanitized+groupSep+oldGID):]
+				newName = sanitized + groupSep + newName + rest
+			}
+
+			// Check for duplicate names using the full name.
+			if disc, ok := m.sessions[instKey]; ok && disc.err == nil {
+				for _, s := range disc.sessions {
+					if s.Name == newName {
+						m.message = fmt.Sprintf("Session %q already exists", newName)
+						m.mode = viewNormal
+						m.textInput.Blur()
+						return m, nil
+					}
+				}
+			}
+
 			m.mode = viewNormal
 			m.textInput.Blur()
 			b := m.instanceBackend(inst)
-			return m, renameSessionCmd(b, inst.WorkspaceDir, instKey, m.dialogSession, newName)
+			return m, renameSessionCmd(b, inst.WorkspaceDir, instKey, oldName, newName)
 
 		case "esc", "ctrl+c":
 			m.mode = viewNormal

@@ -66,7 +66,16 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.dialogFleet = r.fleetName
 				m.dialogInst = r.instance.Name
 				m.dialogSession = r.sessionName
-				m.textInput.SetValue(r.sessionName)
+				// Show just the group ID (display name) for editing,
+				// not the full internal session name.
+				displayName := r.sessionName
+				if r.instance != nil {
+					sanitized := SanitizeSessionName(r.instance.Name)
+					if gid, ok := parseGroupID(sanitized, r.sessionName); ok {
+						displayName = gid
+					}
+				}
+				m.textInput.SetValue(displayName)
 				m.textInput.Placeholder = "new-session-name"
 				m.textInput.CharLimit = 64
 				m.textInput.Focus()
