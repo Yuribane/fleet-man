@@ -14,9 +14,9 @@ func shQuote(s string) string {
 	return dotfiles.ShQuote(s)
 }
 
-// sanitizeSessionName replaces characters that are problematic in
+// SanitizeSessionName replaces characters that are problematic in
 // socket filenames with hyphens.
-func sanitizeSessionName(name string) string {
+func SanitizeSessionName(name string) string {
 	r := strings.NewReplacer(".", "-", ":", "-", "/", "-")
 	s := r.Replace(name)
 	if s == "" {
@@ -58,14 +58,14 @@ func dotfilesSetup(cfg *state.Config) string {
 // needed for backends like coder ssh that may report incorrect sizes
 // (e.g. 128x128).
 func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested bool) []string {
-	return shellCommandForSession(cfg, sanitizeSessionName(instanceName), cols, rows, nested)
+	return ShellCommandForSession(cfg, SanitizeSessionName(instanceName), cols, rows, nested)
 }
 
-// shellCommandForSession returns the command to run inside a devcontainer
+// ShellCommandForSession returns the command to run inside a devcontainer
 // with a persistent tmux session using the given session name. This allows
 // connecting to a specific named session rather than the default one derived
 // from the instance name.
-func shellCommandForSession(cfg *state.Config, session string, cols, rows int, nested bool) []string {
+func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, nested bool) []string {
 	setup := dotfilesSetup(cfg)
 	tmuxInstall := `command -v tmux >/dev/null 2>&1 || { echo '==> Installing tmux...'; (apt-get update -qq && apt-get install -y -qq tmux) 2>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq tmux) 2>/dev/null || (apk add tmux) 2>/dev/null || (sudo apk add tmux) 2>/dev/null || (dnf install -y tmux) 2>/dev/null || (sudo dnf install -y tmux) 2>/dev/null || echo 'ERROR: failed to install tmux'; }; `
 	// coder ssh may report incorrect terminal dimensions (e.g. 128x128).
@@ -85,24 +85,22 @@ func shellCommandForSession(cfg *state.Config, session string, cols, rows int, n
 	}
 	// When nested inside a host tmux (split pane mode), use Ctrl+X as
 	// the inner prefix so it doesn't conflict with the outer Ctrl+B.
-	// Vim-style pane navigation (j/k) is injected only when the user
-	// has enabled the "tmux vim keys" setting.
+	// Pane navigation (h/j/k/l) is handled by the outer tmux, so the
+	// inner tmux only needs prefix and session keys.
 	prefixConf := ""
 	statusRight := ` ctrl+q/ctrl+o: detach `
 	if nested {
-		vimKeys := cfg != nil && cfg.GeneralSettings.TmuxVimKeysEnabled()
-		prefixConf = ` \; set -g prefix C-x \; bind-key C-x send-prefix \; set -g status-right-length 80`
-		statusRight = ` pgup/pgdn: sessions | prefix+T: new | ctrl+q/ctrl+o: detach `
-		if vimKeys {
-			prefixConf += ` \; bind-key j select-pane -D \; bind-key k select-pane -U`
-			statusRight = ` j/k: pane | pgup/pgdn: sessions | prefix+T: new | ctrl+q: detach `
-		}
+		// In nested mode, Ctrl+Q/O are handled by the outer tmux
+		// (they close all split panes). The inner tmux only needs
+		// the prefix override and session navigation. The status bar
+		// is hidden because the outer tmux provides all the UI.
+		prefixConf = ` \; set -g prefix C-x \; bind-key C-x send-prefix \; set -g status off`
+		statusRight = ""
 	}
-	// Session navigation hotkeys: Ctrl+PageUp/Down cycle sessions,
-	// prefix+T creates a new session and switches to it.
-	// The host tmux must unbind C-PPage/C-NPage so they pass through
-	// to the inner tmux (handled by splitPaneCmd / TUI init).
-	sessionKeys := ` \; bind-key -n C-PPage switch-client -p \; bind-key -n C-NPage switch-client -n \; bind-key T new-session`
+	// Session navigation: Ctrl+PageUp/Down are handled by the outer
+	// tmux to cycle session groups. prefix+T creates a new session
+	// inside the container.
+	sessionKeys := ` \; bind-key T new-session`
 	// Clear any stale resize-window hooks from previous sessions before
 	// attaching. The hook puts the window into manual-size mode and
 	// prevents dynamic resizing. We run this as a one-off tmux command
@@ -117,9 +115,20 @@ func shellCommandForSession(cfg *state.Config, session string, cols, rows int, n
 		`tmux has-session -t %s 2>/dev/null && tmux set-hook -gu client-attached 2>/dev/null; `,
 		shQuote(session),
 	)
+	// In non-nested mode, Ctrl+Q/O detach from the inner tmux session.
+	// In nested mode, the outer tmux handles these keys to close all
+	// split panes, so we don't bind them here.
+	detachKeys := ` \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client`
+	if nested {
+		detachKeys = ""
+	}
+	statusConf := ""
+	if statusRight != "" {
+		statusConf = fmt.Sprintf(` \; set status-right '%s'`, statusRight)
+	}
 	inner := setup + tmuxInstall + sizefix + sshAgentFix + hookClear + fmt.Sprintf(
-		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client \; set status-right '%s'`+prefixConf+sessionKeys+resizeHook,
-		shQuote(session), statusRight,
+		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on`+detachKeys+statusConf+prefixConf+sessionKeys+resizeHook,
+		shQuote(session),
 	)
 	return []string{"sh", "-c", inner}
 }

@@ -62,6 +62,8 @@ type row struct {
 	fleetName   string
 	instance    *fleet.Instance
 	sessionName string // set when kind == rowSession or rowNewSession
+	groupID     string // set for grouped session rows
+	groupSize   int    // number of sessions in the group (for display)
 }
 
 type model struct {
@@ -110,8 +112,6 @@ type model struct {
 	// Instance expansion: which instances are expanded to show sessions
 	expandedInstances map[string]bool              // key: "fleet/instance"
 	sessions          map[string]*sessionDiscovery // key: "fleet/instance"
-	activeSessions    map[string]string            // containerID → active tmux session name
-	sessionPoller     *sessionPoller               // manages fast 1s session poll loop
 	dialogSession     string                       // session being renamed (for viewRenameSession)
 
 	// Split pane mode: when fleet runs inside a host tmux session,
@@ -121,6 +121,16 @@ type model struct {
 	splitPaneID   string // tmux pane ID of the right pane ("" = no split)
 	splitInstance string // instance name currently in the right pane
 	splitSession  string // tmux session name in the right pane
+
+	// Session groups: track the active group and saved layouts for
+	// group switching (kill all panes → restore).
+	activeGroupID string                // group ID of current outer panes
+	savedGroups   map[string]savedGroup // groupID → saved layout for restoration
+
+	// Session cycle debounce: visual selection moves instantly but
+	// pane switching waits 500ms for additional input.
+	pendingGroupID string // group ID selected but not yet switched to ("" = none)
+	debounceSeq    int    // incremented on each pgup/pgdown, checked by timer
 
 	// Update check
 	updateAvailable string // non-empty = new version tag from GitHub
@@ -152,17 +162,23 @@ func newModel() model {
 		portForwards:      portforward.NewManager(),
 		expandedInstances: make(map[string]bool),
 		sessions:          make(map[string]*sessionDiscovery),
-		activeSessions:    make(map[string]string),
-		sessionPoller:     newSessionPoller(),
+		savedGroups:       make(map[string]savedGroup),
 		textInput:         ti,
 		spinner:           sp,
 		settingsInput:     si,
 		inHostTmux:        os.Getenv("TMUX") != "",
 	}
 	// Unbind C-PPage/C-NPage from the host tmux so they pass through
-	// to inner tmux sessions for session cycling.
+	// to inner tmux sessions for session cycling. Bind Ctrl+Q/O to
+	// close all split panes from any pane.
 	if m.inHostTmux {
-		unbindHostSessionKeys()
+		bindHostSessionCycleKeys()
+		bindHostCloseKeys()
+		// Neutralize default split bindings so the user doesn't
+		// accidentally open a host shell before selecting an instance.
+		// These will be rebound to connect to the active instance
+		// once a split pane is opened.
+		unbindDefaultSplitKeys()
 	}
 	// On first-ever startup, check for required binaries and show results
 	// if anything is missing. "First startup" = the ~/.fleet/ dir doesn't exist.
@@ -248,12 +264,18 @@ func (m *model) buildRows() {
 				instKey := name + "/" + inst.Name
 				if m.expandedInstances[instKey] {
 					if disc, ok := m.sessions[instKey]; ok && disc.err == nil {
-						for _, sess := range disc.sessions {
+						sanitized := SanitizeSessionName(inst.Name)
+						groups := groupSessions(sanitized, disc.sessions)
+						for _, g := range groups {
+							// Use the root session name (first in group) for display.
+							rootName := g.Sessions[0].Name
 							m.rows = append(m.rows, row{
 								kind:        rowSession,
 								fleetName:   name,
 								instance:    inst,
-								sessionName: sess.Name,
+								sessionName: rootName,
+								groupID:     g.GroupID,
+								groupSize:   len(g.Sessions),
 							})
 						}
 					}
@@ -382,17 +404,46 @@ func (m *model) containersByBackend() map[fleet.BackendType]*backendGroup {
 				groups[bt] = g
 			}
 			g.ids = append(g.ids, inst.ContainerID)
-			g.sessions[inst.ContainerID] = sanitizeSessionName(inst.Name)
+			g.sessions[inst.ContainerID] = SanitizeSessionName(inst.Name)
 		}
 	}
 	return groups
+}
+
+// sessionDiscoveryLoop returns a tea.Cmd that lists tmux sessions for
+// expanded instances on a 1-second cycle. Unlike the old session poll,
+// this only discovers sessions — it does not track which is active.
+func (m model) sessionDiscoveryLoop() tea.Cmd {
+	return sessionDiscoveryCmd(m.backends, m.expandedInstances, m.st.Fleets)
+}
+
+// refreshInstanceSessions returns a tea.Cmd that re-lists tmux sessions
+// for the given instance (if expanded). Used after split pane creation,
+// group switching, and session creation to keep the UI in sync.
+func (m *model) refreshInstanceSessions(instanceName string) tea.Cmd {
+	for instKey, expanded := range m.expandedInstances {
+		if !expanded {
+			continue
+		}
+		parts := strings.SplitN(instKey, "/", 2)
+		if len(parts) != 2 || parts[1] != instanceName {
+			continue
+		}
+		if f, ok := m.st.Fleets[parts[0]]; ok {
+			if inst, err := f.GetInstance(parts[1]); err == nil {
+				b := m.instanceBackend(inst)
+				return listSessionsCmd(b, inst.WorkspaceDir, instKey)
+			}
+		}
+	}
+	return nil
 }
 
 func (m model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		m.spinner.Tick,
 		m.fetchAllStatsCmd(false),
-		m.sessionPollLoop(false),
+		m.sessionDiscoveryLoop(),
 		checkUpdateCmd(),
 	}
 	if len(m.creating) > 0 {
@@ -409,13 +460,6 @@ func (m model) Init() tea.Cmd {
 		cmds = append(cmds, fetchCodespaceMachinesCmd(repo))
 	}
 	return tea.Batch(cmds...)
-}
-
-// sessionPollLoop returns a tea.Cmd that runs the fast 1-second session
-// poll loop. It polls active sessions for all running containers and
-// lists sessions for expanded instances.
-func (m model) sessionPollLoop(delay bool) tea.Cmd {
-	return sessionPollCmd(m.sessionPoller, m.backends, m.expandedInstances, m.st.Fleets, delay)
 }
 
 // fetchAllStatsCmd creates a command that fetches stats from all backends concurrently.
@@ -507,17 +551,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.fetchAllStatsCmd(true)
 
-	case sessionPollMsg:
-		if msg.activeSessions != nil {
-			m.activeSessions = msg.activeSessions
-		}
+	case sessionDiscoveryMsg:
 		if msg.discovered != nil {
 			for key, sessions := range msg.discovered {
 				m.sessions[key] = &sessionDiscovery{sessions: sessions, fetchedAt: time.Now()}
 			}
 			m.buildRows()
 		}
-		return m, m.sessionPollLoop(true)
+		// Detect when panes were killed externally (e.g. Ctrl+Q/O).
+		if m.splitPaneID != "" && !splitOpen() {
+			unbindHostSplitKeys()
+			m.splitPaneID = ""
+			m.splitInstance = ""
+			m.splitSession = ""
+			m.activeGroupID = ""
+		}
+		return m, m.sessionDiscoveryLoop()
+
+	case groupCycleMsg:
+		// Debounce timer expired — commit the group switch if the
+		// sequence still matches (no further pgup/pgdown since).
+		if msg.seq == m.debounceSeq && m.pendingGroupID != "" {
+			return m.commitGroupCycle()
+		}
+		return m, nil
 
 	case instanceSpawnedMsg:
 		// Background process launched; start polling for completion
@@ -549,9 +606,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.splitPaneID = msg.paneID
 		m.splitInstance = msg.instance
 		m.splitSession = msg.session
-		// Force an immediate session poll so the active session
-		// indicator updates without waiting for the 1-second cycle.
-		return m, m.sessionPollLoop(false)
+		m.activeGroupID = msg.groupID
+		// Rebind outer tmux split keys so new splits open inside
+		// this instance (and group) instead of spawning a local shell.
+		bindHostSplitKeys(msg.instance, msg.groupID)
+		// Refresh session list for the instance so the UI is up to date.
+		return m, m.refreshInstanceSessions(msg.instance)
 
 	case sessionsMsg:
 		if msg.err != nil {
@@ -780,10 +840,12 @@ func (m model) updateByMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	if m.quitting {
-		killSplitPane(m.splitPaneID)
+		killAllSplitPanes()
 		m.portForwards.Shutdown()
 		if m.inHostTmux {
-			rebindHostSessionKeys()
+			unbindHostSessionCycleKeys()
+			unbindHostSplitKeys()
+			unbindHostCloseKeys()
 		}
 		return ""
 	}

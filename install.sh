@@ -4,6 +4,21 @@ set -e
 REPO="BenjaminBenetti/fleet-man"
 INSTALL_DIR="/usr/local/bin"
 BINARY="fleet"
+VERSION=""
+
+# Parse flags
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --version)
+            VERSION="$2"
+            shift 2
+            ;;
+        *)
+            echo "Error: unknown flag: $1"
+            exit 1
+            ;;
+    esac
+done
 
 # Detect architecture
 ARCH=$(uname -m)
@@ -24,13 +39,18 @@ fi
 
 ASSET="fleet-${OS}-${ARCH}"
 
-# Get latest release tag
-echo "Fetching latest release..."
-TAG=$(curl -sL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | head -1 | cut -d '"' -f 4)
+# Determine version
+if [ -n "$VERSION" ]; then
+    TAG="$VERSION"
+    echo "Using specified version: ${TAG}"
+else
+    echo "Fetching latest release..."
+    TAG=$(curl -sL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | head -1 | cut -d '"' -f 4)
 
-if [ -z "$TAG" ]; then
-    echo "Error: could not determine latest release"
-    exit 1
+    if [ -z "$TAG" ]; then
+        echo "Error: could not determine latest release"
+        exit 1
+    fi
 fi
 
 URL="https://github.com/${REPO}/releases/download/${TAG}/${ASSET}"

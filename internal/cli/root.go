@@ -50,6 +50,7 @@ func NewRootCmd() *cobra.Command {
 		newStatusCmd(),
 		newCreateInstanceCmd(),
 		newPortForwardCmd(),
+		newShellCmd(),
 	)
 
 	return root
@@ -93,8 +94,10 @@ func relaunchInTmux() error {
 	cfg, _ := state.LoadConfig()
 	if cfg == nil || cfg.GeneralSettings.TmuxVimKeysEnabled() {
 		args = append(args,
-			";", "bind-key", "h", "select-pane", "-L",
-			";", "bind-key", "l", "select-pane", "-R",
+			";", "bind-key", "h", "if", "-F", "#{pane_at_left}", "", "select-pane -L",
+			";", "bind-key", "l", "if", "-F", "#{pane_at_right}", "", "select-pane -R",
+			";", "bind-key", "j", "if", "-F", "#{pane_at_bottom}", "", "select-pane -D",
+			";", "bind-key", "k", "if", "-F", "#{pane_at_top}", "", "select-pane -U",
 		)
 	}
 

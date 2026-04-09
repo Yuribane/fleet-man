@@ -1,12 +1,10 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backend"
@@ -32,17 +30,6 @@ type sessionDiscovery struct {
 	fetchedAt time.Time
 }
 
-// sessionPoller manages the fast 1-second session polling loop with
-// a lock to prevent concurrent polls from stacking up.
-type sessionPoller struct {
-	running atomic.Bool // true while a poll is in flight
-}
-
-// newSessionPoller creates a new session poller.
-func newSessionPoller() *sessionPoller {
-	return &sessionPoller{}
-}
-
 // ===========================================
 // Messages
 // ===========================================
@@ -52,14 +39,6 @@ type sessionsMsg struct {
 	instanceKey string // "fleet/instance"
 	sessions    []tmuxSession
 	err         error
-}
-
-// sessionPollMsg carries the combined result of a fast session poll:
-// discovered sessions per expanded instance and the active session
-// per container.
-type sessionPollMsg struct {
-	discovered     map[string][]tmuxSession // instanceKey → sessions
-	activeSessions map[string]string        // containerID → active session name
 }
 
 // sessionCreatedMsg is sent after creating a new tmux session.
@@ -76,29 +55,23 @@ type sessionRenamedMsg struct {
 	err         error
 }
 
-// ===========================================
-// Session Polling
-// ===========================================
+// sessionDiscoveryMsg carries discovered sessions for expanded instances.
+type sessionDiscoveryMsg struct {
+	discovered map[string][]tmuxSession // instanceKey → sessions
+}
 
-// sessionPollCmd runs a fast session poll: lists sessions for expanded
-// instances and detects active sessions for all running containers.
-// A lock prevents concurrent polls from stacking. If a previous poll
-// is still in flight, this one is skipped. A 30-second timeout acts
-// as a safety valve for slow remote hosts.
-func sessionPollCmd(
-	poller *sessionPoller,
+// sessionDiscoveryCmd lists tmux sessions for all expanded, running
+// instances. Runs on a 1-second loop to detect external session
+// creation/destruction.
+func sessionDiscoveryCmd(
 	backends map[fleet.BackendType]backend.Backend,
 	expanded map[string]bool,
 	fleets map[string]*fleet.Fleet,
-	delay bool,
 ) tea.Cmd {
-	// Snapshot what we need — don't capture model fields across goroutines.
 	type target struct {
 		instanceKey  string
 		workspaceDir string
-		containerID  string
 		backendType  fleet.BackendType
-		isExpanded   bool
 	}
 	var targets []target
 	for _, f := range fleets {
@@ -111,36 +84,25 @@ func sessionPollCmd(
 				bt = fleet.BackendDevcontainer
 			}
 			instKey := f.Name + "/" + inst.Name
+			if !expanded[instKey] {
+				continue
+			}
 			targets = append(targets, target{
 				instanceKey:  instKey,
 				workspaceDir: inst.WorkspaceDir,
-				containerID:  inst.ContainerID,
 				backendType:  bt,
-				isExpanded:   expanded[instKey],
 			})
 		}
 	}
 
 	return func() tea.Msg {
-		if delay {
-			time.Sleep(1 * time.Second)
-		}
-
-		// Skip if a previous poll is still running.
-		if !poller.running.CompareAndSwap(false, true) {
-			return sessionPollMsg{}
-		}
-		defer poller.running.Store(false)
+		time.Sleep(1 * time.Second)
 
 		if len(targets) == 0 {
-			return sessionPollMsg{}
+			return sessionDiscoveryMsg{}
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
 		discovered := make(map[string][]tmuxSession)
-		activeSessions := make(map[string]string)
 		var mu sync.Mutex
 		var wg sync.WaitGroup
 
@@ -149,52 +111,26 @@ func sessionPollCmd(
 			if b == nil {
 				continue
 			}
-
-			// Always poll active session.
 			wg.Add(1)
-			go func(b backend.Backend, cid string) {
+			go func(b backend.Backend, wsDir, instKey string) {
 				defer wg.Done()
-				sess := b.ActiveSession(cid)
-				if sess != "" {
-					mu.Lock()
-					activeSessions[cid] = sess
-					mu.Unlock()
+				cmd := b.ExecCommand(wsDir, []string{
+					"sh", "-c",
+					`tmux list-sessions -F "#{session_name}:#{session_windows}:#{session_attached}" 2>/dev/null`,
+				})
+				out, err := cmd.Output()
+				if err != nil {
+					return
 				}
-			}(b, t.containerID)
-
-			// Only list sessions for expanded instances.
-			if t.isExpanded {
-				wg.Add(1)
-				go func(b backend.Backend, wsDir, instKey string) {
-					defer wg.Done()
-					cmd := b.ExecCommand(wsDir, []string{
-						"sh", "-c",
-						`tmux list-sessions -F "#{session_name}:#{session_windows}:#{session_attached}" 2>/dev/null`,
-					})
-					out, err := cmd.Output()
-					if err != nil {
-						return
-					}
-					sessions := parseTmuxSessions(string(out))
-					mu.Lock()
-					discovered[instKey] = sessions
-					mu.Unlock()
-				}(b, t.workspaceDir, t.instanceKey)
-			}
+				sessions := parseTmuxSessions(string(out))
+				mu.Lock()
+				discovered[instKey] = sessions
+				mu.Unlock()
+			}(b, t.workspaceDir, t.instanceKey)
 		}
 
-		// Wait for all goroutines or timeout.
-		done := make(chan struct{})
-		go func() {
-			wg.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-ctx.Done():
-		}
-
-		return sessionPollMsg{discovered: discovered, activeSessions: activeSessions}
+		wg.Wait()
+		return sessionDiscoveryMsg{discovered: discovered}
 	}
 }
 
@@ -242,6 +178,48 @@ func renameSessionCmd(b backend.Backend, workspaceDir, instanceKey, oldName, new
 			return sessionRenamedMsg{instanceKey: instanceKey, oldName: oldName, newName: newName, err: err}
 		}
 		return sessionRenamedMsg{instanceKey: instanceKey, oldName: oldName, newName: newName}
+	}
+}
+
+// renameGroupCmd renames all sessions in a group. It lists sessions
+// matching the old group prefix, then renames each one by swapping the
+// old group ID for the new one.
+func renameGroupCmd(b backend.Backend, workspaceDir, instanceKey, sanitizedInstance, oldGroupID, newGroupID string) tea.Cmd {
+	oldPrefix := sanitizedInstance + groupSep + oldGroupID
+	newPrefix := sanitizedInstance + groupSep + newGroupID
+
+	return func() tea.Msg {
+		// List all sessions in the container.
+		listCmd := b.ExecCommand(workspaceDir, []string{
+			"sh", "-c",
+			`tmux list-sessions -F "#{session_name}" 2>/dev/null`,
+		})
+		out, err := listCmd.Output()
+		if err != nil {
+			return sessionRenamedMsg{instanceKey: instanceKey, oldName: oldPrefix, newName: newPrefix, err: err}
+		}
+
+		// Rename each session that matches the old group prefix.
+		var lastErr error
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			name := strings.TrimSpace(line)
+			if name == "" || !strings.HasPrefix(name, oldPrefix) {
+				continue
+			}
+			// Swap prefix: instance~oldGID~suffix → instance~newGID~suffix
+			renamed := newPrefix + name[len(oldPrefix):]
+			cmd := b.ExecCommand(workspaceDir, []string{
+				"sh", "-c",
+				fmt.Sprintf(`tmux rename-session -t %s %s 2>/dev/null`, shQuote(name), shQuote(renamed)),
+			})
+			if err := cmd.Run(); err != nil {
+				lastErr = err
+			}
+		}
+		if lastErr != nil {
+			return sessionRenamedMsg{instanceKey: instanceKey, oldName: oldPrefix, newName: newPrefix, err: lastErr}
+		}
+		return sessionRenamedMsg{instanceKey: instanceKey, oldName: oldPrefix, newName: newPrefix}
 	}
 }
 

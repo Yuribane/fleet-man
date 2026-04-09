@@ -66,7 +66,16 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.dialogFleet = r.fleetName
 				m.dialogInst = r.instance.Name
 				m.dialogSession = r.sessionName
-				m.textInput.SetValue(r.sessionName)
+				// Show just the group ID (display name) for editing,
+				// not the full internal session name.
+				displayName := r.sessionName
+				if r.instance != nil {
+					sanitized := SanitizeSessionName(r.instance.Name)
+					if gid, ok := parseGroupID(sanitized, r.sessionName); ok {
+						displayName = gid
+					}
+				}
+				m.textInput.SetValue(displayName)
 				m.textInput.Placeholder = "new-session-name"
 				m.textInput.CharLimit = 64
 				m.textInput.Focus()
@@ -157,6 +166,13 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textInput.Focus()
 			return m, m.textInput.Cursor.BlinkCmd()
 
+		case "pgup", "pgdown":
+			// Cycle session groups: Ctrl+PageUp/Down on the outer tmux
+			// sends PageUp/PageDown to the TUI pane.
+			if m.inHostTmux && m.splitInstance != "" && m.activeGroupID != "" {
+				return m.cycleSessionGroup(msg.String() == "pgup")
+			}
+
 		case "enter", "e":
 			r := m.currentRow()
 			if r == nil {
@@ -187,33 +203,55 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.textInput.Cursor.BlinkCmd()
 
 			case rowSession:
-				// Connect to a specific named tmux session
+				// Connect to a specific named tmux session (or session group).
 				inst := r.instance
 				sessionName := r.sessionName
+				groupID := r.groupID
 				if m.inHostTmux {
 					if m.splitPaneID != "" && !splitOpen() {
+						unbindHostSplitKeys()
 						m.splitPaneID = ""
 						m.splitInstance = ""
 						m.splitSession = ""
+						m.activeGroupID = ""
 					}
-					if m.splitPaneID != "" && m.splitInstance == inst.Name && m.splitSession == sessionName {
-						killSplitPane(m.splitPaneID)
+					// If this is a group row and the group is active, toggle off.
+					if m.splitPaneID != "" && m.splitInstance == inst.Name && groupID != "" && groupID == m.activeGroupID {
+						// Save current group layout before killing.
+						m.saveCurrentGroupLayout()
+						killAllSplitPanes()
+						unbindHostSplitKeys()
 						m.splitPaneID = ""
 						m.splitInstance = ""
 						m.splitSession = ""
+						m.activeGroupID = ""
 						return m, nil
 					}
+					// If a different group is active, save its layout first.
+					if m.splitPaneID != "" && m.activeGroupID != "" {
+						m.saveCurrentGroupLayout()
+						killAllSplitPanes()
+					}
+					// Set activeGroupID immediately so the indicator
+					// updates without waiting for the async command.
+					m.activeGroupID = groupID
+					// Restore the group: query the inner tmux for all
+					// sessions matching the group prefix and recreate panes.
+					if groupID != "" && isGroupedSession(SanitizeSessionName(inst.Name), sessionName) {
+						return m, m.restoreGroupCmd(inst, groupID)
+					}
+					// Ungrouped/legacy session — open a single pane.
 					cols, rows := tmuxWindowSize()
 					cols = cols * 70 / 100
 					cmd := m.instanceBackend(inst).ExecCommand(
 						inst.WorkspaceDir,
-						shellCommandForSession(m.cfg, sessionName, cols, rows, true),
+						ShellCommandForSession(m.cfg, sessionName, cols, rows, true),
 					)
-					return m, splitPaneCmd(m.splitPaneID, inst.Name, sessionName, cmd)
+					return m, splitPaneCmd(m.splitPaneID, inst.Name, sessionName, groupID, cmd)
 				}
 				cmd := m.instanceBackend(inst).ExecCommand(
 					inst.WorkspaceDir,
-					shellCommandForSession(m.cfg, sessionName, m.width, m.height, false),
+					ShellCommandForSession(m.cfg, sessionName, m.width, m.height, false),
 				)
 				banner := renderGradient(nameToBanner(inst.Name))
 				banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
@@ -227,11 +265,11 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if inst == nil {
 					break
 				}
-				// Resume the last active session if known, otherwise
-				// fall back to the default session named after the instance.
-				sessionName := m.activeSessions[inst.ContainerID]
-				if sessionName == "" {
-					sessionName = sanitizeSessionName(inst.Name)
+				// Use the current split session if it matches this instance,
+				// otherwise fall back to the default session name.
+				sessionName := SanitizeSessionName(inst.Name)
+				if m.splitInstance == inst.Name && m.splitSession != "" {
+					sessionName = m.splitSession
 				}
 				// Split pane mode: open shell in a right-side tmux pane
 				// instead of suspending the TUI. Toggle: if the same
@@ -240,27 +278,36 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Clear stale pane state if the split is no longer visible
 					// (e.g. session killed or detached).
 					if m.splitPaneID != "" && !splitOpen() {
+						unbindHostSplitKeys()
 						m.splitPaneID = ""
 						m.splitInstance = ""
 						m.splitSession = ""
+						m.activeGroupID = ""
 					}
 					// Toggle: if the same instance is already open, close it.
 					if m.splitPaneID != "" && m.splitInstance == inst.Name {
-						killSplitPane(m.splitPaneID)
+						m.saveCurrentGroupLayout()
+						killAllSplitPanes()
+						unbindHostSplitKeys()
 						m.splitPaneID = ""
 						m.splitInstance = ""
 						m.splitSession = ""
+						m.activeGroupID = ""
 						return m, nil
 					}
+					// Generate a new group ID for this session group.
+					newGroupID := randomHex(3)
+					sanitized := SanitizeSessionName(inst.Name)
+					sessName := groupSessionName(sanitized, newGroupID)
 					// Query the host tmux window size and calculate the
 					// right pane dimensions (70% of the window width).
 					cols, rows := tmuxWindowSize()
 					cols = cols * 70 / 100
-					cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, shellCommandForSession(m.cfg, sessionName, cols, rows, true))
-					return m, splitPaneCmd(m.splitPaneID, inst.Name, sessionName, cmd)
+					cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, ShellCommandForSession(m.cfg, sessName, cols, rows, true))
+					return m, splitPaneCmd(m.splitPaneID, inst.Name, sessName, newGroupID, cmd)
 				}
 
-				cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, shellCommandForSession(m.cfg, sessionName, m.width, m.height, false))
+				cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, ShellCommandForSession(m.cfg, sessionName, m.width, m.height, false))
 
 				banner := renderGradient(nameToBanner(inst.Name))
 				banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
@@ -434,14 +481,27 @@ func (m model) viewFleetList() string {
 			}
 			listContent.WriteString("\n")
 		} else if r.kind == rowSession {
-			// Session row: indented under its parent instance
+			// Session row: indented under its parent instance.
+			// Grouped sessions show the group ID and pane count.
 			icon := "○"
 			style := sessionStyle
-			if m.activeSessions[r.instance.ContainerID] == r.sessionName {
+			// Use pending group during debounce, otherwise active group.
+			displayGroupID := m.activeGroupID
+			if m.pendingGroupID != "" {
+				displayGroupID = m.pendingGroupID
+			}
+			if r.groupID != "" && r.groupID == displayGroupID {
 				icon = "●"
 				style = sessionActiveStyle
 			}
-			label := fmt.Sprintf("%s %s", icon, r.sessionName)
+			var label string
+			if r.groupSize > 1 {
+				label = fmt.Sprintf("%s %s (%d panes)", icon, r.groupID, r.groupSize)
+			} else if r.groupID != "" && isGroupedSession(SanitizeSessionName(r.instance.Name), r.sessionName) {
+				label = fmt.Sprintf("%s %s", icon, r.groupID)
+			} else {
+				label = fmt.Sprintf("%s %s", icon, r.sessionName)
+			}
 			if isSelected {
 				listContent.WriteString(fmt.Sprintf("%s      %s", cursor, selectedStyle.Render(label)))
 			} else {
@@ -804,4 +864,107 @@ func (m model) viewFleetList() string {
 	}))
 
 	return b.String()
+}
+
+// instanceGroups returns the session groups for the given instance name,
+// using the current session discovery data.
+func (m *model) instanceGroups(instanceName string) []sessionGroup {
+	sanitized := SanitizeSessionName(instanceName)
+	for _, disc := range m.sessions {
+		if disc == nil || disc.err != nil {
+			continue
+		}
+		g := groupSessions(sanitized, disc.sessions)
+		if len(g) > 0 {
+			return g
+		}
+	}
+	return nil
+}
+
+// cycleSessionGroup moves the visual selection to the next or previous
+// session group and starts a 500ms debounce timer. The actual pane
+// switch only happens when the timer expires without further input.
+func (m model) cycleSessionGroup(prev bool) (tea.Model, tea.Cmd) {
+	groups := m.instanceGroups(m.splitInstance)
+	if len(groups) < 2 {
+		return m, nil
+	}
+
+	// Determine which group ID we're cycling FROM: if a pending
+	// selection exists, cycle from that; otherwise from the active group.
+	fromID := m.activeGroupID
+	if m.pendingGroupID != "" {
+		fromID = m.pendingGroupID
+	}
+
+	currentIdx := -1
+	for i, g := range groups {
+		if g.GroupID == fromID {
+			currentIdx = i
+			break
+		}
+	}
+	if currentIdx < 0 {
+		return m, nil
+	}
+
+	// Calculate target index with wrapping.
+	targetIdx := currentIdx - 1
+	if !prev {
+		targetIdx = currentIdx + 1
+	}
+	if targetIdx < 0 {
+		targetIdx = len(groups) - 1
+	} else if targetIdx >= len(groups) {
+		targetIdx = 0
+	}
+
+	// Update the visual selection (pendingGroupID) and bump the
+	// debounce sequence. The timer will only fire the switch if
+	// the sequence hasn't changed.
+	m.pendingGroupID = groups[targetIdx].GroupID
+	m.debounceSeq++
+	return m, groupCycleDebounce(m.debounceSeq)
+}
+
+// commitGroupCycle performs the actual pane switch after the debounce
+// timer expires. Called from the groupCycleMsg handler.
+func (m model) commitGroupCycle() (tea.Model, tea.Cmd) {
+	if m.pendingGroupID == "" || m.pendingGroupID == m.activeGroupID {
+		m.pendingGroupID = ""
+		return m, nil
+	}
+
+	// Find the instance.
+	var inst *fleet.Instance
+	for _, f := range m.st.Fleets {
+		for _, i := range f.Instances {
+			if i.Name == m.splitInstance {
+				inst = i
+				break
+			}
+		}
+		if inst != nil {
+			break
+		}
+	}
+	if inst == nil {
+		m.pendingGroupID = ""
+		return m, nil
+	}
+
+	targetGroupID := m.pendingGroupID
+	m.pendingGroupID = ""
+
+	// Save current layout BEFORE changing activeGroupID, so it's
+	// stored under the old group ID (not the target).
+	m.saveCurrentGroupLayout()
+	killAllSplitPanes()
+
+	// Now set activeGroupID so the indicator shows the target group
+	// while restoreGroupCmd is running (~2s).
+	m.activeGroupID = targetGroupID
+
+	return m, m.restoreGroupCmd(inst, targetGroupID)
 }

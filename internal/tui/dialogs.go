@@ -497,7 +497,7 @@ func (m model) updateCreateSession(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				name = nextSessionName(existing)
 			}
-			name = sanitizeSessionName(name)
+			name = SanitizeSessionName(name)
 
 			f, ok := m.st.Fleets[m.dialogFleet]
 			if !ok {
@@ -512,11 +512,16 @@ func (m model) updateCreateSession(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			// Apply group naming convention so the session is
+			// recognized as a group root (instance~name).
+			sanitized := SanitizeSessionName(inst.Name)
+			fullName := groupSessionName(sanitized, name)
+
 			m.mode = viewNormal
 			m.textInput.Blur()
 			m.message = fmt.Sprintf("Creating session %s...", name)
 			b := m.instanceBackend(inst)
-			return m, createSessionCmd(b, inst.WorkspaceDir, instKey, name)
+			return m, createSessionCmd(b, inst.WorkspaceDir, instKey, fullName)
 
 		case "esc", "ctrl+c":
 			m.mode = viewNormal
@@ -544,20 +549,9 @@ func (m model) updateRenameSession(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.textInput.Blur()
 				return m, nil
 			}
-			newName = sanitizeSessionName(newName)
+			newName = SanitizeSessionName(newName)
 
 			instKey := m.dialogFleet + "/" + m.dialogInst
-			// Check for duplicate names
-			if disc, ok := m.sessions[instKey]; ok && disc.err == nil {
-				for _, s := range disc.sessions {
-					if s.Name == newName {
-						m.message = fmt.Sprintf("Session %q already exists", newName)
-						m.mode = viewNormal
-						m.textInput.Blur()
-						return m, nil
-					}
-				}
-			}
 
 			f, ok := m.st.Fleets[m.dialogFleet]
 			if !ok {
@@ -572,10 +566,21 @@ func (m model) updateRenameSession(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			sanitized := SanitizeSessionName(inst.Name)
+			oldName := m.dialogSession
+			oldGID, isGrouped := parseGroupID(sanitized, oldName)
+
 			m.mode = viewNormal
 			m.textInput.Blur()
 			b := m.instanceBackend(inst)
-			return m, renameSessionCmd(b, inst.WorkspaceDir, instKey, m.dialogSession, newName)
+
+			if isGrouped {
+				// Rename the entire group: swap old group ID for new
+				// in all sessions matching the prefix.
+				return m, renameGroupCmd(b, inst.WorkspaceDir, instKey, sanitized, oldGID, newName)
+			}
+			// Ungrouped/legacy session — rename just the one.
+			return m, renameSessionCmd(b, inst.WorkspaceDir, instKey, oldName, newName)
 
 		case "esc", "ctrl+c":
 			m.mode = viewNormal

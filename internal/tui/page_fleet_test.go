@@ -312,7 +312,6 @@ func TestViewFleetListShowsAgentOffIndicator(t *testing.T) {
 			nil,
 		),
 		expandedInstances: make(map[string]bool),
-		activeSessions:    make(map[string]string),
 		stats:             map[string]*backend.ContainerStats{},
 		rows: []row{
 			{kind: rowFleetHeader, fleetName: "alpha"},
