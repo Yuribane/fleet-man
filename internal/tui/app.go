@@ -406,6 +406,13 @@ func (m *model) containersByBackend() map[fleet.BackendType]*backendGroup {
 	return groups
 }
 
+// sessionDiscoveryLoop returns a tea.Cmd that lists tmux sessions for
+// expanded instances on a 1-second cycle. Unlike the old session poll,
+// this only discovers sessions — it does not track which is active.
+func (m model) sessionDiscoveryLoop() tea.Cmd {
+	return sessionDiscoveryCmd(m.backends, m.expandedInstances, m.st.Fleets)
+}
+
 // refreshInstanceSessions returns a tea.Cmd that re-lists tmux sessions
 // for the given instance (if expanded). Used after split pane creation,
 // group switching, and session creation to keep the UI in sync.
@@ -432,6 +439,7 @@ func (m model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		m.spinner.Tick,
 		m.fetchAllStatsCmd(false),
+		m.sessionDiscoveryLoop(),
 	}
 	if len(m.creating) > 0 {
 		cmds = append(cmds, pollCreatingCmd())
@@ -537,6 +545,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activity.Update(msg.screens, msg.probes, msg.containerIDs, time.Now())
 		}
 		return m, m.fetchAllStatsCmd(true)
+
+	case sessionDiscoveryMsg:
+		if msg.discovered != nil {
+			for key, sessions := range msg.discovered {
+				m.sessions[key] = &sessionDiscovery{sessions: sessions, fetchedAt: time.Now()}
+			}
+			m.buildRows()
+		}
+		// Detect when panes were killed externally (e.g. Ctrl+Q/O).
+		if m.splitPaneID != "" && !splitOpen() {
+			unbindHostSplitKeys()
+			m.splitPaneID = ""
+			m.splitInstance = ""
+			m.splitSession = ""
+			m.activeGroupID = ""
+		}
+		return m, m.sessionDiscoveryLoop()
 
 	case groupCycleMsg:
 		// Debounce timer expired — commit the group switch if the

@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backend"
+	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -51,6 +53,85 @@ type sessionRenamedMsg struct {
 	oldName     string
 	newName     string
 	err         error
+}
+
+// sessionDiscoveryMsg carries discovered sessions for expanded instances.
+type sessionDiscoveryMsg struct {
+	discovered map[string][]tmuxSession // instanceKey → sessions
+}
+
+// sessionDiscoveryCmd lists tmux sessions for all expanded, running
+// instances. Runs on a 1-second loop to detect external session
+// creation/destruction.
+func sessionDiscoveryCmd(
+	backends map[fleet.BackendType]backend.Backend,
+	expanded map[string]bool,
+	fleets map[string]*fleet.Fleet,
+) tea.Cmd {
+	type target struct {
+		instanceKey  string
+		workspaceDir string
+		backendType  fleet.BackendType
+	}
+	var targets []target
+	for _, f := range fleets {
+		for _, inst := range f.Instances {
+			if inst.Status != fleet.StatusRunning || inst.ContainerID == "" {
+				continue
+			}
+			bt := inst.Backend
+			if bt == "" {
+				bt = fleet.BackendDevcontainer
+			}
+			instKey := f.Name + "/" + inst.Name
+			if !expanded[instKey] {
+				continue
+			}
+			targets = append(targets, target{
+				instanceKey:  instKey,
+				workspaceDir: inst.WorkspaceDir,
+				backendType:  bt,
+			})
+		}
+	}
+
+	return func() tea.Msg {
+		time.Sleep(1 * time.Second)
+
+		if len(targets) == 0 {
+			return sessionDiscoveryMsg{}
+		}
+
+		discovered := make(map[string][]tmuxSession)
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+
+		for _, t := range targets {
+			b := backends[t.backendType]
+			if b == nil {
+				continue
+			}
+			wg.Add(1)
+			go func(b backend.Backend, wsDir, instKey string) {
+				defer wg.Done()
+				cmd := b.ExecCommand(wsDir, []string{
+					"sh", "-c",
+					`tmux list-sessions -F "#{session_name}:#{session_windows}:#{session_attached}" 2>/dev/null`,
+				})
+				out, err := cmd.Output()
+				if err != nil {
+					return
+				}
+				sessions := parseTmuxSessions(string(out))
+				mu.Lock()
+				discovered[instKey] = sessions
+				mu.Unlock()
+			}(b, t.workspaceDir, t.instanceKey)
+		}
+
+		wg.Wait()
+		return sessionDiscoveryMsg{discovered: discovered}
+	}
 }
 
 // listSessionsCmd returns a tea.Cmd that execs `tmux list-sessions`
