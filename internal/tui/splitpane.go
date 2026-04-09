@@ -354,10 +354,13 @@ func (m *model) restoreGroupCmd(inst *fleet.Instance, groupID string) tea.Cmd {
 			_ = exec.Command("tmux", "select-pane", "-t", firstPaneID).Run()
 		}
 
-		// Wait briefly for panes to initialize, then force a repaint
-		// to avoid blank/corrupted terminals after rapid pane creation.
-		time.Sleep(2 * time.Second)
-		_ = exec.Command("tmux", "refresh-client").Run()
+		// Force a repaint after a brief delay to avoid blank/corrupted
+		// terminals after rapid pane creation. Done in a goroutine so
+		// the splitPaneMsg returns immediately.
+		go func() {
+			time.Sleep(2 * time.Second)
+			_ = exec.Command("tmux", "refresh-client").Run()
+		}()
 
 		firstSession := ""
 		if len(sessions) > 0 {

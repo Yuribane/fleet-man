@@ -189,6 +189,10 @@ func TestShellCommandNestedNoInnerPaneKeys(t *testing.T) {
 	if !strings.Contains(script, "set -g prefix C-x") {
 		t.Errorf("nested script missing prefix override: %s", script)
 	}
+	// Status bar should be hidden in nested mode.
+	if !strings.Contains(script, "set -g status off") {
+		t.Errorf("nested script should hide status bar: %s", script)
+	}
 }
 
 func TestShellCommandNestedVimKeysDisabled(t *testing.T) {

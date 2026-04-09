@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-	"time"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/deps"
@@ -233,6 +232,9 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.saveCurrentGroupLayout()
 						killAllSplitPanes()
 					}
+					// Set activeGroupID immediately so the indicator
+					// updates without waiting for the async command.
+					m.activeGroupID = groupID
 					// Restore the group: query the inner tmux for all
 					// sessions matching the group prefix and recreate panes.
 					if groupID != "" && isGroupedSession(SanitizeSessionName(inst.Name), sessionName) {
@@ -263,11 +265,11 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if inst == nil {
 					break
 				}
-				// Resume the last active session if known, otherwise
-				// fall back to the default session named after the instance.
-				sessionName := m.activeSessions[inst.ContainerID]
-				if sessionName == "" {
-					sessionName = SanitizeSessionName(inst.Name)
+				// Use the current split session if it matches this instance,
+				// otherwise fall back to the default session name.
+				sessionName := SanitizeSessionName(inst.Name)
+				if m.splitInstance == inst.Name && m.splitSession != "" {
+					sessionName = m.splitSession
 				}
 				// Split pane mode: open shell in a right-side tmux pane
 				// instead of suspending the TUI. Toggle: if the same
@@ -480,19 +482,12 @@ func (m model) viewFleetList() string {
 			// Grouped sessions show the group ID and pane count.
 			icon := "○"
 			style := sessionStyle
-			// During debounce or post-switch settling, only use the
-			// group ID to determine the active indicator — don't fall
-			// back to activeSessions which may have stale values.
+			// Use pending group during debounce, otherwise active group.
 			displayGroupID := m.activeGroupID
 			if m.pendingGroupID != "" {
 				displayGroupID = m.pendingGroupID
 			}
-			settling := !m.sessionDeferUtil.IsZero() && time.Now().Before(m.sessionDeferUtil)
-			isActive := r.groupID != "" && r.groupID == displayGroupID
-			if isActive {
-				icon = "●"
-				style = sessionActiveStyle
-			} else if !settling && m.pendingGroupID == "" && m.activeSessions[r.instance.ContainerID] == r.sessionName {
+			if r.groupID != "" && r.groupID == displayGroupID {
 				icon = "●"
 				style = sessionActiveStyle
 			}
@@ -959,17 +954,14 @@ func (m model) commitGroupCycle() (tea.Model, tea.Cmd) {
 	targetGroupID := m.pendingGroupID
 	m.pendingGroupID = ""
 
-	// Set activeGroupID immediately so the indicator doesn't jump
-	// back to the old group while restoreGroupCmd is running (~2s).
-	m.activeGroupID = targetGroupID
-
-	// Suppress active session poll updates for 5 seconds to give the
-	// new sessions time to settle and prevent indicator flickering.
-	m.sessionDeferUtil = time.Now().Add(5 * time.Second)
-
-	// Save current layout, kill panes, restore target.
+	// Save current layout BEFORE changing activeGroupID, so it's
+	// stored under the old group ID (not the target).
 	m.saveCurrentGroupLayout()
 	killAllSplitPanes()
+
+	// Now set activeGroupID so the indicator shows the target group
+	// while restoreGroupCmd is running (~2s).
+	m.activeGroupID = targetGroupID
 
 	return m, m.restoreGroupCmd(inst, targetGroupID)
 }

@@ -92,9 +92,10 @@ func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, n
 	if nested {
 		// In nested mode, Ctrl+Q/O are handled by the outer tmux
 		// (they close all split panes). The inner tmux only needs
-		// the prefix override and session navigation.
-		prefixConf = ` \; set -g prefix C-x \; bind-key C-x send-prefix \; set -g status-right-length 80`
-		statusRight = ` ctrl+pgup/pgdn: sessions | prefix+T: new | ctrl+q/ctrl+o: close `
+		// the prefix override and session navigation. The status bar
+		// is hidden because the outer tmux provides all the UI.
+		prefixConf = ` \; set -g prefix C-x \; bind-key C-x send-prefix \; set -g status off`
+		statusRight = ""
 	}
 	// Session navigation: Ctrl+PageUp/Down are handled by the outer
 	// tmux to cycle session groups. prefix+T creates a new session
@@ -121,9 +122,13 @@ func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, n
 	if nested {
 		detachKeys = ""
 	}
+	statusConf := ""
+	if statusRight != "" {
+		statusConf = fmt.Sprintf(` \; set status-right '%s'`, statusRight)
+	}
 	inner := setup + tmuxInstall + sizefix + sshAgentFix + hookClear + fmt.Sprintf(
-		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on`+detachKeys+` \; set status-right '%s'`+prefixConf+sessionKeys+resizeHook,
-		shQuote(session), statusRight,
+		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on`+detachKeys+statusConf+prefixConf+sessionKeys+resizeHook,
+		shQuote(session),
 	)
 	return []string{"sh", "-c", inner}
 }
