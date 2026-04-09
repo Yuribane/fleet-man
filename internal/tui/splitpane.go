@@ -16,6 +16,7 @@ import (
 // splitPaneMsg is sent after a tmux split-window command completes.
 type splitPaneMsg struct {
 	paneID   string // tmux pane ID (e.g. "%3")
+	fleet    string // fleet name for the instance
 	instance string // instance name occupying the pane
 	session  string // tmux session name in the pane
 	groupID  string // session group ID (for group management)
@@ -54,7 +55,7 @@ func quoteArgs(args []string) string {
 // command. When an existing pane ID is provided, it is respawned in-place
 // (via respawn-pane) to avoid layout changes that cause visual corruption.
 // If the pane no longer exists, it falls back to creating a fresh split.
-func splitPaneCmd(existingPaneID string, instanceName string, sessionName string, groupID string, cmd *exec.Cmd) tea.Cmd {
+func splitPaneCmd(existingPaneID string, fleetName string, instanceName string, sessionName string, groupID string, cmd *exec.Cmd) tea.Cmd {
 	// Snapshot the args — we must not capture the *exec.Cmd across goroutines.
 	args := cmd.Args
 
@@ -73,7 +74,7 @@ func splitPaneCmd(existingPaneID string, instanceName string, sessionName string
 			}
 			if exec.Command("tmux", respawnArgs...).Run() == nil {
 				_ = exec.Command("tmux", "select-pane", "-t", existingPaneID).Run()
-				return splitPaneMsg{paneID: existingPaneID, instance: instanceName, session: sessionName, groupID: groupID}
+				return splitPaneMsg{paneID: existingPaneID, fleet: fleetName, instance: instanceName, session: sessionName, groupID: groupID}
 			}
 			// Pane is gone — fall through to create a fresh split.
 		}
@@ -96,7 +97,7 @@ func splitPaneCmd(existingPaneID string, instanceName string, sessionName string
 
 		paneID := strings.TrimSpace(string(out))
 		_ = exec.Command("tmux", "select-pane", "-t", paneID).Run()
-		return splitPaneMsg{paneID: paneID, instance: instanceName, session: sessionName, groupID: groupID}
+		return splitPaneMsg{paneID: paneID, fleet: fleetName, instance: instanceName, session: sessionName, groupID: groupID}
 	}
 }
 
@@ -298,9 +299,10 @@ func (m *model) saveCurrentGroupLayout() {
 // Instead of trusting the saved session list (which may be stale), it
 // queries the inner tmux directly for sessions matching the group prefix.
 // Each discovered session gets its own pane via `fleet shell --session`.
-func (m *model) restoreGroupCmd(inst *fleet.Instance, groupID string) tea.Cmd {
+func (m *model) restoreGroupCmd(fleetName string, inst *fleet.Instance, groupID string) tea.Cmd {
 	b := m.instanceBackend(inst)
 	instanceName := inst.Name
+	qualifiedName := fleetName + "/" + instanceName
 	workspaceDir := inst.WorkspaceDir
 	sanitized := SanitizeSessionName(instanceName)
 	prefix := sanitized + groupSep + groupID
@@ -413,7 +415,7 @@ func (m *model) restoreGroupCmd(inst *fleet.Instance, groupID string) tea.Cmd {
 				break
 			}
 			pid := paneSlots[i]
-			shellCmd := fmt.Sprintf("%s shell %s --session %s", self, instanceName, sessName)
+			shellCmd := fmt.Sprintf("%s shell %s --session %s", self, qualifiedName, sessName)
 			script := shellCmd + `; __rc=$?; if [ $__rc -ne 0 ]; then echo; echo "exited with code $__rc — closing in 3s"; sleep 3; fi; exit $__rc`
 			_ = exec.Command("tmux", "respawn-pane", "-k", "-t", pid, "sh", "-c", script).Run()
 		}
@@ -436,6 +438,7 @@ func (m *model) restoreGroupCmd(inst *fleet.Instance, groupID string) tea.Cmd {
 		}
 		return splitPaneMsg{
 			paneID:   firstPaneID,
+			fleet:    fleetName,
 			instance: instanceName,
 			session:  firstSession,
 			groupID:  groupID,

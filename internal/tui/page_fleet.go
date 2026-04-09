@@ -211,6 +211,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.splitPaneID != "" && !splitOpen() {
 						unbindHostSplitKeys()
 						m.splitPaneID = ""
+						m.splitFleet = ""
 						m.splitInstance = ""
 						m.splitSession = ""
 						m.activeGroupID = ""
@@ -222,6 +223,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 						killAllSplitPanes()
 						unbindHostSplitKeys()
 						m.splitPaneID = ""
+						m.splitFleet = ""
 						m.splitInstance = ""
 						m.splitSession = ""
 						m.activeGroupID = ""
@@ -238,7 +240,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Restore the group: query the inner tmux for all
 					// sessions matching the group prefix and recreate panes.
 					if groupID != "" && isGroupedSession(SanitizeSessionName(inst.Name), sessionName) {
-						return m, m.restoreGroupCmd(inst, groupID)
+						return m, m.restoreGroupCmd(r.fleetName, inst, groupID)
 					}
 					// Ungrouped/legacy session — open a single pane.
 					cols, rows := tmuxWindowSize()
@@ -247,7 +249,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 						inst.WorkspaceDir,
 						ShellCommandForSession(m.cfg, sessionName, cols, rows, true),
 					)
-					return m, splitPaneCmd(m.splitPaneID, inst.Name, sessionName, groupID, cmd)
+					return m, splitPaneCmd(m.splitPaneID, r.fleetName, inst.Name, sessionName, groupID, cmd)
 				}
 				cmd := m.instanceBackend(inst).ExecCommand(
 					inst.WorkspaceDir,
@@ -265,6 +267,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if inst == nil {
 					break
 				}
+				instFleetName := r.fleetName
 				// Use the current split session if it matches this instance,
 				// otherwise fall back to the default session name.
 				sessionName := SanitizeSessionName(inst.Name)
@@ -280,6 +283,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.splitPaneID != "" && !splitOpen() {
 						unbindHostSplitKeys()
 						m.splitPaneID = ""
+						m.splitFleet = ""
 						m.splitInstance = ""
 						m.splitSession = ""
 						m.activeGroupID = ""
@@ -290,6 +294,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 						killAllSplitPanes()
 						unbindHostSplitKeys()
 						m.splitPaneID = ""
+						m.splitFleet = ""
 						m.splitInstance = ""
 						m.splitSession = ""
 						m.activeGroupID = ""
@@ -304,7 +309,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cols, rows := tmuxWindowSize()
 					cols = cols * 70 / 100
 					cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, ShellCommandForSession(m.cfg, sessName, cols, rows, true))
-					return m, splitPaneCmd(m.splitPaneID, inst.Name, sessName, newGroupID, cmd)
+					return m, splitPaneCmd(m.splitPaneID, instFleetName, inst.Name, sessName, newGroupID, cmd)
 				}
 
 				cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, ShellCommandForSession(m.cfg, sessionName, m.width, m.height, false))
@@ -966,5 +971,5 @@ func (m model) commitGroupCycle() (tea.Model, tea.Cmd) {
 	// while restoreGroupCmd is running (~2s).
 	m.activeGroupID = targetGroupID
 
-	return m, m.restoreGroupCmd(inst, targetGroupID)
+	return m, m.restoreGroupCmd(m.splitFleet, inst, targetGroupID)
 }

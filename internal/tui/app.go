@@ -119,6 +119,7 @@ type model struct {
 	// instead of suspending the TUI.
 	inHostTmux    bool   // true when TMUX env var is set at startup
 	splitPaneID   string // tmux pane ID of the right pane ("" = no split)
+	splitFleet    string // fleet name of the instance in the right pane
 	splitInstance string // instance name currently in the right pane
 	splitSession  string // tmux session name in the right pane
 
@@ -562,6 +563,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.splitPaneID != "" && !splitOpen() {
 			unbindHostSplitKeys()
 			m.splitPaneID = ""
+			m.splitFleet = ""
 			m.splitInstance = ""
 			m.splitSession = ""
 			m.activeGroupID = ""
@@ -604,12 +606,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.splitPaneID = msg.paneID
+		m.splitFleet = msg.fleet
 		m.splitInstance = msg.instance
 		m.splitSession = msg.session
 		m.activeGroupID = msg.groupID
 		// Rebind outer tmux split keys so new splits open inside
 		// this instance (and group) instead of spawning a local shell.
-		bindHostSplitKeys(msg.instance, msg.groupID)
+		bindHostSplitKeys(msg.fleet+"/"+msg.instance, msg.groupID)
 		// Refresh session list for the instance so the UI is up to date.
 		return m, m.refreshInstanceSessions(msg.instance)
 
