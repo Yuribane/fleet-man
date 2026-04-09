@@ -497,7 +497,7 @@ func (m model) updateCreateSession(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				name = nextSessionName(existing)
 			}
-			name = sanitizeSessionName(name)
+			name = SanitizeSessionName(name)
 
 			f, ok := m.st.Fleets[m.dialogFleet]
 			if !ok {
@@ -544,7 +544,7 @@ func (m model) updateRenameSession(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.textInput.Blur()
 				return m, nil
 			}
-			newName = sanitizeSessionName(newName)
+			newName = SanitizeSessionName(newName)
 
 			instKey := m.dialogFleet + "/" + m.dialogInst
 			// Check for duplicate names

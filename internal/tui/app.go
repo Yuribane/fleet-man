@@ -62,6 +62,8 @@ type row struct {
 	fleetName   string
 	instance    *fleet.Instance
 	sessionName string // set when kind == rowSession or rowNewSession
+	groupID     string // set for grouped session rows
+	groupSize   int    // number of sessions in the group (for display)
 }
 
 type model struct {
@@ -121,6 +123,11 @@ type model struct {
 	splitInstance string // instance name currently in the right pane
 	splitSession  string // tmux session name in the right pane
 
+	// Session groups: track the active group and saved layouts for
+	// group switching (kill all panes → restore).
+	activeGroupID string                // group ID of current outer panes
+	savedGroups   map[string]savedGroup // groupID → saved layout for restoration
+
 	message  string
 	quitting bool
 	width    int
@@ -150,6 +157,7 @@ func newModel() model {
 		sessions:          make(map[string]*sessionDiscovery),
 		activeSessions:    make(map[string]string),
 		sessionPoller:     newSessionPoller(),
+		savedGroups:       make(map[string]savedGroup),
 		textInput:         ti,
 		spinner:           sp,
 		settingsInput:     si,
@@ -244,12 +252,18 @@ func (m *model) buildRows() {
 				instKey := name + "/" + inst.Name
 				if m.expandedInstances[instKey] {
 					if disc, ok := m.sessions[instKey]; ok && disc.err == nil {
-						for _, sess := range disc.sessions {
+						sanitized := SanitizeSessionName(inst.Name)
+						groups := groupSessions(sanitized, disc.sessions)
+						for _, g := range groups {
+							// Use the root session name (first in group) for display.
+							rootName := g.Sessions[0].Name
 							m.rows = append(m.rows, row{
 								kind:        rowSession,
 								fleetName:   name,
 								instance:    inst,
-								sessionName: sess.Name,
+								sessionName: rootName,
+								groupID:     g.GroupID,
+								groupSize:   len(g.Sessions),
 							})
 						}
 					}
@@ -378,7 +392,7 @@ func (m *model) containersByBackend() map[fleet.BackendType]*backendGroup {
 				groups[bt] = g
 			}
 			g.ids = append(g.ids, inst.ContainerID)
-			g.sessions[inst.ContainerID] = sanitizeSessionName(inst.Name)
+			g.sessions[inst.ContainerID] = SanitizeSessionName(inst.Name)
 		}
 	}
 	return groups
@@ -544,6 +558,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.splitPaneID = msg.paneID
 		m.splitInstance = msg.instance
 		m.splitSession = msg.session
+		m.activeGroupID = msg.groupID
+		// Rebind outer tmux split keys so new splits open inside
+		// this instance (and group) instead of spawning a local shell.
+		bindHostSplitKeys(msg.instance, msg.groupID)
 		// Force an immediate session poll so the active session
 		// indicator updates without waiting for the 1-second cycle.
 		return m, m.sessionPollLoop(false)
@@ -769,10 +787,11 @@ func (m model) updateByMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	if m.quitting {
-		killSplitPane(m.splitPaneID)
+		killAllSplitPanes()
 		m.portForwards.Shutdown()
 		if m.inHostTmux {
 			rebindHostSessionKeys()
+			unbindHostSplitKeys()
 		}
 		return ""
 	}

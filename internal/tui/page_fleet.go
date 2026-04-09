@@ -187,33 +187,52 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.textInput.Cursor.BlinkCmd()
 
 			case rowSession:
-				// Connect to a specific named tmux session
+				// Connect to a specific named tmux session (or session group).
 				inst := r.instance
 				sessionName := r.sessionName
+				groupID := r.groupID
 				if m.inHostTmux {
 					if m.splitPaneID != "" && !splitOpen() {
+						unbindHostSplitKeys()
 						m.splitPaneID = ""
 						m.splitInstance = ""
 						m.splitSession = ""
+						m.activeGroupID = ""
 					}
-					if m.splitPaneID != "" && m.splitInstance == inst.Name && m.splitSession == sessionName {
-						killSplitPane(m.splitPaneID)
+					// If this is a group row and the group is active, toggle off.
+					if m.splitPaneID != "" && m.splitInstance == inst.Name && groupID != "" && groupID == m.activeGroupID {
+						// Save current group layout before killing.
+						m.saveCurrentGroupLayout()
+						killAllSplitPanes()
+						unbindHostSplitKeys()
 						m.splitPaneID = ""
 						m.splitInstance = ""
 						m.splitSession = ""
+						m.activeGroupID = ""
 						return m, nil
 					}
+					// If a different group is active, save its layout first.
+					if m.splitPaneID != "" && m.activeGroupID != "" {
+						m.saveCurrentGroupLayout()
+						killAllSplitPanes()
+					}
+					// Restore the group: query the inner tmux for all
+					// sessions matching the group prefix and recreate panes.
+					if groupID != "" && isGroupedSession(SanitizeSessionName(inst.Name), sessionName) {
+						return m, m.restoreGroupCmd(inst, groupID)
+					}
+					// Ungrouped/legacy session — open a single pane.
 					cols, rows := tmuxWindowSize()
 					cols = cols * 70 / 100
 					cmd := m.instanceBackend(inst).ExecCommand(
 						inst.WorkspaceDir,
-						shellCommandForSession(m.cfg, sessionName, cols, rows, true),
+						ShellCommandForSession(m.cfg, sessionName, cols, rows, true),
 					)
-					return m, splitPaneCmd(m.splitPaneID, inst.Name, sessionName, cmd)
+					return m, splitPaneCmd(m.splitPaneID, inst.Name, sessionName, groupID, cmd)
 				}
 				cmd := m.instanceBackend(inst).ExecCommand(
 					inst.WorkspaceDir,
-					shellCommandForSession(m.cfg, sessionName, m.width, m.height, false),
+					ShellCommandForSession(m.cfg, sessionName, m.width, m.height, false),
 				)
 				banner := renderGradient(nameToBanner(inst.Name))
 				banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
@@ -231,7 +250,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// fall back to the default session named after the instance.
 				sessionName := m.activeSessions[inst.ContainerID]
 				if sessionName == "" {
-					sessionName = sanitizeSessionName(inst.Name)
+					sessionName = SanitizeSessionName(inst.Name)
 				}
 				// Split pane mode: open shell in a right-side tmux pane
 				// instead of suspending the TUI. Toggle: if the same
@@ -240,27 +259,36 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Clear stale pane state if the split is no longer visible
 					// (e.g. session killed or detached).
 					if m.splitPaneID != "" && !splitOpen() {
+						unbindHostSplitKeys()
 						m.splitPaneID = ""
 						m.splitInstance = ""
 						m.splitSession = ""
+						m.activeGroupID = ""
 					}
 					// Toggle: if the same instance is already open, close it.
 					if m.splitPaneID != "" && m.splitInstance == inst.Name {
-						killSplitPane(m.splitPaneID)
+						m.saveCurrentGroupLayout()
+						killAllSplitPanes()
+						unbindHostSplitKeys()
 						m.splitPaneID = ""
 						m.splitInstance = ""
 						m.splitSession = ""
+						m.activeGroupID = ""
 						return m, nil
 					}
+					// Generate a new group ID for this session group.
+					newGroupID := randomHex(3)
+					sanitized := SanitizeSessionName(inst.Name)
+					sessName := groupSessionName(sanitized, newGroupID)
 					// Query the host tmux window size and calculate the
 					// right pane dimensions (70% of the window width).
 					cols, rows := tmuxWindowSize()
 					cols = cols * 70 / 100
-					cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, shellCommandForSession(m.cfg, sessionName, cols, rows, true))
-					return m, splitPaneCmd(m.splitPaneID, inst.Name, sessionName, cmd)
+					cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, ShellCommandForSession(m.cfg, sessName, cols, rows, true))
+					return m, splitPaneCmd(m.splitPaneID, inst.Name, sessName, newGroupID, cmd)
 				}
 
-				cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, shellCommandForSession(m.cfg, sessionName, m.width, m.height, false))
+				cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, ShellCommandForSession(m.cfg, sessionName, m.width, m.height, false))
 
 				banner := renderGradient(nameToBanner(inst.Name))
 				banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
@@ -431,14 +459,26 @@ func (m model) viewFleetList() string {
 			}
 			listContent.WriteString("\n")
 		} else if r.kind == rowSession {
-			// Session row: indented under its parent instance
+			// Session row: indented under its parent instance.
+			// Grouped sessions show the group ID and pane count.
 			icon := "○"
 			style := sessionStyle
-			if m.activeSessions[r.instance.ContainerID] == r.sessionName {
+			isActive := r.groupID != "" && r.groupID == m.activeGroupID
+			if isActive {
+				icon = "●"
+				style = sessionActiveStyle
+			} else if m.activeSessions[r.instance.ContainerID] == r.sessionName {
 				icon = "●"
 				style = sessionActiveStyle
 			}
-			label := fmt.Sprintf("%s %s", icon, r.sessionName)
+			var label string
+			if r.groupSize > 1 {
+				label = fmt.Sprintf("%s %s (%d panes)", icon, r.groupID, r.groupSize)
+			} else if r.groupID != "" && isGroupedSession(SanitizeSessionName(r.instance.Name), r.sessionName) {
+				label = fmt.Sprintf("%s %s", icon, r.groupID)
+			} else {
+				label = fmt.Sprintf("%s %s", icon, r.sessionName)
+			}
 			if isSelected {
 				listContent.WriteString(fmt.Sprintf("%s      %s", cursor, selectedStyle.Render(label)))
 			} else {

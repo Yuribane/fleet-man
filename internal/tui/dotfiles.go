@@ -14,9 +14,9 @@ func shQuote(s string) string {
 	return dotfiles.ShQuote(s)
 }
 
-// sanitizeSessionName replaces characters that are problematic in
+// SanitizeSessionName replaces characters that are problematic in
 // socket filenames with hyphens.
-func sanitizeSessionName(name string) string {
+func SanitizeSessionName(name string) string {
 	r := strings.NewReplacer(".", "-", ":", "-", "/", "-")
 	s := r.Replace(name)
 	if s == "" {
@@ -58,14 +58,14 @@ func dotfilesSetup(cfg *state.Config) string {
 // needed for backends like coder ssh that may report incorrect sizes
 // (e.g. 128x128).
 func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested bool) []string {
-	return shellCommandForSession(cfg, sanitizeSessionName(instanceName), cols, rows, nested)
+	return ShellCommandForSession(cfg, SanitizeSessionName(instanceName), cols, rows, nested)
 }
 
-// shellCommandForSession returns the command to run inside a devcontainer
+// ShellCommandForSession returns the command to run inside a devcontainer
 // with a persistent tmux session using the given session name. This allows
 // connecting to a specific named session rather than the default one derived
 // from the instance name.
-func shellCommandForSession(cfg *state.Config, session string, cols, rows int, nested bool) []string {
+func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, nested bool) []string {
 	setup := dotfilesSetup(cfg)
 	tmuxInstall := `command -v tmux >/dev/null 2>&1 || { echo '==> Installing tmux...'; (apt-get update -qq && apt-get install -y -qq tmux) 2>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq tmux) 2>/dev/null || (apk add tmux) 2>/dev/null || (sudo apk add tmux) 2>/dev/null || (dnf install -y tmux) 2>/dev/null || (sudo dnf install -y tmux) 2>/dev/null || echo 'ERROR: failed to install tmux'; }; `
 	// coder ssh may report incorrect terminal dimensions (e.g. 128x128).
