@@ -164,9 +164,16 @@ func newModel() model {
 		inHostTmux:        os.Getenv("TMUX") != "",
 	}
 	// Unbind C-PPage/C-NPage from the host tmux so they pass through
-	// to inner tmux sessions for session cycling.
+	// to inner tmux sessions for session cycling. Bind Ctrl+Q/O to
+	// close all split panes from any pane.
 	if m.inHostTmux {
 		unbindHostSessionKeys()
+		bindHostCloseKeys()
+		// Neutralize default split bindings so the user doesn't
+		// accidentally open a host shell before selecting an instance.
+		// These will be rebound to connect to the active instance
+		// once a split pane is opened.
+		unbindDefaultSplitKeys()
 	}
 	// On first-ever startup, check for required binaries and show results
 	// if anything is missing. "First startup" = the ~/.fleet/ dir doesn't exist.
@@ -526,6 +533,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.buildRows()
 		}
+		// Keep the saved group layout fresh so that if Ctrl+Q/O kills
+		// panes externally, the most recent layout is preserved.
+		if m.activeGroupID != "" && m.splitPaneID != "" && splitOpen() {
+			m.saveCurrentGroupLayout()
+		}
+		// Detect when panes were killed externally (e.g. Ctrl+Q/O).
+		if m.splitPaneID != "" && !splitOpen() {
+			unbindHostSplitKeys()
+			m.splitPaneID = ""
+			m.splitInstance = ""
+			m.splitSession = ""
+			m.activeGroupID = ""
+		}
 		return m, m.sessionPollLoop(true)
 
 	case instanceSpawnedMsg:
@@ -792,6 +812,7 @@ func (m model) View() string {
 		if m.inHostTmux {
 			rebindHostSessionKeys()
 			unbindHostSplitKeys()
+			unbindHostCloseKeys()
 		}
 		return ""
 	}

@@ -142,10 +142,38 @@ func unbindHostSplitKeys() {
 	_ = exec.Command("tmux", "bind-key", `"`, "split-window", "-v").Run()
 }
 
-// killAllSplitPanes kills all panes except the current one (the TUI pane).
-// This is used when switching session groups.
+// unbindDefaultSplitKeys disables the default split-window bindings so
+// the user doesn't accidentally create host shell panes before selecting
+// an instance. A display-message reminds them to use the TUI.
+func unbindDefaultSplitKeys() {
+	msg := "Select an instance in fleet first"
+	_ = exec.Command("tmux", "bind-key", "%", "display-message", msg).Run()
+	_ = exec.Command("tmux", "bind-key", `"`, "display-message", msg).Run()
+}
+
+// killAllSplitPanes kills all panes except the TUI pane (index 0).
+// Selects the TUI pane first so kill-pane -a removes the right targets
+// regardless of which pane currently has focus.
 func killAllSplitPanes() {
+	_ = exec.Command("tmux", "select-pane", "-t", ":.0").Run()
 	_ = exec.Command("tmux", "kill-pane", "-a").Run()
+}
+
+// bindHostCloseKeys binds Ctrl+Q and Ctrl+O on the outer tmux root
+// table to close all split panes (select TUI pane, then kill others).
+func bindHostCloseKeys() {
+	// Use run-shell to chain tmux commands reliably. The guard
+	// prevents errors when there's only the TUI pane.
+	script := `tmux select-pane -t :.0 && tmux kill-pane -a 2>/dev/null || true`
+	_ = exec.Command("tmux", "bind-key", "-n", "C-q", "run-shell", script).Run()
+	_ = exec.Command("tmux", "bind-key", "-n", "C-o", "run-shell", script).Run()
+}
+
+// unbindHostCloseKeys removes the Ctrl+Q and Ctrl+O bindings from the
+// outer tmux root table.
+func unbindHostCloseKeys() {
+	_ = exec.Command("tmux", "unbind", "-n", "C-q").Run()
+	_ = exec.Command("tmux", "unbind", "-n", "C-o").Run()
 }
 
 // tmuxLayoutString returns the current tmux window layout string.

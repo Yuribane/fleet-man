@@ -90,8 +90,11 @@ func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, n
 	prefixConf := ""
 	statusRight := ` ctrl+q/ctrl+o: detach `
 	if nested {
+		// In nested mode, Ctrl+Q/O are handled by the outer tmux
+		// (they close all split panes). The inner tmux only needs
+		// the prefix override and session navigation.
 		prefixConf = ` \; set -g prefix C-x \; bind-key C-x send-prefix \; set -g status-right-length 80`
-		statusRight = ` pgup/pgdn: sessions | prefix+T: new | ctrl+q/ctrl+o: detach `
+		statusRight = ` pgup/pgdn: sessions | prefix+T: new | ctrl+q/ctrl+o: close `
 	}
 	// Session navigation hotkeys: Ctrl+PageUp/Down cycle sessions,
 	// prefix+T creates a new session and switches to it.
@@ -112,8 +115,15 @@ func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, n
 		`tmux has-session -t %s 2>/dev/null && tmux set-hook -gu client-attached 2>/dev/null; `,
 		shQuote(session),
 	)
+	// In non-nested mode, Ctrl+Q/O detach from the inner tmux session.
+	// In nested mode, the outer tmux handles these keys to close all
+	// split panes, so we don't bind them here.
+	detachKeys := ` \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client`
+	if nested {
+		detachKeys = ""
+	}
 	inner := setup + tmuxInstall + sizefix + sshAgentFix + hookClear + fmt.Sprintf(
-		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on \; bind-key -n C-q detach-client \; bind-key -n C-o detach-client \; set status-right '%s'`+prefixConf+sessionKeys+resizeHook,
+		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on`+detachKeys+` \; set status-right '%s'`+prefixConf+sessionKeys+resizeHook,
 		shQuote(session), statusRight,
 	)
 	return []string{"sh", "-c", inner}
