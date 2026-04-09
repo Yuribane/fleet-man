@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
@@ -66,6 +67,13 @@ existing group, or --session to reconnect to a specific named session.`,
 				var suffix [3]byte
 				_, _ = rand.Read(suffix[:])
 				sessionName = sanitized + "~" + hex.EncodeToString(suffix[:])
+			}
+
+			// Tag the outer tmux pane with the session name so the
+			// TUI can read pane titles to preserve pane order when
+			// saving and restoring group layouts.
+			if nested {
+				_ = exec.Command("tmux", "select-pane", "-T", sessionName).Run()
 			}
 
 			cols, rows := termSize()

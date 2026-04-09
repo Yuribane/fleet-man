@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	tea "github.com/charmbracelet/bubbletea"
@@ -156,54 +157,50 @@ func tmuxLayoutString() string {
 	return strings.TrimSpace(string(out))
 }
 
+// paneSessionOrder reads outer tmux pane titles to determine the
+// session-to-pane-position mapping. fleet shell sets each pane's title
+// to the inner tmux session name, so we can read them back in pane
+// index order. The TUI pane (index 0) is skipped.
+func paneSessionOrder() []string {
+	out, err := exec.Command("tmux", "list-panes", "-F", "#{pane_index}:#{pane_title}").Output()
+	if err != nil {
+		return nil
+	}
+	var sessions []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Skip the TUI pane (index 0).
+		if strings.HasPrefix(line, "0:") {
+			continue
+		}
+		// Extract title after the first colon.
+		if idx := strings.IndexByte(line, ':'); idx >= 0 {
+			title := line[idx+1:]
+			if title != "" {
+				sessions = append(sessions, title)
+			}
+		}
+	}
+	return sessions
+}
+
 // saveCurrentGroupLayout saves the active group's outer tmux layout so
-// it can be restored later.
+// it can be restored later. Pane titles (set by fleet shell) are read
+// in pane index order to preserve the session-to-position mapping.
 func (m *model) saveCurrentGroupLayout() {
 	if m.activeGroupID == "" || m.splitInstance == "" {
 		return
 	}
-	// Discover which sessions belong to this group by querying the
-	// inner tmux. We do this synchronously since we're about to kill
-	// all panes and need the info now.
-	sanitized := SanitizeSessionName(m.splitInstance)
-	instKey := ""
-	// Find the instance key for session discovery.
-	for key, disc := range m.sessions {
-		if disc == nil || disc.err != nil {
-			continue
-		}
-		for _, s := range disc.sessions {
-			gid, ok := parseGroupID(sanitized, s.Name)
-			if ok && gid == m.activeGroupID {
-				instKey = key
-				break
-			}
-		}
-		if instKey != "" {
-			break
-		}
-	}
 
-	var sessionNames []string
-	if instKey != "" {
-		if disc, ok := m.sessions[instKey]; ok && disc.err == nil {
-			for _, s := range disc.sessions {
-				gid, ok := parseGroupID(sanitized, s.Name)
-				if ok && gid == m.activeGroupID {
-					sessionNames = append(sessionNames, s.Name)
-				}
-			}
-		}
-	}
-	// If discovery didn't find sessions yet, at least save the one we know.
+	// Read session names from outer tmux pane titles, in pane order.
+	sessionNames := paneSessionOrder()
+
+	// Fallback: if pane titles aren't available, use the one we know.
 	if len(sessionNames) == 0 && m.splitSession != "" {
 		sessionNames = []string{m.splitSession}
-	}
-
-	// Count outer tmux panes (excluding TUI pane).
-	paneCount := 0
-	if out, err := exec.Command("tmux", "list-panes", "-F", "x").Output(); err == nil {
-		paneCount = strings.Count(strings.TrimSpace(string(out)), "x") - 1 // subtract TUI pane
 	}
 
 	m.savedGroups[m.activeGroupID] = savedGroup{
@@ -211,7 +208,7 @@ func (m *model) saveCurrentGroupLayout() {
 		InstanceName: m.splitInstance,
 		Sessions:     sessionNames,
 		Layout:       tmuxLayoutString(),
-		PaneCount:    paneCount,
+		PaneCount:    len(sessionNames),
 	}
 }
 
@@ -232,6 +229,13 @@ func (m *model) restoreGroupCmd(inst *fleet.Instance, groupID string) tea.Cmd {
 		savedLayout = sg.Layout
 	}
 
+	// Prefer saved session order (from pane titles) to preserve
+	// the exact pane-to-session mapping.
+	var savedOrder []string
+	if sg, ok := m.savedGroups[groupID]; ok && len(sg.Sessions) > 0 {
+		savedOrder = sg.Sessions
+	}
+
 	return func() tea.Msg {
 		self, err := os.Executable()
 		if err != nil {
@@ -245,17 +249,34 @@ func (m *model) restoreGroupCmd(inst *fleet.Instance, groupID string) tea.Cmd {
 		})
 		out, _ := listCmd.Output()
 
-		var sessions []string
+		// Build a set of live sessions for validation.
+		live := make(map[string]bool)
 		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			name := strings.TrimSpace(line)
 			if name != "" && strings.HasPrefix(name, prefix) {
+				live[name] = true
+			}
+		}
+
+		// Use saved order if available, filtering to sessions that
+		// still exist. Then append any newly discovered sessions
+		// that weren't in the saved order.
+		var sessions []string
+		seen := make(map[string]bool)
+		for _, s := range savedOrder {
+			if live[s] {
+				sessions = append(sessions, s)
+				seen[s] = true
+			}
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			name := strings.TrimSpace(line)
+			if name != "" && strings.HasPrefix(name, prefix) && !seen[name] {
 				sessions = append(sessions, name)
 			}
 		}
 
 		if len(sessions) == 0 {
-			// Group has no surviving sessions — fall back to creating
-			// a fresh one in the group.
 			return splitPaneMsg{err: fmt.Errorf("no sessions found for group %s", groupID)}
 		}
 
@@ -304,6 +325,11 @@ func (m *model) restoreGroupCmd(inst *fleet.Instance, groupID string) tea.Cmd {
 		if firstPaneID != "" {
 			_ = exec.Command("tmux", "select-pane", "-t", firstPaneID).Run()
 		}
+
+		// Wait briefly for panes to initialize, then force a repaint
+		// to avoid blank/corrupted terminals after rapid pane creation.
+		time.Sleep(2 * time.Second)
+		_ = exec.Command("tmux", "refresh-client").Run()
 
 		firstSession := ""
 		if len(sessions) > 0 {
