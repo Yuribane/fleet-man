@@ -128,6 +128,12 @@ type model struct {
 	activeGroupID string                // group ID of current outer panes
 	savedGroups   map[string]savedGroup // groupID → saved layout for restoration
 
+	// Session cycle debounce: visual selection moves instantly but
+	// pane switching waits 500ms for additional input.
+	pendingGroupID   string    // group ID selected but not yet switched to ("" = none)
+	debounceSeq      int       // incremented on each pgup/pgdown, checked by timer
+	sessionDeferUtil time.Time // suppress active session poll updates until this time
+
 	message  string
 	quitting bool
 	width    int
@@ -167,7 +173,7 @@ func newModel() model {
 	// to inner tmux sessions for session cycling. Bind Ctrl+Q/O to
 	// close all split panes from any pane.
 	if m.inHostTmux {
-		unbindHostSessionKeys()
+		bindHostSessionCycleKeys()
 		bindHostCloseKeys()
 		// Neutralize default split bindings so the user doesn't
 		// accidentally open a host shell before selecting an instance.
@@ -524,8 +530,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.fetchAllStatsCmd(true)
 
 	case sessionPollMsg:
-		if msg.activeSessions != nil {
-			m.activeSessions = msg.activeSessions
+		// During debounce or the post-switch settling window, skip
+		// active session updates to prevent indicator flickering.
+		settling := !m.sessionDeferUtil.IsZero() && time.Now().Before(m.sessionDeferUtil)
+		if m.pendingGroupID == "" && !settling {
+			if msg.activeSessions != nil {
+				m.activeSessions = msg.activeSessions
+			}
 		}
 		if msg.discovered != nil {
 			for key, sessions := range msg.discovered {
@@ -533,20 +544,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.buildRows()
 		}
-		// Keep the saved group layout fresh so that if Ctrl+Q/O kills
-		// panes externally, the most recent layout is preserved.
-		if m.activeGroupID != "" && m.splitPaneID != "" && splitOpen() {
-			m.saveCurrentGroupLayout()
-		}
-		// Detect when panes were killed externally (e.g. Ctrl+Q/O).
-		if m.splitPaneID != "" && !splitOpen() {
-			unbindHostSplitKeys()
-			m.splitPaneID = ""
-			m.splitInstance = ""
-			m.splitSession = ""
-			m.activeGroupID = ""
+		if m.pendingGroupID == "" && !settling {
+			// Keep the saved group layout fresh so that if Ctrl+Q/O kills
+			// panes externally, the most recent layout is preserved.
+			if m.activeGroupID != "" && m.splitPaneID != "" && splitOpen() {
+				m.saveCurrentGroupLayout()
+			}
+			// Detect when panes were killed externally (e.g. Ctrl+Q/O).
+			if m.splitPaneID != "" && !splitOpen() {
+				unbindHostSplitKeys()
+				m.splitPaneID = ""
+				m.splitInstance = ""
+				m.splitSession = ""
+				m.activeGroupID = ""
+			}
 		}
 		return m, m.sessionPollLoop(true)
+
+	case groupCycleMsg:
+		// Debounce timer expired — commit the group switch if the
+		// sequence still matches (no further pgup/pgdown since).
+		if msg.seq == m.debounceSeq && m.pendingGroupID != "" {
+			return m.commitGroupCycle()
+		}
+		return m, nil
 
 	case instanceSpawnedMsg:
 		// Background process launched; start polling for completion
@@ -810,7 +831,7 @@ func (m model) View() string {
 		killAllSplitPanes()
 		m.portForwards.Shutdown()
 		if m.inHostTmux {
-			rebindHostSessionKeys()
+			unbindHostSessionCycleKeys()
 			unbindHostSplitKeys()
 			unbindHostCloseKeys()
 		}

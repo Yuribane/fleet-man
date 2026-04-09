@@ -94,13 +94,12 @@ func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, n
 		// (they close all split panes). The inner tmux only needs
 		// the prefix override and session navigation.
 		prefixConf = ` \; set -g prefix C-x \; bind-key C-x send-prefix \; set -g status-right-length 80`
-		statusRight = ` pgup/pgdn: sessions | prefix+T: new | ctrl+q/ctrl+o: close `
+		statusRight = ` ctrl+pgup/pgdn: sessions | prefix+T: new | ctrl+q/ctrl+o: close `
 	}
-	// Session navigation hotkeys: Ctrl+PageUp/Down cycle sessions,
-	// prefix+T creates a new session and switches to it.
-	// The host tmux must unbind C-PPage/C-NPage so they pass through
-	// to the inner tmux (handled by splitPaneCmd / TUI init).
-	sessionKeys := ` \; bind-key -n C-PPage switch-client -p \; bind-key -n C-NPage switch-client -n \; bind-key T new-session`
+	// Session navigation: Ctrl+PageUp/Down are handled by the outer
+	// tmux to cycle session groups. prefix+T creates a new session
+	// inside the container.
+	sessionKeys := ` \; bind-key T new-session`
 	// Clear any stale resize-window hooks from previous sessions before
 	// attaching. The hook puts the window into manual-size mode and
 	// prevents dynamic resizing. We run this as a one-off tmux command

@@ -372,16 +372,19 @@ func (m *model) restoreGroupCmd(inst *fleet.Instance, groupID string) tea.Cmd {
 	}
 }
 
-// unbindHostSessionKeys removes C-PPage and C-NPage from the host
-// tmux root table so they pass through to inner tmux sessions.
-func unbindHostSessionKeys() {
-	_ = exec.Command("tmux", "unbind", "-T", "root", "C-PPage").Run()
-	_ = exec.Command("tmux", "unbind", "-T", "root", "C-NPage").Run()
+// bindHostSessionCycleKeys binds Ctrl+PageUp/Down on the outer tmux to
+// focus the TUI pane and send PageUp/PageDown, which the TUI handles
+// as "cycle to previous/next session group".
+func bindHostSessionCycleKeys() {
+	_ = exec.Command("tmux", "bind-key", "-n", "C-PPage",
+		"run-shell", "tmux select-pane -t :.0 && tmux send-keys -t :.0 PPage").Run()
+	_ = exec.Command("tmux", "bind-key", "-n", "C-NPage",
+		"run-shell", "tmux select-pane -t :.0 && tmux send-keys -t :.0 NPage").Run()
 }
 
-// rebindHostSessionKeys restores the default C-PPage/C-NPage bindings
-// on the host tmux (copy-mode related defaults).
-func rebindHostSessionKeys() {
+// unbindHostSessionCycleKeys restores the default C-PPage/C-NPage
+// bindings on the host tmux.
+func unbindHostSessionCycleKeys() {
 	_ = exec.Command("tmux", "bind", "-T", "root", "C-PPage", "copy-mode", "-eu").Run()
 	_ = exec.Command("tmux", "bind", "-T", "root", "C-NPage", "send-keys", "PPage").Run()
 }

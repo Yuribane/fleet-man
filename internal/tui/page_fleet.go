@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/deps"
@@ -165,6 +166,13 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.textInput.CharLimit = 256
 			m.textInput.Focus()
 			return m, m.textInput.Cursor.BlinkCmd()
+
+		case "pgup", "pgdown":
+			// Cycle session groups: Ctrl+PageUp/Down on the outer tmux
+			// sends PageUp/PageDown to the TUI pane.
+			if m.inHostTmux && m.splitInstance != "" && m.activeGroupID != "" {
+				return m.cycleSessionGroup(msg.String() == "pgup")
+			}
 
 		case "enter", "e":
 			r := m.currentRow()
@@ -472,11 +480,19 @@ func (m model) viewFleetList() string {
 			// Grouped sessions show the group ID and pane count.
 			icon := "○"
 			style := sessionStyle
-			isActive := r.groupID != "" && r.groupID == m.activeGroupID
+			// During debounce or post-switch settling, only use the
+			// group ID to determine the active indicator — don't fall
+			// back to activeSessions which may have stale values.
+			displayGroupID := m.activeGroupID
+			if m.pendingGroupID != "" {
+				displayGroupID = m.pendingGroupID
+			}
+			settling := !m.sessionDeferUtil.IsZero() && time.Now().Before(m.sessionDeferUtil)
+			isActive := r.groupID != "" && r.groupID == displayGroupID
 			if isActive {
 				icon = "●"
 				style = sessionActiveStyle
-			} else if m.activeSessions[r.instance.ContainerID] == r.sessionName {
+			} else if !settling && m.pendingGroupID == "" && m.activeSessions[r.instance.ContainerID] == r.sessionName {
 				icon = "●"
 				style = sessionActiveStyle
 			}
@@ -850,4 +866,110 @@ func (m model) viewFleetList() string {
 	}))
 
 	return b.String()
+}
+
+// instanceGroups returns the session groups for the given instance name,
+// using the current session discovery data.
+func (m *model) instanceGroups(instanceName string) []sessionGroup {
+	sanitized := SanitizeSessionName(instanceName)
+	for _, disc := range m.sessions {
+		if disc == nil || disc.err != nil {
+			continue
+		}
+		g := groupSessions(sanitized, disc.sessions)
+		if len(g) > 0 {
+			return g
+		}
+	}
+	return nil
+}
+
+// cycleSessionGroup moves the visual selection to the next or previous
+// session group and starts a 500ms debounce timer. The actual pane
+// switch only happens when the timer expires without further input.
+func (m model) cycleSessionGroup(prev bool) (tea.Model, tea.Cmd) {
+	groups := m.instanceGroups(m.splitInstance)
+	if len(groups) < 2 {
+		return m, nil
+	}
+
+	// Determine which group ID we're cycling FROM: if a pending
+	// selection exists, cycle from that; otherwise from the active group.
+	fromID := m.activeGroupID
+	if m.pendingGroupID != "" {
+		fromID = m.pendingGroupID
+	}
+
+	currentIdx := -1
+	for i, g := range groups {
+		if g.GroupID == fromID {
+			currentIdx = i
+			break
+		}
+	}
+	if currentIdx < 0 {
+		return m, nil
+	}
+
+	// Calculate target index with wrapping.
+	targetIdx := currentIdx - 1
+	if !prev {
+		targetIdx = currentIdx + 1
+	}
+	if targetIdx < 0 {
+		targetIdx = len(groups) - 1
+	} else if targetIdx >= len(groups) {
+		targetIdx = 0
+	}
+
+	// Update the visual selection (pendingGroupID) and bump the
+	// debounce sequence. The timer will only fire the switch if
+	// the sequence hasn't changed.
+	m.pendingGroupID = groups[targetIdx].GroupID
+	m.debounceSeq++
+	return m, groupCycleDebounce(m.debounceSeq)
+}
+
+// commitGroupCycle performs the actual pane switch after the debounce
+// timer expires. Called from the groupCycleMsg handler.
+func (m model) commitGroupCycle() (tea.Model, tea.Cmd) {
+	if m.pendingGroupID == "" || m.pendingGroupID == m.activeGroupID {
+		m.pendingGroupID = ""
+		return m, nil
+	}
+
+	// Find the instance.
+	var inst *fleet.Instance
+	for _, f := range m.st.Fleets {
+		for _, i := range f.Instances {
+			if i.Name == m.splitInstance {
+				inst = i
+				break
+			}
+		}
+		if inst != nil {
+			break
+		}
+	}
+	if inst == nil {
+		m.pendingGroupID = ""
+		return m, nil
+	}
+
+	targetGroupID := m.pendingGroupID
+	m.pendingGroupID = ""
+
+	// Set activeGroupID immediately so the indicator doesn't jump
+	// back to the old group while restoreGroupCmd is running (~2s).
+	m.activeGroupID = targetGroupID
+
+	// Suppress active session poll updates for 5 seconds to give the
+	// new sessions time to settle and prevent indicator flickering.
+	m.sessionDeferUtil = time.Now().Add(5 * time.Second)
+
+	// Save current layout, kill panes, restore target.
+	m.saveCurrentGroupLayout()
+	killAllSplitPanes()
+
+	return m, m.restoreGroupCmd(inst, targetGroupID)
 }

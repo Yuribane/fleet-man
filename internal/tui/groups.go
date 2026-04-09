@@ -5,6 +5,9 @@ import (
 	"encoding/hex"
 	"sort"
 	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // sessionGroup represents a set of related tmux sessions inside a
@@ -110,6 +113,21 @@ func groupSessions(sanitizedInstance string, sessions []tmuxSession) []sessionGr
 func isGroupedSession(sanitizedInstance, sessionName string) bool {
 	_, ok := parseGroupID(sanitizedInstance, sessionName)
 	return ok
+}
+
+// groupCycleMsg is sent after the debounce timer expires to confirm
+// a session group switch.
+type groupCycleMsg struct {
+	seq int // must match m.debounceSeq to be acted on
+}
+
+// groupCycleDebounce returns a tea.Cmd that fires a groupCycleMsg
+// after 500ms. If additional pgup/pgdown presses arrive before it
+// fires, the seq will have been incremented and this msg is ignored.
+func groupCycleDebounce(seq int) tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(_ time.Time) tea.Msg {
+		return groupCycleMsg{seq: seq}
+	})
 }
 
 // randomHex returns a random hex string of n bytes (2n characters).
