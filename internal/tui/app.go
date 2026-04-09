@@ -99,7 +99,8 @@ type model struct {
 	codespaceMachines         []codespaceMachine // available machine types (from GitHub API)
 	codespaceFetchingMachines bool     // true while fetching machine types
 
-	toolStatus []deps.ToolStatus // cached tool install statuses for settings page
+	toolStatus      []deps.ToolStatus // cached tool install statuses for settings page
+	showKeybindings bool              // true when the keybindings dialog is open
 
 	depsResult []deps.Dependency // set on first-ever startup
 
@@ -130,6 +131,9 @@ type model struct {
 	// pane switching waits 500ms for additional input.
 	pendingGroupID string // group ID selected but not yet switched to ("" = none)
 	debounceSeq    int    // incremented on each pgup/pgdown, checked by timer
+
+	// Update check
+	updateAvailable string // non-empty = new version tag from GitHub
 
 	message  string
 	quitting bool
@@ -440,6 +444,7 @@ func (m model) Init() tea.Cmd {
 		m.spinner.Tick,
 		m.fetchAllStatsCmd(false),
 		m.sessionDiscoveryLoop(),
+		checkUpdateCmd(),
 	}
 	if len(m.creating) > 0 {
 		cmds = append(cmds, pollCreatingCmd())
@@ -721,6 +726,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cfg != nil && m.cfg.CodespacesSettings.Machine == "" && len(m.codespaceMachines) > 0 {
 			m.cfg.CodespacesSettings.Machine = m.codespaceMachines[0].Name
 			_ = state.SaveConfig(m.cfg)
+		}
+		return m, nil
+
+	case updateCheckMsg:
+		if msg.latestVersion != "" {
+			m.updateAvailable = msg.latestVersion
 		}
 		return m, nil
 

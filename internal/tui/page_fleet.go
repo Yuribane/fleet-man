@@ -426,6 +426,9 @@ func (m model) viewFleetList() string {
 		"|  _| / -_) -_)  _|\n" +
 		"|_| |_\\___\\___|\\___|"
 	b.WriteString(renderGradient(logo))
+	if m.updateAvailable != "" {
+		b.WriteString("  " + updateStyle.Render(fmt.Sprintf("A new version: %s is available ⚡ Settings to update", m.updateAvailable)))
+	}
 	b.WriteString("\n\n")
 
 	if m.err != nil {
