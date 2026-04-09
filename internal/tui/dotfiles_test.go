@@ -173,18 +173,21 @@ func TestFreshShellCommandBothSet(t *testing.T) {
 	}
 }
 
-func TestShellCommandNestedVimKeysEnabled(t *testing.T) {
+func TestShellCommandNestedNoInnerPaneKeys(t *testing.T) {
 	cfg := state.DefaultConfig()
 	got := shellCommand(cfg, "agent-1", 80, 24, true)
 	script := got[2]
-	if !strings.Contains(script, "bind-key j select-pane -D") {
-		t.Errorf("nested script missing j keybinding when vim keys enabled: %s", script)
+	// Pane navigation is handled by the outer tmux, so the inner
+	// tmux should not bind j/k even when vim keys are enabled.
+	if strings.Contains(script, "bind-key j select-pane") {
+		t.Errorf("nested script should not have j keybinding (pane nav is on outer tmux): %s", script)
 	}
-	if !strings.Contains(script, "bind-key k select-pane -U") {
-		t.Errorf("nested script missing k keybinding when vim keys enabled: %s", script)
+	if strings.Contains(script, "bind-key k select-pane") {
+		t.Errorf("nested script should not have k keybinding (pane nav is on outer tmux): %s", script)
 	}
-	if !strings.Contains(script, "j/k: pane") {
-		t.Errorf("nested script missing vim keys help text: %s", script)
+	// Should still have the prefix override for inner tmux.
+	if !strings.Contains(script, "set -g prefix C-x") {
+		t.Errorf("nested script missing prefix override: %s", script)
 	}
 }
 

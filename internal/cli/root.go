@@ -96,6 +96,8 @@ func relaunchInTmux() error {
 		args = append(args,
 			";", "bind-key", "h", "if", "-F", "#{pane_at_left}", "", "select-pane -L",
 			";", "bind-key", "l", "if", "-F", "#{pane_at_right}", "", "select-pane -R",
+			";", "bind-key", "j", "if", "-F", "#{pane_at_bottom}", "", "select-pane -D",
+			";", "bind-key", "k", "if", "-F", "#{pane_at_top}", "", "select-pane -U",
 		)
 	}
 

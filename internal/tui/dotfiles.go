@@ -85,18 +85,13 @@ func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, n
 	}
 	// When nested inside a host tmux (split pane mode), use Ctrl+X as
 	// the inner prefix so it doesn't conflict with the outer Ctrl+B.
-	// Vim-style pane navigation (j/k) is injected only when the user
-	// has enabled the "tmux vim keys" setting.
+	// Pane navigation (h/j/k/l) is handled by the outer tmux, so the
+	// inner tmux only needs prefix and session keys.
 	prefixConf := ""
 	statusRight := ` ctrl+q/ctrl+o: detach `
 	if nested {
-		vimKeys := cfg != nil && cfg.GeneralSettings.TmuxVimKeysEnabled()
 		prefixConf = ` \; set -g prefix C-x \; bind-key C-x send-prefix \; set -g status-right-length 80`
 		statusRight = ` pgup/pgdn: sessions | prefix+T: new | ctrl+q/ctrl+o: detach `
-		if vimKeys {
-			prefixConf += ` \; bind-key j select-pane -D \; bind-key k select-pane -U`
-			statusRight = ` j/k: pane | pgup/pgdn: sessions | prefix+T: new | ctrl+q: detach `
-		}
 	}
 	// Session navigation hotkeys: Ctrl+PageUp/Down cycle sessions,
 	// prefix+T creates a new session and switches to it.
