@@ -245,6 +245,48 @@ func renameSessionCmd(b backend.Backend, workspaceDir, instanceKey, oldName, new
 	}
 }
 
+// renameGroupCmd renames all sessions in a group. It lists sessions
+// matching the old group prefix, then renames each one by swapping the
+// old group ID for the new one.
+func renameGroupCmd(b backend.Backend, workspaceDir, instanceKey, sanitizedInstance, oldGroupID, newGroupID string) tea.Cmd {
+	oldPrefix := sanitizedInstance + groupSep + oldGroupID
+	newPrefix := sanitizedInstance + groupSep + newGroupID
+
+	return func() tea.Msg {
+		// List all sessions in the container.
+		listCmd := b.ExecCommand(workspaceDir, []string{
+			"sh", "-c",
+			`tmux list-sessions -F "#{session_name}" 2>/dev/null`,
+		})
+		out, err := listCmd.Output()
+		if err != nil {
+			return sessionRenamedMsg{instanceKey: instanceKey, oldName: oldPrefix, newName: newPrefix, err: err}
+		}
+
+		// Rename each session that matches the old group prefix.
+		var lastErr error
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			name := strings.TrimSpace(line)
+			if name == "" || !strings.HasPrefix(name, oldPrefix) {
+				continue
+			}
+			// Swap prefix: instance~oldGID~suffix → instance~newGID~suffix
+			renamed := newPrefix + name[len(oldPrefix):]
+			cmd := b.ExecCommand(workspaceDir, []string{
+				"sh", "-c",
+				fmt.Sprintf(`tmux rename-session -t %s %s 2>/dev/null`, shQuote(name), shQuote(renamed)),
+			})
+			if err := cmd.Run(); err != nil {
+				lastErr = err
+			}
+		}
+		if lastErr != nil {
+			return sessionRenamedMsg{instanceKey: instanceKey, oldName: oldPrefix, newName: newPrefix, err: lastErr}
+		}
+		return sessionRenamedMsg{instanceKey: instanceKey, oldName: oldPrefix, newName: newPrefix}
+	}
+}
+
 // ===========================================
 // Helpers
 // ===========================================
