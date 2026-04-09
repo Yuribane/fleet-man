@@ -142,4 +142,9 @@ var (
 
 	keybindingDescStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("252"))
+
+	// Update notification
+	updateStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214")).
+			Bold(true)
 )

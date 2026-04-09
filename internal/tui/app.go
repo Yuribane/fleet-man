@@ -122,6 +122,9 @@ type model struct {
 	splitInstance string // instance name currently in the right pane
 	splitSession  string // tmux session name in the right pane
 
+	// Update check
+	updateAvailable string // non-empty = new version tag from GitHub
+
 	message  string
 	quitting bool
 	width    int
@@ -390,6 +393,7 @@ func (m model) Init() tea.Cmd {
 		m.spinner.Tick,
 		m.fetchAllStatsCmd(false),
 		m.sessionPollLoop(false),
+		checkUpdateCmd(),
 	}
 	if len(m.creating) > 0 {
 		cmds = append(cmds, pollCreatingCmd())
@@ -662,6 +666,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.cfg != nil && m.cfg.CodespacesSettings.Machine == "" && len(m.codespaceMachines) > 0 {
 			m.cfg.CodespacesSettings.Machine = m.codespaceMachines[0].Name
 			_ = state.SaveConfig(m.cfg)
+		}
+		return m, nil
+
+	case updateCheckMsg:
+		if msg.latestVersion != "" {
+			m.updateAvailable = msg.latestVersion
 		}
 		return m, nil
 

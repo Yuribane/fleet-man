@@ -16,6 +16,7 @@ import (
 const (
 	settingsItemToolSelection = iota
 	settingsItemTmuxVimKeys
+	settingsItemUpdate // only visible when an update is available
 	settingsItemDotfilesRepo
 	settingsItemDotfilesScript
 	settingsItemDotfilesAutoInstall
@@ -48,7 +49,9 @@ var settingsSections = []settingsSection{
 	{
 		Title: "General",
 		Items: func(_ *state.Config) []int {
-			return []int{settingsItemToolSelection, settingsItemTmuxVimKeys}
+			// settingsItemUpdate is included here but filtered out
+			// by visibleItems() when no update is available.
+			return []int{settingsItemToolSelection, settingsItemTmuxVimKeys, settingsItemUpdate}
 		},
 	},
 	{
@@ -117,7 +120,13 @@ func (m model) visibleItems() []int {
 		if !m.sectionVisible(s) {
 			continue
 		}
-		items = append(items, s.Items(m.cfg)...)
+		for _, id := range s.Items(m.cfg) {
+			// Hide the Update row when no update is available.
+			if id == settingsItemUpdate && m.updateAvailable == "" {
+				continue
+			}
+			items = append(items, id)
+		}
 	}
 	return items
 }
@@ -393,6 +402,9 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cycleCodespacesMachine(1)
 				return m, nil
 			}
+			if item == settingsItemUpdate {
+				return m, performUpdateCmd(m.inHostTmux)
+			}
 			if item == settingsItemDoctor {
 				cmd, err := doctor.Command()
 				if err != nil {
@@ -530,6 +542,9 @@ func (m model) viewSettings() string {
 	var b strings.Builder
 
 	b.WriteString(renderGradient(nameToBanner("Settings")))
+	if m.updateAvailable != "" {
+		b.WriteString("  " + updateStyle.Render(fmt.Sprintf("A new version: %s is available ⚡ ", m.updateAvailable)))
+	}
 	b.WriteString("\n\n")
 
 	if m.err != nil {
@@ -578,6 +593,12 @@ func (m model) viewSettings() string {
 				vimKeysValue = "[ on ]"
 			}
 			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemTmuxVimKeys, "Tmux vim keys", vimKeysValue))
+
+			if m.updateAvailable != "" {
+				listContent.WriteString("\n")
+				updateValue := updateStyle.Render(m.updateAvailable+" available ⚡") + "  " + dimStyle.Render("press enter to update")
+				listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemUpdate, "Update", updateValue))
+			}
 
 		case "Dotfiles":
 			repoValue := cfg.DotfilesSettings.RepoURL
