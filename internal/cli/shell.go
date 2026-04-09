@@ -71,9 +71,16 @@ existing group, or --session to reconnect to a specific named session.`,
 
 			// Tag the outer tmux pane with the session name so the
 			// TUI can read pane titles to preserve pane order when
-			// saving and restoring group layouts.
+			// saving and restoring group layouts. Use TMUX_PANE to
+			// target this specific pane — without -t, select-pane
+			// targets whichever pane has focus, which breaks restore
+			// when multiple panes are respawned concurrently.
 			if nested {
-				_ = exec.Command("tmux", "select-pane", "-T", sessionName).Run()
+				if paneID := os.Getenv("TMUX_PANE"); paneID != "" {
+					_ = exec.Command("tmux", "select-pane", "-t", paneID, "-T", sessionName).Run()
+				} else {
+					_ = exec.Command("tmux", "select-pane", "-T", sessionName).Run()
+				}
 			}
 
 			cols, rows := termSize()

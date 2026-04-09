@@ -7,7 +7,13 @@ A CLI/TUI tool for managing fleets of devcontainers. Spawn, name, exec into, and
 ## Install
 
 ```bash
-curl -sL https://raw.githubusercontent.com/BenjaminBenetti/fleet-man/main/install.sh | sh
+sudo curl -sL https://raw.githubusercontent.com/BenjaminBenetti/fleet-man/main/install.sh | sh
+```
+
+To install a specific version:
+
+```bash
+sudo curl -sL https://raw.githubusercontent.com/BenjaminBenetti/fleet-man/main/install.sh | sh -s -- --version v0.2.0
 ```
 
 ## Usage

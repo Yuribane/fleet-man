@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -119,6 +120,18 @@ func killSplitPane(paneID string) {
 	_ = exec.Command("tmux", "kill-pane", "-t", paneID).Run()
 }
 
+// listPaneSlots returns pane IDs sorted by screen position (top then
+// left), skipping the TUI pane. Used after layout application to
+// determine which pane occupies which visual slot.
+func listPaneSlots() []string {
+	panes := listPanesByPosition()
+	var ids []string
+	for _, p := range panes {
+		ids = append(ids, p.id)
+	}
+	return ids
+}
+
 // bindHostSplitKeys rebinds the outer tmux's % and " keys so that
 // new splits open a shell inside the given instance (via fleet shell)
 // instead of spawning a local shell. When groupID is non-empty, new
@@ -185,31 +198,72 @@ func tmuxLayoutString() string {
 	return strings.TrimSpace(string(out))
 }
 
-// paneSessionOrder reads outer tmux pane titles to determine the
-// session-to-pane-position mapping. fleet shell sets each pane's title
-// to the inner tmux session name, so we can read them back in pane
-// index order. The TUI pane (index 0) is skipped.
-func paneSessionOrder() []string {
-	out, err := exec.Command("tmux", "list-panes", "-F", "#{pane_index}:#{pane_title}").Output()
+// paneByPosition holds a tmux pane's screen coordinates, ID, and title.
+type paneByPosition struct {
+	top, left int
+	id        string
+	title     string
+}
+
+// listPanesByPosition returns non-TUI panes sorted by screen position
+// (top then left). This gives a stable ordering that matches what the
+// user sees, regardless of pane creation order or index numbering.
+func listPanesByPosition() []paneByPosition {
+	out, err := exec.Command("tmux", "list-panes", "-F",
+		"#{pane_id}:#{pane_top}:#{pane_left}:#{pane_title}").Output()
 	if err != nil {
 		return nil
 	}
-	var sessions []string
+
+	// Identify the TUI pane (index 0) so we can skip it.
+	tuiID := ""
+	if idOut, err := exec.Command("tmux", "display-message", "-t", ":.0", "-p", "#{pane_id}").Output(); err == nil {
+		tuiID = strings.TrimSpace(string(idOut))
+	}
+
+	var panes []paneByPosition
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		// Skip the TUI pane (index 0).
-		if strings.HasPrefix(line, "0:") {
+		// Format: %id:top:left:title
+		parts := strings.SplitN(line, ":", 4)
+		if len(parts) < 4 {
 			continue
 		}
-		// Extract title after the first colon.
-		if idx := strings.IndexByte(line, ':'); idx >= 0 {
-			title := line[idx+1:]
-			if title != "" {
-				sessions = append(sessions, title)
-			}
+		id := parts[0]
+		if id == tuiID {
+			continue
+		}
+		top, err1 := strconv.Atoi(parts[1])
+		left, err2 := strconv.Atoi(parts[2])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		panes = append(panes, paneByPosition{
+			top: top, left: left,
+			id: id, title: parts[3],
+		})
+	}
+
+	sort.Slice(panes, func(i, j int) bool {
+		if panes[i].top != panes[j].top {
+			return panes[i].top < panes[j].top
+		}
+		return panes[i].left < panes[j].left
+	})
+	return panes
+}
+
+// paneSessionOrder returns session names (from pane titles) sorted by
+// screen position. This gives a stable ordering for save/restore.
+func paneSessionOrder() []string {
+	panes := listPanesByPosition()
+	var sessions []string
+	for _, p := range panes {
+		if p.title != "" {
+			sessions = append(sessions, p.title)
 		}
 	}
 	return sessions
@@ -311,43 +365,57 @@ func (m *model) restoreGroupCmd(inst *fleet.Instance, groupID string) tea.Cmd {
 		// Kill any existing split panes.
 		_ = exec.Command("tmux", "kill-pane", "-a").Run()
 
+		// Phase 1: Create placeholder panes with `sleep` so we can
+		// establish the layout geometry without worrying about which
+		// session goes where.
 		var firstPaneID string
-		for i, sessName := range sessions {
-			shellCmd := fmt.Sprintf("%s shell %s --session %s", self, instanceName, sessName)
-			script := shellCmd + `; __rc=$?; if [ $__rc -ne 0 ]; then echo; echo "exited with code $__rc — closing in 3s"; sleep 3; fi; exit $__rc`
-
+		var lastPaneID string
+		for i := range sessions {
 			var tmuxArgs []string
 			if i == 0 {
-				// First pane: horizontal split from TUI.
 				tmuxArgs = []string{
 					"split-window", "-h",
 					"-l", "70%",
 					"-P", "-F", "#{pane_id}",
-					"--", "sh", "-c", script,
+					"--", "sleep", "infinity",
 				}
 			} else {
-				// Subsequent panes: vertical split in the right area.
 				tmuxArgs = []string{
 					"split-window", "-v",
-					"-t", firstPaneID,
+					"-t", lastPaneID,
 					"-P", "-F", "#{pane_id}",
-					"--", "sh", "-c", script,
+					"--", "sleep", "infinity",
 				}
 			}
-
 			paneOut, err := exec.Command("tmux", tmuxArgs...).Output()
 			if err != nil {
 				continue
 			}
 			paneID := strings.TrimSpace(string(paneOut))
+			lastPaneID = paneID
 			if i == 0 {
 				firstPaneID = paneID
 			}
 		}
 
-		// Try to restore the saved layout.
+		// Phase 2: Apply the saved layout to resize/reposition panes.
 		if savedLayout != "" && firstPaneID != "" {
 			_ = exec.Command("tmux", "select-layout", savedLayout).Run()
+		}
+
+		// Phase 3: Read the actual pane index→ID mapping after layout,
+		// then respawn each pane with the correct session based on
+		// position. This guarantees the right session is in the right
+		// pane regardless of how tmux reordered indices.
+		paneSlots := listPaneSlots()
+		for i, sessName := range sessions {
+			if i >= len(paneSlots) {
+				break
+			}
+			pid := paneSlots[i]
+			shellCmd := fmt.Sprintf("%s shell %s --session %s", self, instanceName, sessName)
+			script := shellCmd + `; __rc=$?; if [ $__rc -ne 0 ]; then echo; echo "exited with code $__rc — closing in 3s"; sleep 3; fi; exit $__rc`
+			_ = exec.Command("tmux", "respawn-pane", "-k", "-t", pid, "sh", "-c", script).Run()
 		}
 
 		if firstPaneID != "" {
