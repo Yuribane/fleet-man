@@ -16,6 +16,7 @@ import (
 const (
 	settingsItemToolSelection = iota
 	settingsItemTmuxVimKeys
+	settingsItemShowHelpText
 	settingsItemUpdate // only visible when an update is available
 	settingsItemDotfilesRepo
 	settingsItemDotfilesScript
@@ -51,7 +52,7 @@ var settingsSections = []settingsSection{
 		Items: func(_ *state.Config) []int {
 			// settingsItemUpdate is included here but filtered out
 			// by visibleItems() when no update is available.
-			return []int{settingsItemToolSelection, settingsItemTmuxVimKeys, settingsItemUpdate}
+			return []int{settingsItemTmuxVimKeys, settingsItemShowHelpText, settingsItemUpdate}
 		},
 	},
 	{
@@ -146,26 +147,6 @@ func (m model) settingsItemCount() int {
 	return len(m.visibleItems())
 }
 
-var agentToolOptions = []state.AgentTool{
-	state.AgentToolCodex,
-	state.AgentToolClaude,
-	state.AgentToolGemini,
-	state.AgentToolCopilot,
-}
-
-func nextAgentTool(current state.AgentTool, direction int) state.AgentTool {
-	idx := 0
-	for i, tool := range agentToolOptions {
-		if tool == current {
-			idx = i
-			break
-		}
-	}
-
-	idx = (idx + direction + len(agentToolOptions)) % len(agentToolOptions)
-	return agentToolOptions[idx]
-}
-
 func agentToolLabel(tool state.AgentTool) string {
 	switch tool {
 	case state.AgentToolCodex:
@@ -179,27 +160,6 @@ func agentToolLabel(tool state.AgentTool) string {
 	default:
 		return "Claude Code"
 	}
-}
-
-func (m *model) cycleAgentTool(direction int) {
-	if m.cfg == nil {
-		m.cfg = state.DefaultConfig()
-	}
-
-	current := m.cfg.AgentSettings.ToolSelection
-	next := nextAgentTool(current, direction)
-	if next == current {
-		return
-	}
-
-	m.cfg.AgentSettings.ToolSelection = next
-	if err := state.SaveConfig(m.cfg); err != nil {
-		m.cfg.AgentSettings.ToolSelection = current
-		m.message = fmt.Sprintf("Failed to save settings: %v", err)
-		return
-	}
-
-	m.message = fmt.Sprintf("Preferred tool set to %s", agentToolLabel(next))
 }
 
 func (m *model) toggleTmuxVimKeys() {
@@ -221,6 +181,28 @@ func (m *model) toggleTmuxVimKeys() {
 		label = "on"
 	}
 	m.message = fmt.Sprintf("Tmux vim keys set to %s", label)
+}
+
+// toggleShowHelpText flips the show-help-text preference and saves.
+func (m *model) toggleShowHelpText() {
+	if m.cfg == nil {
+		m.cfg = state.DefaultConfig()
+	}
+
+	current := m.cfg.GeneralSettings.ShowHelpTextEnabled()
+	next := !current
+	m.cfg.GeneralSettings.ShowHelpText = &next
+	if err := state.SaveConfig(m.cfg); err != nil {
+		m.cfg.GeneralSettings.ShowHelpText = &current
+		m.message = fmt.Sprintf("Failed to save settings: %v", err)
+		return
+	}
+
+	label := "off"
+	if next {
+		label = "on"
+	}
+	m.message = fmt.Sprintf("Show help text set to %s", label)
 }
 
 func (m *model) toggleAutoInstall() {
@@ -353,10 +335,10 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "left", "h":
 			item := m.settingsCursorItem()
-			if item == settingsItemToolSelection {
-				m.cycleAgentTool(-1)
-			} else if item == settingsItemTmuxVimKeys {
+			if item == settingsItemTmuxVimKeys {
 				m.toggleTmuxVimKeys()
+			} else if item == settingsItemShowHelpText {
+				m.toggleShowHelpText()
 			} else if item == settingsItemDotfilesAutoInstall {
 				m.toggleAutoInstall()
 			} else if item == settingsItemCoderPreset {
@@ -368,10 +350,10 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "right", "l":
 			item := m.settingsCursorItem()
-			if item == settingsItemToolSelection {
-				m.cycleAgentTool(1)
-			} else if item == settingsItemTmuxVimKeys {
+			if item == settingsItemTmuxVimKeys {
 				m.toggleTmuxVimKeys()
+			} else if item == settingsItemShowHelpText {
+				m.toggleShowHelpText()
 			} else if item == settingsItemDotfilesAutoInstall {
 				m.toggleAutoInstall()
 			} else if item == settingsItemCoderPreset {
@@ -383,12 +365,12 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "enter", " ":
 			item := m.settingsCursorItem()
-			if item == settingsItemToolSelection {
-				m.cycleAgentTool(1)
-				return m, nil
-			}
 			if item == settingsItemTmuxVimKeys {
 				m.toggleTmuxVimKeys()
+				return m, nil
+			}
+			if item == settingsItemShowHelpText {
+				m.toggleShowHelpText()
 				return m, nil
 			}
 			if item == settingsItemDotfilesAutoInstall {
@@ -584,15 +566,18 @@ func (m model) viewSettings() string {
 		// Section-specific rows
 		switch s.Title {
 		case "General":
-			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemToolSelection,
-				"Tool selection", fmt.Sprintf("[ %s ]", agentToolLabel(cfg.AgentSettings.ToolSelection))))
-			listContent.WriteString("\n")
-
 			vimKeysValue := "[ off ]"
 			if cfg.GeneralSettings.TmuxVimKeysEnabled() {
 				vimKeysValue = "[ on ]"
 			}
 			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemTmuxVimKeys, "Tmux vim keys", vimKeysValue))
+			listContent.WriteString("\n")
+
+			helpTextValue := "[ off ]"
+			if cfg.GeneralSettings.ShowHelpTextEnabled() {
+				helpTextValue = "[ on ]"
+			}
+			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemShowHelpText, "Show help text", helpTextValue))
 
 			if m.updateAvailable != "" {
 				listContent.WriteString("\n")

@@ -36,13 +36,18 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.moveCursor(1)
 
 		case " ", "tab":
-			// Toggle collapse on fleet headers or expand/collapse instances
+			// Toggle collapse on fleet headers, expand/collapse instances,
+			// or act like enter on session/new-session/settings rows.
 			if r := m.currentRow(); r != nil {
-				if r.kind == rowFleetHeader {
+				switch r.kind {
+				case rowFleetHeader:
 					name := r.fleetName
 					m.collapsed[name] = !m.collapsed[name]
 					m.buildRows()
-				} else if r.kind == rowInstance && r.instance != nil {
+				case rowInstance:
+					if r.instance == nil {
+						break
+					}
 					if r.instance.Status != fleet.StatusRunning {
 						m.message = "Instance must be running to view sessions"
 						break
@@ -57,6 +62,9 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 						b := m.instanceBackend(r.instance)
 						return m, listSessionsCmd(b, r.instance.WorkspaceDir, instKey)
 					}
+				case rowSession, rowNewSession, rowSettings:
+					// Delegate to the enter/e handler for these row types.
+					return m.handleEnter()
 				}
 			}
 
@@ -115,7 +123,16 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "d":
 			r := m.currentRow()
-			if r == nil || r.kind == rowSettings {
+			if r == nil || r.kind == rowSettings || r.kind == rowNewSession {
+				break
+			}
+			if r.kind == rowSession {
+				// Session-level delete
+				m.dialogFleet = r.fleetName
+				m.dialogInst = r.instance.Name
+				m.dialogSession = r.sessionName
+				m.dialogGroupID = r.groupID
+				m.mode = viewConfirmDeleteSession
 				break
 			}
 			m.dialogFleet = r.fleetName
@@ -129,6 +146,31 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = viewConfirmDelete
 
 		case "a":
+			r := m.currentRow()
+			if r == nil {
+				m.message = "No fleet selected"
+				break
+			}
+			// On instance or session rows, create a new session instead
+			if r.kind == rowInstance || r.kind == rowSession || r.kind == rowNewSession {
+				inst := r.instance
+				if inst == nil {
+					break
+				}
+				if inst.Status != fleet.StatusRunning {
+					m.message = "Instance must be running to create sessions"
+					break
+				}
+				m.mode = viewCreateSession
+				m.dialogFleet = r.fleetName
+				m.dialogInst = inst.Name
+				m.textInput.SetValue("")
+				m.textInput.Placeholder = "session-name (or empty for auto)"
+				m.textInput.CharLimit = 64
+				m.textInput.Focus()
+				return m, m.textInput.Cursor.BlinkCmd()
+			}
+			// Fleet header or settings row — add instance
 			fleetName := m.currentFleetName()
 			if fleetName == "" {
 				m.message = "No fleet selected"
@@ -174,151 +216,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "enter", "e":
-			r := m.currentRow()
-			if r == nil {
-				break
-			}
-
-			switch r.kind {
-			case rowSettings:
-				m.page = pageSettings
-				m.toolStatus = deps.CheckTools()
-				return m, nil
-
-			case rowFleetHeader:
-				name := r.fleetName
-				m.collapsed[name] = !m.collapsed[name]
-				m.buildRows()
-
-			case rowNewSession:
-				// Open dialog to create a new session
-				inst := r.instance
-				m.mode = viewCreateSession
-				m.dialogFleet = r.fleetName
-				m.dialogInst = inst.Name
-				m.textInput.SetValue("")
-				m.textInput.Placeholder = "session-name (or empty for auto)"
-				m.textInput.CharLimit = 64
-				m.textInput.Focus()
-				return m, m.textInput.Cursor.BlinkCmd()
-
-			case rowSession:
-				// Connect to a specific named tmux session (or session group).
-				inst := r.instance
-				sessionName := r.sessionName
-				groupID := r.groupID
-				// Record as last active so enter on the instance row reopens it.
-				sessInstKey := r.fleetName + "/" + inst.Name
-				m.lastActive[sessInstKey] = lastSession{sessionName: sessionName, groupID: groupID}
-				if m.inHostTmux {
-					if m.splitPaneID != "" && !splitOpen() {
-						unbindHostSplitKeys()
-						m.splitPaneID = ""
-						m.splitFleet = ""
-						m.splitInstance = ""
-						m.splitSession = ""
-						m.activeGroupID = ""
-					}
-					// If this is a group row and the group is active, toggle off.
-					if m.splitPaneID != "" && m.splitInstance == inst.Name && groupID != "" && groupID == m.activeGroupID {
-						// Save current group layout before killing.
-						m.saveCurrentGroupLayout()
-						killAllSplitPanes()
-						unbindHostSplitKeys()
-						m.splitPaneID = ""
-						m.splitFleet = ""
-						m.splitInstance = ""
-						m.splitSession = ""
-						m.activeGroupID = ""
-						return m, nil
-					}
-					// If a different group is active, save its layout first.
-					if m.splitPaneID != "" && m.activeGroupID != "" {
-						m.saveCurrentGroupLayout()
-						killAllSplitPanes()
-					}
-					// Set activeGroupID immediately so the indicator
-					// updates without waiting for the async command.
-					m.activeGroupID = groupID
-					// Restore the group: query the inner tmux for all
-					// sessions matching the group prefix and recreate panes.
-					if groupID != "" && isGroupedSession(SanitizeSessionName(inst.Name), sessionName) {
-						return m, m.restoreGroupCmd(r.fleetName, inst, groupID)
-					}
-					// Ungrouped/legacy session — open a single pane.
-					cols, rows := tmuxWindowSize()
-					cols = cols * 70 / 100
-					cmd := m.instanceBackend(inst).ExecCommand(
-						inst.WorkspaceDir,
-						ShellCommandForSession(m.cfg, sessionName, cols, rows, true),
-					)
-					return m, splitPaneCmd(m.splitPaneID, r.fleetName, inst.Name, sessionName, groupID, cmd)
-				}
-				cmd := m.instanceBackend(inst).ExecCommand(
-					inst.WorkspaceDir,
-					ShellCommandForSession(m.cfg, sessionName, m.width, m.height, false),
-				)
-				banner := renderGradient(nameToBanner(inst.Name))
-				banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
-				return m, tea.ExecProcess(
-					execWithBannerCmd(banner, cmd),
-					func(err error) tea.Msg { return execDoneMsg{err} },
-				)
-
-			case rowInstance:
-				_, inst := m.selectedInstance()
-				if inst == nil {
-					break
-				}
-				instFleetName := r.fleetName
-				instKey := instFleetName + "/" + inst.Name
-				// Split pane mode: open shell in a right-side tmux pane
-				// instead of suspending the TUI. Toggle: if the same
-				// instance is already open, close the pane.
-				if m.inHostTmux {
-					// Clear stale pane state if the split is no longer visible
-					// (e.g. session killed or detached).
-					if m.splitPaneID != "" && !splitOpen() {
-						unbindHostSplitKeys()
-						m.splitPaneID = ""
-						m.splitFleet = ""
-						m.splitInstance = ""
-						m.splitSession = ""
-						m.activeGroupID = ""
-					}
-					// Toggle: if the same instance is already open, close it.
-					if m.splitPaneID != "" && m.splitInstance == inst.Name {
-						m.saveCurrentGroupLayout()
-						killAllSplitPanes()
-						unbindHostSplitKeys()
-						m.splitPaneID = ""
-						m.splitFleet = ""
-						m.splitInstance = ""
-						m.splitSession = ""
-						m.activeGroupID = ""
-						return m, nil
-					}
-					return m, m.openInstanceSession(instFleetName, inst)
-				}
-
-				// Non-split: reuse last active session, fall back to
-				// default session name. tmux new-session -A creates or
-				// attaches automatically.
-				sessionName := SanitizeSessionName(inst.Name)
-				if last, ok := m.lastActive[instKey]; ok {
-					sessionName = last.sessionName
-				}
-				m.lastActive[instKey] = lastSession{sessionName: sessionName}
-
-				cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, ShellCommandForSession(m.cfg, sessionName, m.width, m.height, false))
-
-				banner := renderGradient(nameToBanner(inst.Name))
-				banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
-				return m, tea.ExecProcess(
-					execWithBannerCmd(banner, cmd),
-					func(err error) tea.Msg { return execDoneMsg{err} },
-				)
-			}
+			return m.handleEnter()
 
 		case "o":
 			_, inst := m.selectedInstance()
@@ -418,6 +316,227 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// handleEnter executes the enter/e/space action for the current row.
+// Extracted so that both "enter"/"e" and "space" (on session/new-session/
+// settings rows) share the same logic.
+func (m model) handleEnter() (tea.Model, tea.Cmd) {
+	r := m.currentRow()
+	if r == nil {
+		return m, nil
+	}
+
+	switch r.kind {
+	case rowSettings:
+		m.page = pageSettings
+		m.toolStatus = deps.CheckTools()
+		return m, nil
+
+	case rowFleetHeader:
+		name := r.fleetName
+		m.collapsed[name] = !m.collapsed[name]
+		m.buildRows()
+
+	case rowNewSession:
+		// Open dialog to create a new session
+		inst := r.instance
+		m.mode = viewCreateSession
+		m.dialogFleet = r.fleetName
+		m.dialogInst = inst.Name
+		m.textInput.SetValue("")
+		m.textInput.Placeholder = "session-name (or empty for auto)"
+		m.textInput.CharLimit = 64
+		m.textInput.Focus()
+		return m, m.textInput.Cursor.BlinkCmd()
+
+	case rowSession:
+		// Connect to a specific named tmux session (or session group).
+		inst := r.instance
+		sessionName := r.sessionName
+		groupID := r.groupID
+		// Record as last active so enter on the instance row reopens it.
+		sessInstKey := r.fleetName + "/" + inst.Name
+		m.lastActive[sessInstKey] = lastSession{sessionName: sessionName, groupID: groupID}
+		if m.inHostTmux {
+			if m.splitPaneID != "" && !splitOpen() {
+				unbindHostSplitKeys()
+				m.splitPaneID = ""
+				m.splitFleet = ""
+				m.splitInstance = ""
+				m.splitSession = ""
+				m.activeGroupID = ""
+			}
+			// If this is a group row and the group is active, toggle off.
+			if m.splitPaneID != "" && m.splitInstance == inst.Name && groupID != "" && groupID == m.activeGroupID {
+				// Save current group layout before killing.
+				m.saveCurrentGroupLayout()
+				killAllSplitPanes()
+				unbindHostSplitKeys()
+				m.splitPaneID = ""
+				m.splitFleet = ""
+				m.splitInstance = ""
+				m.splitSession = ""
+				m.activeGroupID = ""
+				return m, nil
+			}
+			// If a different group is active, save its layout first.
+			if m.splitPaneID != "" && m.activeGroupID != "" {
+				m.saveCurrentGroupLayout()
+				killAllSplitPanes()
+			}
+			// Set activeGroupID immediately so the indicator
+			// updates without waiting for the async command.
+			m.activeGroupID = groupID
+			// Restore the group: query the inner tmux for all
+			// sessions matching the group prefix and recreate panes.
+			if groupID != "" && isGroupedSession(SanitizeSessionName(inst.Name), sessionName) {
+				return m, m.restoreGroupCmd(r.fleetName, inst, groupID)
+			}
+			// Ungrouped/legacy session — open a single pane.
+			cols, rows := tmuxWindowSize()
+			cols = cols * 70 / 100
+			cmd := m.instanceBackend(inst).ExecCommand(
+				inst.WorkspaceDir,
+				ShellCommandForSession(m.cfg, sessionName, cols, rows, true),
+			)
+			return m, splitPaneCmd(m.splitPaneID, r.fleetName, inst.Name, sessionName, groupID, cmd)
+		}
+		cmd := m.instanceBackend(inst).ExecCommand(
+			inst.WorkspaceDir,
+			ShellCommandForSession(m.cfg, sessionName, m.width, m.height, false),
+		)
+		banner := renderGradient(nameToBanner(inst.Name))
+		banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
+		return m, tea.ExecProcess(
+			execWithBannerCmd(banner, cmd),
+			func(err error) tea.Msg { return execDoneMsg{err} },
+		)
+
+	case rowInstance:
+		_, inst := m.selectedInstance()
+		if inst == nil {
+			break
+		}
+		instFleetName := r.fleetName
+		instKey := instFleetName + "/" + inst.Name
+		// Split pane mode: open shell in a right-side tmux pane
+		// instead of suspending the TUI. Toggle: if the same
+		// instance is already open, close the pane.
+		if m.inHostTmux {
+			// Clear stale pane state if the split is no longer visible
+			// (e.g. session killed or detached).
+			if m.splitPaneID != "" && !splitOpen() {
+				unbindHostSplitKeys()
+				m.splitPaneID = ""
+				m.splitFleet = ""
+				m.splitInstance = ""
+				m.splitSession = ""
+				m.activeGroupID = ""
+			}
+			// Toggle: if the same instance is already open, close it.
+			if m.splitPaneID != "" && m.splitInstance == inst.Name {
+				m.saveCurrentGroupLayout()
+				killAllSplitPanes()
+				unbindHostSplitKeys()
+				m.splitPaneID = ""
+				m.splitFleet = ""
+				m.splitInstance = ""
+				m.splitSession = ""
+				m.activeGroupID = ""
+				return m, nil
+			}
+			return m, m.openInstanceSession(instFleetName, inst)
+		}
+
+		// Non-split: reuse last active session, fall back to
+		// default session name. tmux new-session -A creates or
+		// attaches automatically.
+		sessionName := SanitizeSessionName(inst.Name)
+		if last, ok := m.lastActive[instKey]; ok {
+			sessionName = last.sessionName
+		}
+		m.lastActive[instKey] = lastSession{sessionName: sessionName}
+
+		cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, ShellCommandForSession(m.cfg, sessionName, m.width, m.height, false))
+
+		banner := renderGradient(nameToBanner(inst.Name))
+		banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
+		return m, tea.ExecProcess(
+			execWithBannerCmd(banner, cmd),
+			func(err error) tea.Msg { return execDoneMsg{err} },
+		)
+	}
+
+	return m, nil
+}
+
+// contextualHelpKeys returns the help bar entries relevant to the
+// currently selected row and its state.
+func (m model) contextualHelpKeys() []string {
+	r := m.currentRow()
+	if r == nil {
+		return []string{"n: new fleet", "q: quit"}
+	}
+
+	switch r.kind {
+	case rowFleetHeader:
+		keys := []string{
+			"j/k: navigate", "space: expand/collapse", "enter/e: toggle",
+			"a: add instance", "n: new fleet", "d: delete fleet", "r: refresh", "q: quit",
+		}
+		return keys
+
+	case rowInstance:
+		keys := []string{"j/k: navigate"}
+		if r.instance != nil {
+			switch {
+			case r.instance.Status == fleet.StatusRunning:
+				keys = append(keys,
+					"space: show sessions", "enter/e: open shell",
+					"s: stop", "a: new session", "d: delete", "t: tag",
+					"f: port-forward", "c: code", "o: terminal", "l: logs",
+					"r: refresh", "q: quit",
+				)
+			case r.instance.Status == fleet.StatusStopped:
+				keys = append(keys,
+					"enter/e: open shell", "s: start",
+					"a: new session", "d: delete", "t: tag", "r: refresh", "q: quit",
+				)
+			case r.instance.Status == fleet.StatusFailed:
+				keys = append(keys, "d: delete", "r: refresh", "q: quit")
+			case isTransitional(r.instance.Status):
+				keys = append(keys, "r: refresh", "q: quit")
+			default:
+				keys = append(keys, "r: refresh", "q: quit")
+			}
+		}
+		return keys
+
+	case rowSession:
+		keys := []string{
+			"j/k: navigate", "space/enter/e: connect",
+			"a: new session", "d: delete session", "r: rename", "q: quit",
+		}
+		if m.inHostTmux && m.splitInstance != "" && m.activeGroupID != "" {
+			keys = append(keys[:len(keys)-1], "pgup/pgdn: cycle groups", "q: quit")
+		}
+		return keys
+
+	case rowNewSession:
+		return []string{
+			"j/k: navigate", "space/enter/e: create session",
+			"a: new session", "q: quit",
+		}
+
+	case rowSettings:
+		return []string{
+			"j/k: navigate", "space/enter/e: open settings",
+			"n: new fleet", "q: quit",
+		}
+	}
+
+	return []string{"q: quit"}
 }
 
 func (m model) viewFleetList() string {
@@ -573,11 +692,7 @@ func (m model) viewFleetList() string {
 				// Show agent tool indicator
 				agentStr := ""
 				if inst.Status == fleet.StatusRunning && m.activity != nil {
-					// Use detected tool if available, fall back to configured tool
 					tool := m.activity.Tool(inst.ContainerID)
-					if tool == "" && m.cfg != nil {
-						tool = m.cfg.AgentSettings.ToolSelection
-					}
 					label := agentToolLabel(tool)
 					switch m.activity.State(inst.ContainerID) {
 					case agentWorking:
@@ -852,6 +967,22 @@ func (m model) viewFleetList() string {
 		)
 		b.WriteString(dialogBox.Render(dialog))
 		b.WriteString("\n")
+
+	case viewConfirmDeleteSession:
+		b.WriteString("\n")
+		displayName := m.dialogSession
+		if m.dialogGroupID != "" {
+			displayName = m.dialogGroupID
+		}
+		dialog := fmt.Sprintf(
+			"%s\n\n%s\n\n%s",
+			dialogTitle.Render("Delete session"),
+			dialogLabel.Render(fmt.Sprintf("Remove session %s from %s/%s?",
+				displayName, m.dialogFleet, m.dialogInst)),
+			dialogHint.Render("[y] Yes  [n] No"),
+		)
+		b.WriteString(dialogBox.Render(dialog))
+		b.WriteString("\n")
 	}
 
 	// Message
@@ -860,11 +991,9 @@ func (m model) viewFleetList() string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString(renderHelp(m.width, []string{
-		"j/k: navigate", "space: expand/collapse", "enter/e: exec or open",
-		"s: stop/start", "o: open terminal", "n: new fleet", "a: add instance", "d: delete",
-		"t: tag", "f: port-forward", "c: code", "l: logs", "r: refresh/rename", "q: quit",
-	}))
+	if m.cfg == nil || m.cfg.GeneralSettings.ShowHelpTextEnabled() {
+		b.WriteString(renderHelp(m.width, m.contextualHelpKeys()))
+	}
 
 	return b.String()
 }

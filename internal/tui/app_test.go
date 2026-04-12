@@ -30,36 +30,6 @@ func settingsPositionOf(m model, item int) int {
 	return -1
 }
 
-func TestUpdateSettingsCyclesToolAndPersistsConfig(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-
-	m := model{
-		page:           pageSettings,
-		cfg:            state.DefaultConfig(),
-		settingsCursor: settingsItemToolSelection,
-		settingsInput:  textinput.New(),
-		toolStatus:     allToolsFound(),
-	}
-
-	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyRight})
-	got := updated.(model)
-
-	if got.cfg == nil {
-		t.Fatal("cfg is nil after updateSettings")
-	}
-	if got.cfg.AgentSettings.ToolSelection != state.AgentToolGemini {
-		t.Fatalf("ToolSelection = %q, want %q", got.cfg.AgentSettings.ToolSelection, state.AgentToolGemini)
-	}
-
-	cfg, err := state.LoadConfig()
-	if err != nil {
-		t.Fatalf("LoadConfig() error = %v", err)
-	}
-	if cfg.AgentSettings.ToolSelection != state.AgentToolGemini {
-		t.Fatalf("persisted ToolSelection = %q, want %q", cfg.AgentSettings.ToolSelection, state.AgentToolGemini)
-	}
-}
-
 func TestUpdateSettingsEscReturnsToFleetList(t *testing.T) {
 	m := model{page: pageSettings}
 
@@ -111,15 +81,16 @@ func TestUpdateSettingsNavUpDown(t *testing.T) {
 	m := model{
 		page:           pageSettings,
 		cfg:            state.DefaultConfig(),
-		settingsCursor: settingsItemToolSelection,
+		settingsCursor: settingsPositionOf(model{cfg: state.DefaultConfig(), toolStatus: allToolsFound()}, settingsItemTmuxVimKeys),
 		settingsInput:  textinput.New(),
 		toolStatus:     allToolsFound(),
 	}
 
+	// Start on TmuxVimKeys, move down to ShowHelpText
 	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
 	got := updated.(model)
-	if got.settingsCursorItem() != settingsItemTmuxVimKeys {
-		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemTmuxVimKeys)
+	if got.settingsCursorItem() != settingsItemShowHelpText {
+		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemShowHelpText)
 	}
 
 	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})

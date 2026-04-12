@@ -37,6 +37,7 @@ const (
 	viewCodespacesMachine
 	viewCreateSession
 	viewRenameSession
+	viewConfirmDeleteSession
 )
 
 type pageMode int
@@ -88,6 +89,7 @@ type model struct {
 	dialogFleet   string
 	dialogInst    string
 	dialogBackend fleet.BackendType // selected backend in add-instance dialog
+	dialogGroupID string           // group ID for session deletion confirmation
 	textInput     textinput.Model
 
 	spinner  spinner.Model
@@ -695,6 +697,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case sessionDeletedMsg:
+		if msg.err != nil {
+			m.message = fmt.Sprintf("Failed to delete session: %v", msg.err)
+		} else {
+			m.message = fmt.Sprintf("Deleted session %s", msg.sessionName)
+		}
+		// Clear lastActive if it pointed to the deleted session/group
+		if last, ok := m.lastActive[msg.instanceKey]; ok {
+			if last.sessionName == msg.sessionName || last.groupID == msg.groupID {
+				delete(m.lastActive, msg.instanceKey)
+			}
+		}
+		// If the deleted session was in the active split pane, close it
+		if m.splitSession == msg.sessionName || (msg.groupID != "" && m.activeGroupID == msg.groupID) {
+			if m.splitPaneID != "" {
+				killAllSplitPanes()
+				unbindHostSplitKeys()
+			}
+			m.splitPaneID = ""
+			m.splitFleet = ""
+			m.splitInstance = ""
+			m.splitSession = ""
+			m.activeGroupID = ""
+		}
+		// Re-list sessions to refresh the UI
+		if m.expandedInstances[msg.instanceKey] {
+			parts := strings.SplitN(msg.instanceKey, "/", 2)
+			if len(parts) == 2 {
+				if f, ok := m.st.Fleets[parts[0]]; ok {
+					if inst, err := f.GetInstance(parts[1]); err == nil {
+						b := m.instanceBackend(inst)
+						return m, listSessionsCmd(b, inst.WorkspaceDir, msg.instanceKey)
+					}
+				}
+			}
+		}
+		return m, nil
+
 	case operationDoneMsg:
 		m.reload()
 		if msg.err != nil {
@@ -862,6 +902,8 @@ func (m model) updateByMode(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateCodespacesLimit(msg)
 	case viewCodespacesMachine:
 		return m.updateCodespacesMachine(msg)
+	case viewConfirmDeleteSession:
+		return m.updateConfirmDeleteSession(msg)
 	case viewCreateSession:
 		return m.updateCreateSession(msg)
 	case viewRenameSession:

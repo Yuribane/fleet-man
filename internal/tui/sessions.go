@@ -55,6 +55,14 @@ type sessionRenamedMsg struct {
 	err         error
 }
 
+// sessionDeletedMsg is sent after killing a tmux session (or group of sessions).
+type sessionDeletedMsg struct {
+	instanceKey string
+	sessionName string // root session name that was deleted
+	groupID     string // non-empty when a full group was deleted
+	err         error
+}
+
 // sessionDiscoveryMsg carries discovered sessions for expanded instances.
 type sessionDiscoveryMsg struct {
 	discovered map[string][]tmuxSession // instanceKey → sessions
@@ -226,6 +234,58 @@ func renameGroupCmd(b backend.Backend, workspaceDir, instanceKey, sanitizedInsta
 			return sessionRenamedMsg{instanceKey: instanceKey, oldName: oldPrefix, newName: newPrefix, err: lastErr}
 		}
 		return sessionRenamedMsg{instanceKey: instanceKey, oldName: oldPrefix, newName: newPrefix}
+	}
+}
+
+// deleteSessionCmd kills a single tmux session inside the container.
+func deleteSessionCmd(b backend.Backend, workspaceDir, instanceKey, sessionName string) tea.Cmd {
+	return func() tea.Msg {
+		cmd := b.ExecCommand(workspaceDir, []string{
+			"sh", "-c",
+			fmt.Sprintf(`tmux kill-session -t %s 2>/dev/null`, shQuote(sessionName)),
+		})
+		if err := cmd.Run(); err != nil {
+			return sessionDeletedMsg{instanceKey: instanceKey, sessionName: sessionName, err: err}
+		}
+		return sessionDeletedMsg{instanceKey: instanceKey, sessionName: sessionName}
+	}
+}
+
+// deleteGroupSessionsCmd kills all tmux sessions belonging to a group.
+// It lists sessions matching the group prefix and kills each one.
+func deleteGroupSessionsCmd(b backend.Backend, workspaceDir, instanceKey, sanitizedInstance, groupID string) tea.Cmd {
+	prefix := sanitizedInstance + groupSep + groupID
+
+	return func() tea.Msg {
+		// List all sessions in the container.
+		listCmd := b.ExecCommand(workspaceDir, []string{
+			"sh", "-c",
+			`tmux list-sessions -F "#{session_name}" 2>/dev/null`,
+		})
+		out, err := listCmd.Output()
+		if err != nil {
+			return sessionDeletedMsg{instanceKey: instanceKey, sessionName: prefix, groupID: groupID, err: err}
+		}
+
+		// Kill each session that matches the group prefix.
+		var lastErr error
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			name := strings.TrimSpace(line)
+			if name == "" || !strings.HasPrefix(name, prefix) {
+				continue
+			}
+			cmd := b.ExecCommand(workspaceDir, []string{
+				"sh", "-c",
+				fmt.Sprintf(`tmux kill-session -t %s 2>/dev/null`, shQuote(name)),
+			})
+			if err := cmd.Run(); err != nil {
+				lastErr = err
+			}
+		}
+		if lastErr != nil {
+			return sessionDeletedMsg{instanceKey: instanceKey, sessionName: prefix, groupID: groupID, err: lastErr}
+		}
+		return sessionDeletedMsg{instanceKey: instanceKey, sessionName: prefix, groupID: groupID}
 	}
 }
 

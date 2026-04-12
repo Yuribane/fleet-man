@@ -87,6 +87,38 @@ func (m model) updateConfirmDeleteFleetWarn(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// updateConfirmDeleteSession handles the session deletion confirmation dialog.
+func (m model) updateConfirmDeleteSession(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "y", "Y", "enter":
+			m.mode = viewNormal
+			instKey := m.dialogFleet + "/" + m.dialogInst
+			f, ok := m.st.Fleets[m.dialogFleet]
+			if !ok {
+				break
+			}
+			inst, err := f.GetInstance(m.dialogInst)
+			if err != nil {
+				break
+			}
+			b := m.instanceBackend(inst)
+			sanitized := SanitizeSessionName(inst.Name)
+			// If this is a grouped session, kill the entire group.
+			if m.dialogGroupID != "" && isGroupedSession(sanitized, m.dialogSession) {
+				return m, deleteGroupSessionsCmd(b, inst.WorkspaceDir, instKey, sanitized, m.dialogGroupID)
+			}
+			return m, deleteSessionCmd(b, inst.WorkspaceDir, instKey, m.dialogSession)
+
+		case "n", "N", "esc", "ctrl+c":
+			m.mode = viewNormal
+			m.message = "Cancelled"
+		}
+	}
+	return m, nil
+}
+
 // backendToolRequirements maps each backend type to the CLI binary it
 // requires.  An empty string means no external tool is needed.
 var backendToolRequirements = map[fleet.BackendType]string{
