@@ -571,6 +571,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for key, sessions := range msg.discovered {
 				m.sessions[key] = &sessionDiscovery{sessions: sessions, fetchedAt: time.Now()}
 			}
+			// Clear lastActive entries that point to sessions/groups
+			// that no longer exist, so enter on the instance row
+			// doesn't try to reopen a killed session.
+			for key, last := range m.lastActive {
+				disc, ok := m.sessions[key]
+				if !ok || disc.err != nil {
+					delete(m.lastActive, key)
+					continue
+				}
+				if !sessionStillExists(last, disc.sessions) {
+					delete(m.lastActive, key)
+				}
+			}
 			m.buildRows()
 		}
 		// Detect when panes were killed externally (e.g. Ctrl+Q/O).

@@ -233,6 +233,28 @@ func renameGroupCmd(b backend.Backend, workspaceDir, instanceKey, sanitizedInsta
 // Helpers
 // ===========================================
 
+// sessionStillExists checks whether a lastSession reference is still
+// valid against the current list of discovered tmux sessions. For
+// grouped sessions it looks for any session with the group prefix;
+// for ungrouped sessions it matches the exact name.
+func sessionStillExists(last lastSession, sessions []tmuxSession) bool {
+	if last.groupID != "" {
+		// Group session: check if any session has the group prefix.
+		for _, s := range sessions {
+			if strings.Contains(s.Name, groupSep+last.groupID) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, s := range sessions {
+		if s.Name == last.sessionName {
+			return true
+		}
+	}
+	return false
+}
+
 // parseTmuxSessions parses the output of `tmux list-sessions -F
 // "#{session_name}:#{session_windows}:#{session_attached}"` into
 // a slice of tmuxSession.
