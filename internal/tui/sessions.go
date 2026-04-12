@@ -120,6 +120,12 @@ func sessionDiscoveryCmd(
 				})
 				out, err := cmd.Output()
 				if err != nil {
+					// tmux exits with an error when no sessions exist
+					// (server not running). Record an empty list so
+					// stale sessions are cleared from the UI.
+					mu.Lock()
+					discovered[instKey] = nil
+					mu.Unlock()
 					return
 				}
 				sessions := parseTmuxSessions(string(out))
