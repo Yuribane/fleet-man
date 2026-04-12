@@ -42,6 +42,12 @@ func dotfilesSetup(cfg *state.Config) string {
 	return dotfilesSetupScript(cfg)
 }
 
+// tmuxEnsureInstalled is a shell snippet that installs tmux if it is not
+// already present. Used by both ShellCommandForSession (interactive attach)
+// and createSessionCmd (detached session creation) so that both paths
+// handle containers that don't ship tmux out of the box.
+var tmuxEnsureInstalled = `command -v tmux >/dev/null 2>&1 || { echo '==> Installing tmux...'; (apt-get update -qq && apt-get install -y -qq tmux) 2>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq tmux) 2>/dev/null || (apk add tmux) 2>/dev/null || (sudo apk add tmux) 2>/dev/null || (dnf install -y tmux) 2>/dev/null || (sudo dnf install -y tmux) 2>/dev/null || echo 'ERROR: failed to install tmux'; }; `
+
 // shellCommand returns the command to run inside a devcontainer with a
 // persistent tmux session. The session is named after the instance so
 // that reconnecting reattaches to the running session.
@@ -67,7 +73,6 @@ func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested
 // from the instance name.
 func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, nested bool) []string {
 	setup := dotfilesSetup(cfg)
-	tmuxInstall := `command -v tmux >/dev/null 2>&1 || { echo '==> Installing tmux...'; (apt-get update -qq && apt-get install -y -qq tmux) 2>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq tmux) 2>/dev/null || (apk add tmux) 2>/dev/null || (sudo apk add tmux) 2>/dev/null || (dnf install -y tmux) 2>/dev/null || (sudo dnf install -y tmux) 2>/dev/null || echo 'ERROR: failed to install tmux'; }; `
 	// coder ssh may report incorrect terminal dimensions (e.g. 128x128).
 	// We fix the PTY size with stty before tmux starts and pass -x/-y for
 	// new session creation. "window-size latest" tells tmux to always
@@ -126,7 +131,7 @@ func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, n
 	if statusRight != "" {
 		statusConf = fmt.Sprintf(` \; set status-right '%s'`, statusRight)
 	}
-	inner := setup + tmuxInstall + sizefix + sshAgentFix + hookClear + fmt.Sprintf(
+	inner := setup + tmuxEnsureInstalled + sizefix + sshAgentFix + hookClear + fmt.Sprintf(
 		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on`+detachKeys+statusConf+prefixConf+sessionKeys+resizeHook,
 		shQuote(session),
 	)

@@ -19,6 +19,17 @@ func allToolsFound() []deps.ToolStatus {
 	}
 }
 
+// settingsPositionOf returns the cursor position for the given item ID
+// within the model's visible settings items, or -1 if not found.
+func settingsPositionOf(m model, item int) int {
+	for i, id := range m.visibleItems() {
+		if id == item {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestUpdateSettingsCyclesToolAndPersistsConfig(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
@@ -107,59 +118,53 @@ func TestUpdateSettingsNavUpDown(t *testing.T) {
 
 	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
 	got := updated.(model)
-	if got.settingsCursor != settingsItemTmuxVimKeys {
-		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemTmuxVimKeys)
+	if got.settingsCursorItem() != settingsItemTmuxVimKeys {
+		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemTmuxVimKeys)
 	}
 
 	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
 	got = updated.(model)
-	if got.settingsCursor != settingsItemDotfilesRepo {
-		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemDotfilesRepo)
+	if got.settingsCursorItem() != settingsItemDotfilesRepo {
+		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemDotfilesRepo)
 	}
 
 	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
 	got = updated.(model)
-	if got.settingsCursor != settingsItemDotfilesScript {
-		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemDotfilesScript)
+	if got.settingsCursorItem() != settingsItemDotfilesScript {
+		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemDotfilesScript)
 	}
 
 	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
 	got = updated.(model)
-	if got.settingsCursor != settingsItemDotfilesAutoInstall {
-		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemDotfilesAutoInstall)
+	if got.settingsCursorItem() != settingsItemDotfilesAutoInstall {
+		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemDotfilesAutoInstall)
 	}
 
 	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
 	got = updated.(model)
-	if got.settingsCursor != settingsItemDotfilesSetup {
-		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemDotfilesSetup)
+	if got.settingsCursorItem() != settingsItemDotfilesSetup {
+		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemDotfilesSetup)
 	}
 
 	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
 	got = updated.(model)
-	if got.settingsCursor != settingsItemCoderTemplate {
-		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemCoderTemplate)
+	if got.settingsCursorItem() != settingsItemCoderTemplate {
+		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemCoderTemplate)
 	}
 
 	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
 	got = updated.(model)
-	if got.settingsCursor != settingsItemCoderPreset {
-		t.Fatalf("cursor = %d, want %d", got.settingsCursor, settingsItemCoderPreset)
+	if got.settingsCursorItem() != settingsItemCoderPreset {
+		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemCoderPreset)
 	}
 
-	// Navigate through codespaces row (machine)
-	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
-	got = updated.(model)
-
-	// Navigate through tool status rows
-	for i := 0; i < 3; i++ {
+	// Navigate through remaining items until we wrap to top.
+	// Items left: codespaces machine, 3 tool status rows, doctor, keybindings.
+	remaining := got.settingsItemCount() - got.settingsCursor - 1
+	for i := 0; i < remaining; i++ {
 		updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
 		got = updated.(model)
 	}
-
-	// Navigate through doctor row
-	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
-	got = updated.(model)
 
 	// Wrap past last item back to first
 	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
@@ -181,12 +186,12 @@ func TestUpdateSettingsEnterEditingDotfiles(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	m := model{
-		page:           pageSettings,
-		cfg:            state.DefaultConfig(),
-		settingsCursor: settingsItemDotfilesRepo,
-		settingsInput:  textinput.New(),
-		toolStatus:     allToolsFound(),
+		page:          pageSettings,
+		cfg:           state.DefaultConfig(),
+		settingsInput: textinput.New(),
+		toolStatus:    allToolsFound(),
 	}
+	m.settingsCursor = settingsPositionOf(m, settingsItemDotfilesRepo)
 
 	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
 	got := updated.(model)
@@ -208,11 +213,11 @@ func TestUpdateSettingsEditingSavesOnEnter(t *testing.T) {
 	m := model{
 		page:            pageSettings,
 		cfg:             state.DefaultConfig(),
-		settingsCursor:  settingsItemDotfilesRepo,
 		settingsEditing: true,
 		settingsInput:   si,
 		toolStatus:      allToolsFound(),
 	}
+	m.settingsCursor = settingsPositionOf(m, settingsItemDotfilesRepo)
 	m.settingsInput.SetValue("https://github.com/user/dotfiles")
 	m.settingsInput.Focus()
 
@@ -245,11 +250,11 @@ func TestUpdateSettingsEditingCancelsOnEsc(t *testing.T) {
 	m := model{
 		page:            pageSettings,
 		cfg:             cfg,
-		settingsCursor:  settingsItemDotfilesRepo,
 		settingsEditing: true,
 		settingsInput:   si,
 		toolStatus:      allToolsFound(),
 	}
+	m.settingsCursor = settingsPositionOf(m, settingsItemDotfilesRepo)
 	m.settingsInput.SetValue("changed")
 	m.settingsInput.Focus()
 

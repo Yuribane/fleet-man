@@ -151,13 +151,13 @@ func listSessionsCmd(b backend.Backend, workspaceDir, instanceKey string) tea.Cm
 	}
 }
 
-// createSessionCmd execs `tmux new-session -d -s <name>` inside the
-// container and then re-lists sessions to refresh the UI.
+// createSessionCmd ensures tmux is installed (matching the interactive
+// shell path) and then creates a detached session inside the container.
 func createSessionCmd(b backend.Backend, workspaceDir, instanceKey, sessionName string) tea.Cmd {
 	return func() tea.Msg {
 		cmd := b.ExecCommand(workspaceDir, []string{
 			"sh", "-c",
-			fmt.Sprintf(`tmux new-session -d -s %s 2>/dev/null`, shQuote(sessionName)),
+			tmuxEnsureInstalled + fmt.Sprintf(`tmux new-session -d -s %s 2>/dev/null`, shQuote(sessionName)),
 		})
 		if err := cmd.Run(); err != nil {
 			return sessionCreatedMsg{instanceKey: instanceKey, err: err}

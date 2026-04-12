@@ -66,6 +66,14 @@ type row struct {
 	groupSize   int    // number of sessions in the group (for display)
 }
 
+// lastSession tracks the most recently used session for an instance,
+// allowing reconnection on subsequent enter presses instead of always
+// creating a new session.
+type lastSession struct {
+	sessionName string
+	groupID     string
+}
+
 type model struct {
 	rows      []row
 	cursor    int
@@ -113,6 +121,11 @@ type model struct {
 	expandedInstances map[string]bool              // key: "fleet/instance"
 	sessions          map[string]*sessionDiscovery // key: "fleet/instance"
 	dialogSession     string                       // session being renamed (for viewRenameSession)
+
+	// Last active session per instance (in-memory only). Used to
+	// reconnect to the previous session when pressing enter on an
+	// instance row instead of always creating a new one.
+	lastActive map[string]lastSession // key: "fleet/instance"
 
 	// Split pane mode: when fleet runs inside a host tmux session,
 	// pressing enter opens the instance shell in a right-side pane
@@ -163,6 +176,7 @@ func newModel() model {
 		portForwards:      portforward.NewManager(),
 		expandedInstances: make(map[string]bool),
 		sessions:          make(map[string]*sessionDiscovery),
+		lastActive:        make(map[string]lastSession),
 		savedGroups:       make(map[string]savedGroup),
 		textInput:         ti,
 		spinner:           sp,
@@ -610,9 +624,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.splitInstance = msg.instance
 		m.splitSession = msg.session
 		m.activeGroupID = msg.groupID
+		// Remember this session so enter on the instance row reopens it.
+		instKey := msg.fleet + "/" + msg.instance
+		m.lastActive[instKey] = lastSession{sessionName: msg.session, groupID: msg.groupID}
 		// Rebind outer tmux split keys so new splits open inside
 		// this instance (and group) instead of spawning a local shell.
-		bindHostSplitKeys(msg.fleet+"/"+msg.instance, msg.groupID)
+		bindHostSplitKeys(instKey, msg.groupID)
 		// Refresh session list for the instance so the UI is up to date.
 		return m, m.refreshInstanceSessions(msg.instance)
 

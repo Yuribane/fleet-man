@@ -207,6 +207,9 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				inst := r.instance
 				sessionName := r.sessionName
 				groupID := r.groupID
+				// Record as last active so enter on the instance row reopens it.
+				sessInstKey := r.fleetName + "/" + inst.Name
+				m.lastActive[sessInstKey] = lastSession{sessionName: sessionName, groupID: groupID}
 				if m.inHostTmux {
 					if m.splitPaneID != "" && !splitOpen() {
 						unbindHostSplitKeys()
@@ -268,12 +271,7 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 					break
 				}
 				instFleetName := r.fleetName
-				// Use the current split session if it matches this instance,
-				// otherwise fall back to the default session name.
-				sessionName := SanitizeSessionName(inst.Name)
-				if m.splitInstance == inst.Name && m.splitSession != "" {
-					sessionName = m.splitSession
-				}
+				instKey := instFleetName + "/" + inst.Name
 				// Split pane mode: open shell in a right-side tmux pane
 				// instead of suspending the TUI. Toggle: if the same
 				// instance is already open, close the pane.
@@ -300,17 +298,17 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.activeGroupID = ""
 						return m, nil
 					}
-					// Generate a new group ID for this session group.
-					newGroupID := randomHex(3)
-					sanitized := SanitizeSessionName(inst.Name)
-					sessName := groupSessionName(sanitized, newGroupID)
-					// Query the host tmux window size and calculate the
-					// right pane dimensions (70% of the window width).
-					cols, rows := tmuxWindowSize()
-					cols = cols * 70 / 100
-					cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, ShellCommandForSession(m.cfg, sessName, cols, rows, true))
-					return m, splitPaneCmd(m.splitPaneID, instFleetName, inst.Name, sessName, newGroupID, cmd)
+					return m, m.openInstanceSession(instFleetName, inst)
 				}
+
+				// Non-split: reuse last active session, fall back to
+				// default session name. tmux new-session -A creates or
+				// attaches automatically.
+				sessionName := SanitizeSessionName(inst.Name)
+				if last, ok := m.lastActive[instKey]; ok {
+					sessionName = last.sessionName
+				}
+				m.lastActive[instKey] = lastSession{sessionName: sessionName}
 
 				cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, ShellCommandForSession(m.cfg, sessionName, m.width, m.height, false))
 
@@ -869,6 +867,60 @@ func (m model) viewFleetList() string {
 	}))
 
 	return b.String()
+}
+
+// openInstanceSession opens a split pane for the given instance, reusing
+// the last active session when available. The priority is:
+//  1. Last active session (from in-memory tracking).
+//  2. First discovered session (if the instance was expanded).
+//  3. Brand new session group (fallback).
+func (m model) openInstanceSession(fleetName string, inst *fleet.Instance) tea.Cmd {
+	instKey := fleetName + "/" + inst.Name
+	sanitized := SanitizeSessionName(inst.Name)
+
+	// 1. Reopen the last active session for this instance.
+	if last, ok := m.lastActive[instKey]; ok {
+		if last.groupID != "" {
+			return m.restoreGroupCmd(fleetName, inst, last.groupID)
+		}
+		cols, rows := tmuxWindowSize()
+		cols = cols * 70 / 100
+		cmd := m.instanceBackend(inst).ExecCommand(
+			inst.WorkspaceDir,
+			ShellCommandForSession(m.cfg, last.sessionName, cols, rows, true),
+		)
+		return splitPaneCmd(m.splitPaneID, fleetName, inst.Name, last.sessionName, last.groupID, cmd)
+	}
+
+	// 2. Use the first discovered session (if available).
+	if disc, ok := m.sessions[instKey]; ok && disc.err == nil && len(disc.sessions) > 0 {
+		groups := groupSessions(sanitized, disc.sessions)
+		if len(groups) > 0 {
+			g := groups[0]
+			rootName := g.Sessions[0].Name
+			if g.GroupID != "" && isGroupedSession(sanitized, rootName) {
+				return m.restoreGroupCmd(fleetName, inst, g.GroupID)
+			}
+			cols, rows := tmuxWindowSize()
+			cols = cols * 70 / 100
+			cmd := m.instanceBackend(inst).ExecCommand(
+				inst.WorkspaceDir,
+				ShellCommandForSession(m.cfg, rootName, cols, rows, true),
+			)
+			return splitPaneCmd(m.splitPaneID, fleetName, inst.Name, rootName, g.GroupID, cmd)
+		}
+	}
+
+	// 3. No sessions exist — create a new session group.
+	newGroupID := randomHex(3)
+	sessName := groupSessionName(sanitized, newGroupID)
+	cols, rows := tmuxWindowSize()
+	cols = cols * 70 / 100
+	cmd := m.instanceBackend(inst).ExecCommand(
+		inst.WorkspaceDir,
+		ShellCommandForSession(m.cfg, sessName, cols, rows, true),
+	)
+	return splitPaneCmd(m.splitPaneID, fleetName, inst.Name, sessName, newGroupID, cmd)
 }
 
 // instanceGroups returns the session groups for the given instance name,
