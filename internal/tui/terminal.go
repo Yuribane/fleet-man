@@ -2,20 +2,13 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 )
 
 // openInTerminal spawns a new terminal window running the given command.
-// Tries tmux first, then common Linux terminal emulators.
+// Tries common Linux terminal emulators in order of preference.
 func openInTerminal(command []string) error {
-	// tmux — split or new window
-	if os.Getenv("TMUX") != "" {
-		args := append([]string{"new-window", "--"}, command...)
-		return exec.Command("tmux", args...).Run()
-	}
-
 	// Try common Linux terminal emulators in order
 	terminals := []struct {
 		bin  string
