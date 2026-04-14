@@ -123,6 +123,15 @@ func (fp *fleetPage) Update(m *model, msg tea.Msg) tea.Cmd {
 	case sessionsMsg:
 		fp.buildRows(m)
 		return nil
+
+	case browserProxyMsg:
+		bpm := msg.(browserProxyMsg)
+		if bpm.err != nil {
+			m.message = fmt.Sprintf("Browser proxy error: %v", bpm.err)
+		} else {
+			m.message = fmt.Sprintf("Browser opened (proxy on localhost:%d)", bpm.localPort)
+		}
+		return nil
 	}
 
 	// Mode-specific dispatch
@@ -501,6 +510,21 @@ func (fp *fleetPage) updateNormal(m *model, msg tea.Msg) tea.Cmd {
 				}
 			}
 
+		case "b":
+			_, inst := fp.selectedInstance(m)
+			if inst == nil {
+				m.message = "Select an instance"
+				break
+			}
+			if inst.Status != fleet.StatusRunning {
+				m.message = "Instance must be running to open browser"
+				break
+			}
+			b := m.instanceBackend(inst)
+			instanceKey := fp.currentFleetName() + "/" + inst.Name
+			m.message = fmt.Sprintf("Starting browser proxy for %s...", inst.Name)
+			return openBrowserProxyCmd(m.portForwards, b, inst, instanceKey)
+
 		case "t":
 			_, inst := fp.selectedInstance(m)
 			if inst == nil {
@@ -721,7 +745,7 @@ func (fp *fleetPage) contextualHelpKeys(m *model) []string {
 				keys = append(keys,
 					"space: show sessions", "enter/e: open shell",
 					"s: stop", "a: new session", "d: delete", "t: tag",
-					"f: port-forward", "c: code", "o: terminal", "l: logs",
+					"f: port-forward", "b: browser", "c: code", "o: terminal", "l: logs",
 					"r: refresh", "q: quit",
 				)
 			case r.instance.Status == fleet.StatusStopped:

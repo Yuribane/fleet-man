@@ -10,15 +10,21 @@ import (
 
 // Forward represents a single active port forward binding.
 type Forward struct {
-	LocalPort  int       `json:"local_port"`
-	RemotePort int       `json:"remote_port"`
-	cmd        *exec.Cmd    // running process (external fallback)
-	listener   net.Listener // in-process TCP listener
-	done       chan struct{} // closed when the in-process proxy stops
+	LocalPort    int  `json:"local_port"`
+	RemotePort   int  `json:"remote_port"`
+	BrowserProxy bool `json:"browser_proxy"` // true when this forward serves a browser proxy
+	cmd          *exec.Cmd    // running process (external fallback)
+	listener     net.Listener // in-process TCP listener
+	done         chan struct{} // closed when the in-process proxy stops
 }
 
 // Label returns a display string like "8080->80".
+// Browser proxy forwards are labelled "PORT->proxy" to distinguish
+// them from regular port forwards.
 func (f Forward) Label() string {
+	if f.BrowserProxy {
+		return fmt.Sprintf("%d->proxy", f.LocalPort)
+	}
 	return fmt.Sprintf("%d->%d", f.LocalPort, f.RemotePort)
 }
 
@@ -86,6 +92,68 @@ func (m *Manager) Add(key string, localPort, remotePort int, factory CmdFactory,
 	return nil
 }
 
+// FindBrowserProxy returns the local port of an existing browser proxy
+// forward for the given instance key. Returns (0, false) if none exists.
+func (m *Manager) FindBrowserProxy(key string) (int, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, f := range m.forwards[key] {
+		if f.BrowserProxy {
+			return f.LocalPort, true
+		}
+	}
+	return 0, false
+}
+
+// AddBrowserProxy creates a port forward marked as a browser proxy,
+// automatically selecting an available local port. It returns the
+// chosen local port on success.
+func (m *Manager) AddBrowserProxy(key string, remotePort int, factory CmdFactory, containerID string, resolve ResolveFunc) (int, error) {
+	// Grab an ephemeral port from the OS.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, fmt.Errorf("find available port: %w", err)
+	}
+	localPort := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Try in-process proxy via ResolveHostname.
+	if resolve != nil {
+		if hostname, ok := resolve(containerID); ok {
+			fwd, err := startProxy(localPort, hostname, remotePort)
+			if err != nil {
+				return 0, fmt.Errorf("start proxy %d->%d: %w", localPort, remotePort, err)
+			}
+			fwd.BrowserProxy = true
+			m.forwards[key] = append(m.forwards[key], fwd)
+			return localPort, nil
+		}
+	}
+
+	// Fallback: spawn an external process.
+	cmd := factory(containerID, localPort, remotePort)
+	if err := cmd.Start(); err != nil {
+		return 0, fmt.Errorf("start port forward %d->%d: %w", localPort, remotePort, err)
+	}
+
+	fwd := &Forward{
+		LocalPort:    localPort,
+		RemotePort:   remotePort,
+		BrowserProxy: true,
+		cmd:          cmd,
+	}
+	m.forwards[key] = append(m.forwards[key], fwd)
+
+	// Reap the process in the background so it doesn't become a zombie.
+	go cmd.Wait() //nolint:errcheck
+
+	return localPort, nil
+}
+
 // Remove stops and removes the port forward on the given local port.
 func (m *Manager) Remove(key string, localPort int) error {
 	m.mu.Lock()
@@ -124,7 +192,7 @@ func (m *Manager) List(key string) []Forward {
 	fwds := m.forwards[key]
 	result := make([]Forward, len(fwds))
 	for i, f := range fwds {
-		result[i] = Forward{LocalPort: f.LocalPort, RemotePort: f.RemotePort}
+		result[i] = Forward{LocalPort: f.LocalPort, RemotePort: f.RemotePort, BrowserProxy: f.BrowserProxy}
 	}
 	return result
 }
@@ -138,7 +206,7 @@ func (m *Manager) ListAll() map[string][]Forward {
 	for key, fwds := range m.forwards {
 		entries := make([]Forward, len(fwds))
 		for i, f := range fwds {
-			entries[i] = Forward{LocalPort: f.LocalPort, RemotePort: f.RemotePort}
+			entries[i] = Forward{LocalPort: f.LocalPort, RemotePort: f.RemotePort, BrowserProxy: f.BrowserProxy}
 		}
 		result[key] = entries
 	}
