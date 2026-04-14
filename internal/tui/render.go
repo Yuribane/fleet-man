@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
+	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -62,6 +63,22 @@ func isTransitional(s fleet.InstanceStatus) bool {
 		return true
 	}
 	return false
+}
+
+// agentToolLabel returns a human-readable label for the given agent tool.
+func agentToolLabel(tool state.AgentTool) string {
+	switch tool {
+	case state.AgentToolCodex:
+		return "Codex"
+	case state.AgentToolClaude:
+		return "Claude Code"
+	case state.AgentToolGemini:
+		return "Gemini"
+	case state.AgentToolCopilot:
+		return "Copilot"
+	default:
+		return "Claude Code"
+	}
 }
 
 func renderGradient(text string) string {

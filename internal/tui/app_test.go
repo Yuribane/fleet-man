@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/deps"
+	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,9 +21,9 @@ func allToolsFound() []deps.ToolStatus {
 }
 
 // settingsPositionOf returns the cursor position for the given item ID
-// within the model's visible settings items, or -1 if not found.
-func settingsPositionOf(m model, item int) int {
-	for i, id := range m.visibleItems() {
+// within the settings page's visible items, or -1 if not found.
+func settingsPositionOf(sp *settingsPage, m *model, item int) int {
+	for i, id := range sp.visibleItems(m) {
 		if id == item {
 			return i
 		}
@@ -31,147 +32,144 @@ func settingsPositionOf(m model, item int) int {
 }
 
 func TestUpdateSettingsEscReturnsToFleetList(t *testing.T) {
-	m := model{page: pageSettings}
-
-	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEsc})
-	got := updated.(model)
-
-	if got.page != pageFleetList {
-		t.Fatalf("page = %v, want %v", got.page, pageFleetList)
+	sp := newSettingsPage()
+	fp := newFleetPage()
+	m := &model{
+		currentPage: sp,
+		fleetPage:   fp,
+		st:          &state.State{Fleets: map[string]*fleet.Fleet{}},
 	}
+
+	cmd := sp.Update(m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	// After esc, the model's currentPage should be the fleet page
+	if m.currentPage != fp {
+		t.Fatalf("currentPage should be fleetPage after esc")
+	}
+	_ = cmd
 }
 
 func TestUpdateNormalWrapsCursorFromTopToBottom(t *testing.T) {
-	m := model{
-		rows: []row{
-			{kind: rowFleetHeader, fleetName: "alpha"},
-			{kind: rowInstance, fleetName: "alpha"},
-			{kind: rowSettings},
-		},
-		cursor: 0,
+	fp := newFleetPage()
+	fp.rows = []row{
+		{kind: rowFleetHeader, fleetName: "alpha"},
+		{kind: rowInstance, fleetName: "alpha"},
+		{kind: rowSettings},
 	}
+	fp.cursor = 0
+	m := &model{fleetPage: fp}
 
-	updated, _ := m.updateNormal(tea.KeyMsg{Type: tea.KeyUp})
-	got := updated.(model)
+	fp.updateNormal(m, tea.KeyMsg{Type: tea.KeyUp})
 
-	if got.cursor != len(got.rows)-1 {
-		t.Fatalf("cursor = %d, want %d", got.cursor, len(got.rows)-1)
+	if fp.cursor != len(fp.rows)-1 {
+		t.Fatalf("cursor = %d, want %d", fp.cursor, len(fp.rows)-1)
 	}
 }
 
 func TestUpdateNormalWrapsCursorFromBottomToTop(t *testing.T) {
-	m := model{
-		rows: []row{
-			{kind: rowFleetHeader, fleetName: "alpha"},
-			{kind: rowInstance, fleetName: "alpha"},
-			{kind: rowSettings},
-		},
-		cursor: 2,
+	fp := newFleetPage()
+	fp.rows = []row{
+		{kind: rowFleetHeader, fleetName: "alpha"},
+		{kind: rowInstance, fleetName: "alpha"},
+		{kind: rowSettings},
 	}
+	fp.cursor = 2
+	m := &model{fleetPage: fp}
 
-	updated, _ := m.updateNormal(tea.KeyMsg{Type: tea.KeyDown})
-	got := updated.(model)
+	fp.updateNormal(m, tea.KeyMsg{Type: tea.KeyDown})
 
-	if got.cursor != 0 {
-		t.Fatalf("cursor = %d, want 0", got.cursor)
+	if fp.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", fp.cursor)
 	}
 }
 
 func TestUpdateSettingsNavUpDown(t *testing.T) {
-	m := model{
-		page:           pageSettings,
-		cfg:            state.DefaultConfig(),
-		settingsCursor: settingsPositionOf(model{cfg: state.DefaultConfig(), toolStatus: allToolsFound()}, settingsItemTmuxVimKeys),
-		settingsInput:  textinput.New(),
-		toolStatus:     allToolsFound(),
+	sp := newSettingsPage()
+	fp := newFleetPage()
+	m := &model{
+		cfg:          state.DefaultConfig(),
+		toolStatus:   allToolsFound(),
+		currentPage:  sp,
+		fleetPage:    fp,
 	}
+	sp.cursor = settingsPositionOf(sp, m, settingsItemTmuxVimKeys)
 
 	// Start on TmuxVimKeys, move down to ShowHelpText
-	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
-	got := updated.(model)
-	if got.settingsCursorItem() != settingsItemShowHelpText {
-		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemShowHelpText)
+	sp.Update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if sp.settingsCursorItem(m) != settingsItemShowHelpText {
+		t.Fatalf("item = %d, want %d", sp.settingsCursorItem(m), settingsItemShowHelpText)
 	}
 
-	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
-	got = updated.(model)
-	if got.settingsCursorItem() != settingsItemDotfilesRepo {
-		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemDotfilesRepo)
+	sp.Update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if sp.settingsCursorItem(m) != settingsItemDotfilesRepo {
+		t.Fatalf("item = %d, want %d", sp.settingsCursorItem(m), settingsItemDotfilesRepo)
 	}
 
-	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
-	got = updated.(model)
-	if got.settingsCursorItem() != settingsItemDotfilesScript {
-		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemDotfilesScript)
+	sp.Update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if sp.settingsCursorItem(m) != settingsItemDotfilesScript {
+		t.Fatalf("item = %d, want %d", sp.settingsCursorItem(m), settingsItemDotfilesScript)
 	}
 
-	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
-	got = updated.(model)
-	if got.settingsCursorItem() != settingsItemDotfilesAutoInstall {
-		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemDotfilesAutoInstall)
+	sp.Update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if sp.settingsCursorItem(m) != settingsItemDotfilesAutoInstall {
+		t.Fatalf("item = %d, want %d", sp.settingsCursorItem(m), settingsItemDotfilesAutoInstall)
 	}
 
-	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
-	got = updated.(model)
-	if got.settingsCursorItem() != settingsItemDotfilesSetup {
-		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemDotfilesSetup)
+	sp.Update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if sp.settingsCursorItem(m) != settingsItemDotfilesSetup {
+		t.Fatalf("item = %d, want %d", sp.settingsCursorItem(m), settingsItemDotfilesSetup)
 	}
 
-	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
-	got = updated.(model)
-	if got.settingsCursorItem() != settingsItemCoderTemplate {
-		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemCoderTemplate)
+	sp.Update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if sp.settingsCursorItem(m) != settingsItemCoderTemplate {
+		t.Fatalf("item = %d, want %d", sp.settingsCursorItem(m), settingsItemCoderTemplate)
 	}
 
-	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
-	got = updated.(model)
-	if got.settingsCursorItem() != settingsItemCoderPreset {
-		t.Fatalf("item = %d, want %d", got.settingsCursorItem(), settingsItemCoderPreset)
+	sp.Update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if sp.settingsCursorItem(m) != settingsItemCoderPreset {
+		t.Fatalf("item = %d, want %d", sp.settingsCursorItem(m), settingsItemCoderPreset)
 	}
 
 	// Navigate through remaining items until we wrap to top.
-	// Items left: codespaces machine, 3 tool status rows, doctor, keybindings.
-	remaining := got.settingsItemCount() - got.settingsCursor - 1
+	remaining := sp.settingsItemCount(m) - sp.cursor - 1
 	for i := 0; i < remaining; i++ {
-		updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
-		got = updated.(model)
+		sp.Update(m, tea.KeyMsg{Type: tea.KeyDown})
 	}
 
 	// Wrap past last item back to first
-	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyDown})
-	got = updated.(model)
-	if got.settingsCursor != 0 {
-		t.Fatalf("cursor = %d, want 0 (wrap to top)", got.settingsCursor)
+	sp.Update(m, tea.KeyMsg{Type: tea.KeyDown})
+	if sp.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0 (wrap to top)", sp.cursor)
 	}
 
-	// Wrap up from first goes to last tool status item
-	updated, _ = got.updateSettings(tea.KeyMsg{Type: tea.KeyUp})
-	got = updated.(model)
-	wantLast := got.settingsItemCount() - 1
-	if got.settingsCursor != wantLast {
-		t.Fatalf("cursor = %d, want %d (wrap to bottom)", got.settingsCursor, wantLast)
+	// Wrap up from first goes to last item
+	sp.Update(m, tea.KeyMsg{Type: tea.KeyUp})
+	wantLast := sp.settingsItemCount(m) - 1
+	if sp.cursor != wantLast {
+		t.Fatalf("cursor = %d, want %d (wrap to bottom)", sp.cursor, wantLast)
 	}
 }
 
 func TestUpdateSettingsEnterEditingDotfiles(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	m := model{
-		page:          pageSettings,
-		cfg:           state.DefaultConfig(),
-		settingsInput: textinput.New(),
-		toolStatus:    allToolsFound(),
+	sp := newSettingsPage()
+	fp := newFleetPage()
+	m := &model{
+		cfg:          state.DefaultConfig(),
+		toolStatus:   allToolsFound(),
+		currentPage:  sp,
+		fleetPage:    fp,
 	}
-	m.settingsCursor = settingsPositionOf(m, settingsItemDotfilesRepo)
+	sp.cursor = settingsPositionOf(sp, m, settingsItemDotfilesRepo)
 
-	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
-	got := updated.(model)
+	sp.Update(m, tea.KeyMsg{Type: tea.KeyEnter})
 
-	if !got.settingsEditing {
-		t.Fatal("settingsEditing should be true after enter on dotfiles repo")
+	if !sp.editing {
+		t.Fatal("editing should be true after enter on dotfiles repo")
 	}
-	if !got.settingsInput.Focused() {
-		t.Fatal("settingsInput should be focused")
+	if !sp.input.Focused() {
+		t.Fatal("input should be focused")
 	}
 }
 
@@ -181,25 +179,28 @@ func TestUpdateSettingsEditingSavesOnEnter(t *testing.T) {
 	si := textinput.New()
 	si.CharLimit = 256
 
-	m := model{
-		page:            pageSettings,
-		cfg:             state.DefaultConfig(),
-		settingsEditing: true,
-		settingsInput:   si,
-		toolStatus:      allToolsFound(),
+	sp := &settingsPage{
+		editing: true,
+		input:   si,
 	}
-	m.settingsCursor = settingsPositionOf(m, settingsItemDotfilesRepo)
-	m.settingsInput.SetValue("https://github.com/user/dotfiles")
-	m.settingsInput.Focus()
-
-	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
-	got := updated.(model)
-
-	if got.settingsEditing {
-		t.Fatal("settingsEditing should be false after enter")
+	fp := newFleetPage()
+	m := &model{
+		cfg:          state.DefaultConfig(),
+		toolStatus:   allToolsFound(),
+		currentPage:  sp,
+		fleetPage:    fp,
 	}
-	if got.cfg.DotfilesSettings.RepoURL != "https://github.com/user/dotfiles" {
-		t.Fatalf("RepoURL = %q, want %q", got.cfg.DotfilesSettings.RepoURL, "https://github.com/user/dotfiles")
+	sp.cursor = settingsPositionOf(sp, m, settingsItemDotfilesRepo)
+	sp.input.SetValue("https://github.com/user/dotfiles")
+	sp.input.Focus()
+
+	sp.Update(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if sp.editing {
+		t.Fatal("editing should be false after enter")
+	}
+	if m.cfg.DotfilesSettings.RepoURL != "https://github.com/user/dotfiles" {
+		t.Fatalf("RepoURL = %q, want %q", m.cfg.DotfilesSettings.RepoURL, "https://github.com/user/dotfiles")
 	}
 
 	cfg, err := state.LoadConfig()
@@ -218,24 +219,27 @@ func TestUpdateSettingsEditingCancelsOnEsc(t *testing.T) {
 	cfg := state.DefaultConfig()
 	cfg.DotfilesSettings.RepoURL = "original"
 
-	m := model{
-		page:            pageSettings,
-		cfg:             cfg,
-		settingsEditing: true,
-		settingsInput:   si,
-		toolStatus:      allToolsFound(),
+	sp := &settingsPage{
+		editing: true,
+		input:   si,
 	}
-	m.settingsCursor = settingsPositionOf(m, settingsItemDotfilesRepo)
-	m.settingsInput.SetValue("changed")
-	m.settingsInput.Focus()
-
-	updated, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEsc})
-	got := updated.(model)
-
-	if got.settingsEditing {
-		t.Fatal("settingsEditing should be false after esc")
+	fp := newFleetPage()
+	m := &model{
+		cfg:          cfg,
+		toolStatus:   allToolsFound(),
+		currentPage:  sp,
+		fleetPage:    fp,
 	}
-	if got.cfg.DotfilesSettings.RepoURL != "original" {
-		t.Fatalf("RepoURL = %q, want %q (should not have changed)", got.cfg.DotfilesSettings.RepoURL, "original")
+	sp.cursor = settingsPositionOf(sp, m, settingsItemDotfilesRepo)
+	sp.input.SetValue("changed")
+	sp.input.Focus()
+
+	sp.Update(m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	if sp.editing {
+		t.Fatal("editing should be false after esc")
+	}
+	if m.cfg.DotfilesSettings.RepoURL != "original" {
+		t.Fatalf("RepoURL = %q, want %q (should not have changed)", m.cfg.DotfilesSettings.RepoURL, "original")
 	}
 }

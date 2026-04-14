@@ -12,15 +12,264 @@ import (
 	"github.com/BenjaminBenetti/fleet-man/internal/instanceops"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/BenjaminBenetti/fleet-man/internal/version"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
+// ===========================================
+// View Mode
+// ===========================================
+
+type viewMode int
+
+const (
+	viewNormal viewMode = iota
+	viewConfirmDelete
+	viewConfirmDeleteFleetWarn
+	viewAddInstance
+	viewAddFleet
+	viewTagInstance
+	viewPortForward
+	viewCodespacesAuth
+	viewCodespacesLimit
+	viewCodespacesMachine
+	viewCreateSession
+	viewRenameSession
+	viewConfirmDeleteSession
+)
+
+// ===========================================
+// Fleet Page
+// ===========================================
+
 var toggleInstanceStatus = instanceops.ToggleInstance
 var resolveWorkspaceBranch = gitutil.BranchName
 
-func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
+// fleetPage holds fleet-list-specific state.
+type fleetPage struct {
+	rows      []row
+	cursor    int
+	collapsed map[string]bool
+
+	mode          viewMode
+	dialogFleet   string
+	dialogInst    string
+	dialogBackend fleet.BackendType
+	dialogGroupID string
+	dialogSession string
+	textInput     textinput.Model
+
+	pfCursor      int
+	pfContainerID string
+
+	splitPaneID   string
+	splitFleet    string
+	splitInstance string
+	splitSession  string
+
+	activeGroupID  string
+	savedGroups    map[string]savedGroup
+	pendingGroupID string
+	debounceSeq    int
+}
+
+// newFleetPage creates a new fleet page with default state.
+func newFleetPage() *fleetPage {
+	ti := textinput.New()
+	ti.Placeholder = "instance-name"
+	ti.CharLimit = 64
+
+	return &fleetPage{
+		collapsed:   make(map[string]bool),
+		savedGroups: make(map[string]savedGroup),
+		textInput:   ti,
+	}
+}
+
+// Init is called when the fleet page becomes active.
+func (fp *fleetPage) Init(m *model) tea.Cmd {
+	fp.buildRows(m)
+	return nil
+}
+
+// Update dispatches messages to the appropriate handler based on the
+// current view mode.
+func (fp *fleetPage) Update(m *model, msg tea.Msg) tea.Cmd {
+	// Fleet-specific async messages that need row rebuilds
+	switch msg.(type) {
+	case sessionDiscoveryMsg:
+		fp.buildRows(m)
+		// Detect when panes were killed externally
+		if fp.splitPaneID != "" && !splitOpen() {
+			unbindHostSplitKeys()
+			fp.splitPaneID = ""
+			fp.splitFleet = ""
+			fp.splitInstance = ""
+			fp.splitSession = ""
+			fp.activeGroupID = ""
+		}
+		return nil
+
+	case operationDoneMsg:
+		fp.buildRows(m)
+		return nil
+
+	case instanceCreateErrMsg:
+		fp.buildRows(m)
+		return nil
+
+	case sessionsMsg:
+		fp.buildRows(m)
+		return nil
+	}
+
+	// Mode-specific dispatch
+	switch fp.mode {
+	case viewConfirmDelete:
+		return fp.updateConfirmDelete(m, msg)
+	case viewConfirmDeleteFleetWarn:
+		return fp.updateConfirmDeleteFleetWarn(m, msg)
+	case viewAddInstance:
+		return fp.updateAddInstance(m, msg)
+	case viewAddFleet:
+		return fp.updateAddFleet(m, msg)
+	case viewTagInstance:
+		return fp.updateTagInstance(m, msg)
+	case viewPortForward:
+		return fp.updatePortForward(m, msg)
+	case viewCodespacesAuth:
+		return fp.updateCodespacesAuth(m, msg)
+	case viewCodespacesLimit:
+		return fp.updateCodespacesLimit(m, msg)
+	case viewCodespacesMachine:
+		return fp.updateCodespacesMachine(m, msg)
+	case viewConfirmDeleteSession:
+		return fp.updateConfirmDeleteSession(m, msg)
+	case viewCreateSession:
+		return fp.updateCreateSession(m, msg)
+	case viewRenameSession:
+		return fp.updateRenameSession(m, msg)
+	default:
+		return fp.updateNormal(m, msg)
+	}
+}
+
+// View renders the fleet list page.
+func (fp *fleetPage) View(m *model) string {
+	return fp.viewFleetList(m)
+}
+
+// ===========================================
+// Row Management
+// ===========================================
+
+// buildRows rebuilds the navigable row list from the current state.
+func (fp *fleetPage) buildRows(m *model) {
+	wasOnSettings := false
+	if r := fp.currentRow(); r != nil && r.kind == rowSettings {
+		wasOnSettings = true
+	}
+
+	fp.rows = nil
+
+	names := sortedFleetNames(m.st.Fleets)
+
+	for _, name := range names {
+		f := m.st.Fleets[name]
+		fp.rows = append(fp.rows, row{kind: rowFleetHeader, fleetName: name})
+		if !fp.collapsed[name] {
+			for _, inst := range f.Instances {
+				fp.rows = append(fp.rows, row{kind: rowInstance, fleetName: name, instance: inst})
+				instKey := name + "/" + inst.Name
+				if m.expandedInstances[instKey] {
+					if disc, ok := m.sessions[instKey]; ok && disc.err == nil {
+						sanitized := SanitizeSessionName(inst.Name)
+						groups := groupSessions(sanitized, disc.sessions)
+						for _, g := range groups {
+							rootName := g.Sessions[0].Name
+							fp.rows = append(fp.rows, row{
+								kind:        rowSession,
+								fleetName:   name,
+								instance:    inst,
+								sessionName: rootName,
+								groupID:     g.GroupID,
+								groupSize:   len(g.Sessions),
+							})
+						}
+					}
+					fp.rows = append(fp.rows, row{
+						kind:      rowNewSession,
+						fleetName: name,
+						instance:  inst,
+					})
+				}
+			}
+		}
+	}
+	fp.rows = append(fp.rows, row{kind: rowSettings})
+	if wasOnSettings {
+		fp.cursor = len(fp.rows) - 1
+	}
+	if fp.cursor >= len(fp.rows) {
+		fp.cursor = max(0, len(fp.rows)-1)
+	}
+}
+
+// currentRow returns a pointer to the row at the cursor position.
+func (fp *fleetPage) currentRow() *row {
+	if fp.cursor < 0 || fp.cursor >= len(fp.rows) {
+		return nil
+	}
+	return &fp.rows[fp.cursor]
+}
+
+// moveCursor moves the cursor by delta, wrapping around.
+func (fp *fleetPage) moveCursor(delta int) {
+	if len(fp.rows) == 0 || delta == 0 {
+		return
+	}
+	fp.cursor = (fp.cursor + delta + len(fp.rows)) % len(fp.rows)
+}
+
+// currentFleetName returns the fleet name for the row at the cursor.
+func (fp *fleetPage) currentFleetName() string {
+	r := fp.currentRow()
+	if r == nil || r.kind == rowSettings {
+		return ""
+	}
+	return r.fleetName
+}
+
+// selectedInstance returns the fleet and instance when the cursor is
+// on an instance row.
+func (fp *fleetPage) selectedInstance(m *model) (*fleet.Fleet, *fleet.Instance) {
+	r := fp.currentRow()
+	if r == nil || r.kind != rowInstance || r.instance == nil {
+		return nil, nil
+	}
+	f := m.st.Fleets[r.fleetName]
+	return f, r.instance
+}
+
+// selectedSession returns the fleet, instance, and session name when
+// the cursor is on a session row.
+func (fp *fleetPage) selectedSession(m *model) (*fleet.Fleet, *fleet.Instance, string) {
+	r := fp.currentRow()
+	if r == nil || r.kind != rowSession {
+		return nil, nil, ""
+	}
+	f := m.st.Fleets[r.fleetName]
+	return f, r.instance, r.sessionName
+}
+
+// ===========================================
+// Normal Mode Update
+// ===========================================
+
+// updateNormal handles keyboard input in the default fleet list mode.
+func (fp *fleetPage) updateNormal(m *model, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		m.message = ""
@@ -28,23 +277,21 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c", "ctrl+q":
 			m.quitting = true
-			return m, tea.Quit
+			return tea.Quit
 
 		case "up", "k":
-			m.moveCursor(-1)
+			fp.moveCursor(-1)
 
 		case "down", "j":
-			m.moveCursor(1)
+			fp.moveCursor(1)
 
 		case " ", "tab":
-			// Toggle collapse on fleet headers, expand/collapse instances,
-			// or act like enter on session/new-session/settings rows.
-			if r := m.currentRow(); r != nil {
+			if r := fp.currentRow(); r != nil {
 				switch r.kind {
 				case rowFleetHeader:
 					name := r.fleetName
-					m.collapsed[name] = !m.collapsed[name]
-					m.buildRows()
+					fp.collapsed[name] = !fp.collapsed[name]
+					fp.buildRows(m)
 				case rowInstance:
 					if r.instance == nil {
 						break
@@ -56,27 +303,24 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 					instKey := r.fleetName + "/" + r.instance.Name
 					if m.expandedInstances[instKey] {
 						delete(m.expandedInstances, instKey)
-						m.buildRows()
+						fp.buildRows(m)
 					} else {
 						m.expandedInstances[instKey] = true
-						m.buildRows()
+						fp.buildRows(m)
 						b := m.instanceBackend(r.instance)
-						return m, listSessionsCmd(b, r.instance.WorkspaceDir, instKey)
+						return listSessionsCmd(b, r.instance.WorkspaceDir, instKey)
 					}
 				case rowSession, rowNewSession, rowSettings:
-					// Delegate to the enter/e handler for these row types.
-					return m.handleEnter()
+					return fp.handleEnter(m)
 				}
 			}
 
 		case "r":
-			if r := m.currentRow(); r != nil && r.kind == rowSession {
-				m.mode = viewRenameSession
-				m.dialogFleet = r.fleetName
-				m.dialogInst = r.instance.Name
-				m.dialogSession = r.sessionName
-				// Show just the group ID (display name) for editing,
-				// not the full internal session name.
+			if r := fp.currentRow(); r != nil && r.kind == rowSession {
+				fp.mode = viewRenameSession
+				fp.dialogFleet = r.fleetName
+				fp.dialogInst = r.instance.Name
+				fp.dialogSession = r.sessionName
 				displayName := r.sessionName
 				if r.instance != nil {
 					sanitized := SanitizeSessionName(r.instance.Name)
@@ -84,17 +328,18 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 						displayName = gid
 					}
 				}
-				m.textInput.SetValue(displayName)
-				m.textInput.Placeholder = "new-session-name"
-				m.textInput.CharLimit = 64
-				m.textInput.Focus()
-				return m, m.textInput.Cursor.BlinkCmd()
+				fp.textInput.SetValue(displayName)
+				fp.textInput.Placeholder = "new-session-name"
+				fp.textInput.CharLimit = 64
+				fp.textInput.Focus()
+				return fp.textInput.Cursor.BlinkCmd()
 			}
 			m.reload()
+			fp.buildRows(m)
 			m.message = "Refreshed"
 
 		case "s":
-			r := m.currentRow()
+			r := fp.currentRow()
 			if r == nil || r.kind != rowInstance || r.instance == nil {
 				m.message = "Select an instance"
 				break
@@ -110,49 +355,46 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 
-			// Set transitional status and save immediately
 			if r.instance.Status == fleet.StatusRunning {
 				r.instance.Status = fleet.StatusStopping
 			} else if r.instance.Status == fleet.StatusStopped {
 				r.instance.Status = fleet.StatusStarting
 			}
 			_ = state.Save(m.st)
-			m.buildRows()
+			fp.buildRows(m)
 
 			fleetName, instName := r.fleetName, r.instance.Name
-			return m, toggleInstanceCmd(fleetName, instName)
+			return toggleInstanceCmd(fleetName, instName)
 
 		case "d":
-			r := m.currentRow()
+			r := fp.currentRow()
 			if r == nil || r.kind == rowSettings || r.kind == rowNewSession {
 				break
 			}
 			if r.kind == rowSession {
-				// Session-level delete
-				m.dialogFleet = r.fleetName
-				m.dialogInst = r.instance.Name
-				m.dialogSession = r.sessionName
-				m.dialogGroupID = r.groupID
-				m.mode = viewConfirmDeleteSession
+				fp.dialogFleet = r.fleetName
+				fp.dialogInst = r.instance.Name
+				fp.dialogSession = r.sessionName
+				fp.dialogGroupID = r.groupID
+				fp.mode = viewConfirmDeleteSession
 				break
 			}
-			m.dialogFleet = r.fleetName
+			fp.dialogFleet = r.fleetName
 			if r.kind == rowFleetHeader {
-				m.dialogInst = "" // empty means fleet-level delete
+				fp.dialogInst = ""
 			} else if r.instance != nil {
-				m.dialogInst = r.instance.Name
+				fp.dialogInst = r.instance.Name
 			} else {
 				break
 			}
-			m.mode = viewConfirmDelete
+			fp.mode = viewConfirmDelete
 
 		case "a":
-			r := m.currentRow()
+			r := fp.currentRow()
 			if r == nil {
 				m.message = "No fleet selected"
 				break
 			}
-			// On instance or session rows, create a new session instead
 			if r.kind == rowInstance || r.kind == rowSession || r.kind == rowNewSession {
 				inst := r.instance
 				if inst == nil {
@@ -162,65 +404,62 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.message = "Instance must be running to create sessions"
 					break
 				}
-				m.mode = viewCreateSession
-				m.dialogFleet = r.fleetName
-				m.dialogInst = inst.Name
-				m.textInput.SetValue("")
-				m.textInput.Placeholder = "session-name (or empty for auto)"
-				m.textInput.CharLimit = 64
-				m.textInput.Focus()
-				return m, m.textInput.Cursor.BlinkCmd()
+				fp.mode = viewCreateSession
+				fp.dialogFleet = r.fleetName
+				fp.dialogInst = inst.Name
+				fp.textInput.SetValue("")
+				fp.textInput.Placeholder = "session-name (or empty for auto)"
+				fp.textInput.CharLimit = 64
+				fp.textInput.Focus()
+				return fp.textInput.Cursor.BlinkCmd()
 			}
-			// Fleet header or settings row — add instance
-			fleetName := m.currentFleetName()
+			fleetName := fp.currentFleetName()
 			if fleetName == "" {
 				m.message = "No fleet selected"
 				break
 			}
 			m.toolStatus = deps.CheckTools()
-			available := m.availableBackendTypes()
+			available := fp.availableBackendTypes(m)
 			if len(available) == 0 {
 				m.message = "No deploy targets available – install devcontainer or coder CLI"
 				break
 			}
-			m.mode = viewAddInstance
-			m.dialogFleet = fleetName
-			m.dialogBackend = available[0]
+			fp.mode = viewAddInstance
+			fp.dialogFleet = fleetName
+			fp.dialogBackend = available[0]
 			if m.cfg != nil {
 				preferred := fleet.BackendType(m.cfg.DefaultBackend)
 				for _, bt := range available {
 					if bt == preferred {
-						m.dialogBackend = preferred
+						fp.dialogBackend = preferred
 						break
 					}
 				}
 			}
-			m.textInput.SetValue("")
-			m.textInput.Placeholder = "instance-name"
-			m.textInput.CharLimit = 64
-			m.textInput.Focus()
-			return m, m.textInput.Cursor.BlinkCmd()
+			fp.textInput.SetValue("")
+			fp.textInput.Placeholder = "instance-name"
+			fp.textInput.CharLimit = 64
+			fp.textInput.Focus()
+			return fp.textInput.Cursor.BlinkCmd()
 
 		case "n":
-			m.mode = viewAddFleet
-			m.textInput.SetValue("")
-			m.textInput.Placeholder = "git@github.com:org/repo.git"
-			m.textInput.CharLimit = 256
-			m.textInput.Focus()
-			return m, m.textInput.Cursor.BlinkCmd()
+			fp.mode = viewAddFleet
+			fp.textInput.SetValue("")
+			fp.textInput.Placeholder = "git@github.com:org/repo.git"
+			fp.textInput.CharLimit = 256
+			fp.textInput.Focus()
+			return fp.textInput.Cursor.BlinkCmd()
 
 		case "pgup", "pgdown":
-			// Cycle session groups: Ctrl+PageUp/Down on the outer tmux
-			// sends PageUp/PageDown to the TUI pane.
-			if m.inHostTmux && m.splitInstance != "" && m.activeGroupID != "" {
-				return m.cycleSessionGroup(msg.String() == "pgup")
+			if m.inHostTmux && fp.splitInstance != "" && fp.activeGroupID != "" {
+				return fp.cycleSessionGroup(m, msg.String() == "pgup")
 			}
 
 		case "enter", "e":
-			return m.handleEnter()
+			return fp.handleEnter(m)
 
 		case "o":
-			_, inst := m.selectedInstance()
+			_, inst := fp.selectedInstance(m)
 			if inst == nil {
 				m.message = "Select an instance"
 				break
@@ -234,12 +473,12 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "c":
-			_, inst := m.selectedInstance()
+			_, inst := fp.selectedInstance(m)
 			if inst == nil {
 				m.message = "Select an instance"
 				break
 			}
-			r := m.rows[m.cursor]
+			r := fp.rows[fp.cursor]
 			var codeCmd *exec.Cmd
 			switch inst.Backend {
 			case fleet.BackendCoder:
@@ -254,41 +493,43 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				codeCmd = exec.Command("code", "--folder-uri", uri)
 			}
-			if err := codeCmd.Run(); err != nil {
-				m.message = fmt.Sprintf("VS Code error: %v", err)
-			} else {
-				m.message = fmt.Sprintf("Opened VS Code for %s", inst.Name)
+			if codeCmd != nil {
+				if err := codeCmd.Run(); err != nil {
+					m.message = fmt.Sprintf("VS Code error: %v", err)
+				} else {
+					m.message = fmt.Sprintf("Opened VS Code for %s", inst.Name)
+				}
 			}
 
 		case "t":
-			_, inst := m.selectedInstance()
+			_, inst := fp.selectedInstance(m)
 			if inst == nil {
 				m.message = "Select an instance"
 				break
 			}
-			m.mode = viewTagInstance
-			m.dialogFleet = m.currentFleetName()
-			m.dialogInst = inst.Name
-			m.textInput.SetValue(inst.Tag)
-			m.textInput.Placeholder = "short description"
-			m.textInput.CharLimit = 128
-			m.textInput.Focus()
-			return m, m.textInput.Cursor.BlinkCmd()
+			fp.mode = viewTagInstance
+			fp.dialogFleet = fp.currentFleetName()
+			fp.dialogInst = inst.Name
+			fp.textInput.SetValue(inst.Tag)
+			fp.textInput.Placeholder = "short description"
+			fp.textInput.CharLimit = 128
+			fp.textInput.Focus()
+			return fp.textInput.Cursor.BlinkCmd()
 
 		case "l":
-			_, inst := m.selectedInstance()
+			_, inst := fp.selectedInstance(m)
 			if inst == nil {
 				m.message = "Select an instance"
 				break
 			}
-			r := m.rows[m.cursor]
-			return m, tea.ExecProcess(
+			r := fp.rows[fp.cursor]
+			return tea.ExecProcess(
 				logsCommand(m.instanceBackend(inst), r.fleetName, inst),
 				func(err error) tea.Msg { return execDoneMsg{err} },
 			)
 
 		case "f":
-			_, inst := m.selectedInstance()
+			_, inst := fp.selectedInstance(m)
 			if inst == nil {
 				m.message = "Select an instance"
 				break
@@ -297,111 +538,102 @@ func (m model) updateNormal(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = fmt.Sprintf("Instance must be running to port-forward (status: %s)", inst.Status)
 				break
 			}
-			m.mode = viewPortForward
-			m.dialogFleet = m.currentFleetName()
-			m.dialogInst = inst.Name
-			m.pfContainerID = inst.ContainerID
-			m.pfCursor = 0
-			m.textInput.SetValue("")
-			m.textInput.Placeholder = "local:remote (e.g. 8080:80)"
-			m.textInput.CharLimit = 11
-			m.textInput.Focus()
-			return m, m.textInput.Cursor.BlinkCmd()
+			fp.mode = viewPortForward
+			fp.dialogFleet = fp.currentFleetName()
+			fp.dialogInst = inst.Name
+			fp.pfContainerID = inst.ContainerID
+			fp.pfCursor = 0
+			fp.textInput.SetValue("")
+			fp.textInput.Placeholder = "local:remote (e.g. 8080:80)"
+			fp.textInput.CharLimit = 11
+			fp.textInput.Focus()
+			return fp.textInput.Cursor.BlinkCmd()
 		}
 
 	case execDoneMsg:
 		m.reload()
+		fp.buildRows(m)
 		if msg.err != nil {
 			m.message = fmt.Sprintf("Command error: %v", msg.err)
 		}
 	}
 
-	return m, nil
+	return nil
 }
 
+// ===========================================
+// Enter Handler
+// ===========================================
+
 // handleEnter executes the enter/e/space action for the current row.
-// Extracted so that both "enter"/"e" and "space" (on session/new-session/
-// settings rows) share the same logic.
-func (m model) handleEnter() (tea.Model, tea.Cmd) {
-	r := m.currentRow()
+func (fp *fleetPage) handleEnter(m *model) tea.Cmd {
+	r := fp.currentRow()
 	if r == nil {
-		return m, nil
+		return nil
 	}
 
 	switch r.kind {
 	case rowSettings:
-		m.page = pageSettings
 		m.toolStatus = deps.CheckTools()
-		return m, nil
+		return m.ChangeRoute(routeSettings)
 
 	case rowFleetHeader:
 		name := r.fleetName
-		m.collapsed[name] = !m.collapsed[name]
-		m.buildRows()
+		fp.collapsed[name] = !fp.collapsed[name]
+		fp.buildRows(m)
 
 	case rowNewSession:
-		// Open dialog to create a new session
 		inst := r.instance
-		m.mode = viewCreateSession
-		m.dialogFleet = r.fleetName
-		m.dialogInst = inst.Name
-		m.textInput.SetValue("")
-		m.textInput.Placeholder = "session-name (or empty for auto)"
-		m.textInput.CharLimit = 64
-		m.textInput.Focus()
-		return m, m.textInput.Cursor.BlinkCmd()
+		fp.mode = viewCreateSession
+		fp.dialogFleet = r.fleetName
+		fp.dialogInst = inst.Name
+		fp.textInput.SetValue("")
+		fp.textInput.Placeholder = "session-name (or empty for auto)"
+		fp.textInput.CharLimit = 64
+		fp.textInput.Focus()
+		return fp.textInput.Cursor.BlinkCmd()
 
 	case rowSession:
-		// Connect to a specific named tmux session (or session group).
 		inst := r.instance
 		sessionName := r.sessionName
 		groupID := r.groupID
-		// Record as last active so enter on the instance row reopens it.
 		sessInstKey := r.fleetName + "/" + inst.Name
 		m.lastActive[sessInstKey] = lastSession{sessionName: sessionName, groupID: groupID}
 		if m.inHostTmux {
-			if m.splitPaneID != "" && !splitOpen() {
+			if fp.splitPaneID != "" && !splitOpen() {
 				unbindHostSplitKeys()
-				m.splitPaneID = ""
-				m.splitFleet = ""
-				m.splitInstance = ""
-				m.splitSession = ""
-				m.activeGroupID = ""
+				fp.splitPaneID = ""
+				fp.splitFleet = ""
+				fp.splitInstance = ""
+				fp.splitSession = ""
+				fp.activeGroupID = ""
 			}
-			// If this is a group row and the group is active, toggle off.
-			if m.splitPaneID != "" && m.splitInstance == inst.Name && groupID != "" && groupID == m.activeGroupID {
-				// Save current group layout before killing.
-				m.saveCurrentGroupLayout()
+			if fp.splitPaneID != "" && fp.splitInstance == inst.Name && groupID != "" && groupID == fp.activeGroupID {
+				fp.saveCurrentGroupLayout()
 				killAllSplitPanes()
 				unbindHostSplitKeys()
-				m.splitPaneID = ""
-				m.splitFleet = ""
-				m.splitInstance = ""
-				m.splitSession = ""
-				m.activeGroupID = ""
-				return m, nil
+				fp.splitPaneID = ""
+				fp.splitFleet = ""
+				fp.splitInstance = ""
+				fp.splitSession = ""
+				fp.activeGroupID = ""
+				return nil
 			}
-			// If a different group is active, save its layout first.
-			if m.splitPaneID != "" && m.activeGroupID != "" {
-				m.saveCurrentGroupLayout()
+			if fp.splitPaneID != "" && fp.activeGroupID != "" {
+				fp.saveCurrentGroupLayout()
 				killAllSplitPanes()
 			}
-			// Set activeGroupID immediately so the indicator
-			// updates without waiting for the async command.
-			m.activeGroupID = groupID
-			// Restore the group: query the inner tmux for all
-			// sessions matching the group prefix and recreate panes.
+			fp.activeGroupID = groupID
 			if groupID != "" && isGroupedSession(SanitizeSessionName(inst.Name), sessionName) {
-				return m, m.restoreGroupCmd(r.fleetName, inst, groupID)
+				return fp.restoreGroupCmd(m, r.fleetName, inst, groupID)
 			}
-			// Ungrouped/legacy session — open a single pane.
 			cols, rows := tmuxWindowSize()
 			cols = cols * 70 / 100
 			cmd := m.instanceBackend(inst).ExecCommand(
 				inst.WorkspaceDir,
 				ShellCommandForSession(m.cfg, sessionName, cols, rows, true),
 			)
-			return m, splitPaneCmd(m.splitPaneID, r.fleetName, inst.Name, sessionName, groupID, cmd)
+			return splitPaneCmd(fp.splitPaneID, r.fleetName, inst.Name, sessionName, groupID, cmd)
 		}
 		cmd := m.instanceBackend(inst).ExecCommand(
 			inst.WorkspaceDir,
@@ -409,50 +641,41 @@ func (m model) handleEnter() (tea.Model, tea.Cmd) {
 		)
 		banner := renderGradient(nameToBanner(inst.Name))
 		banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
-		return m, tea.ExecProcess(
+		return tea.ExecProcess(
 			execWithBannerCmd(banner, cmd),
 			func(err error) tea.Msg { return execDoneMsg{err} },
 		)
 
 	case rowInstance:
-		_, inst := m.selectedInstance()
+		_, inst := fp.selectedInstance(m)
 		if inst == nil {
 			break
 		}
 		instFleetName := r.fleetName
 		instKey := instFleetName + "/" + inst.Name
-		// Split pane mode: open shell in a right-side tmux pane
-		// instead of suspending the TUI. Toggle: if the same
-		// instance is already open, close the pane.
 		if m.inHostTmux {
-			// Clear stale pane state if the split is no longer visible
-			// (e.g. session killed or detached).
-			if m.splitPaneID != "" && !splitOpen() {
+			if fp.splitPaneID != "" && !splitOpen() {
 				unbindHostSplitKeys()
-				m.splitPaneID = ""
-				m.splitFleet = ""
-				m.splitInstance = ""
-				m.splitSession = ""
-				m.activeGroupID = ""
+				fp.splitPaneID = ""
+				fp.splitFleet = ""
+				fp.splitInstance = ""
+				fp.splitSession = ""
+				fp.activeGroupID = ""
 			}
-			// Toggle: if the same instance is already open, close it.
-			if m.splitPaneID != "" && m.splitInstance == inst.Name {
-				m.saveCurrentGroupLayout()
+			if fp.splitPaneID != "" && fp.splitInstance == inst.Name {
+				fp.saveCurrentGroupLayout()
 				killAllSplitPanes()
 				unbindHostSplitKeys()
-				m.splitPaneID = ""
-				m.splitFleet = ""
-				m.splitInstance = ""
-				m.splitSession = ""
-				m.activeGroupID = ""
-				return m, nil
+				fp.splitPaneID = ""
+				fp.splitFleet = ""
+				fp.splitInstance = ""
+				fp.splitSession = ""
+				fp.activeGroupID = ""
+				return nil
 			}
-			return m, m.openInstanceSession(instFleetName, inst)
+			return fp.openInstanceSession(m, instFleetName, inst)
 		}
 
-		// Non-split: reuse last active session, fall back to
-		// default session name. tmux new-session -A creates or
-		// attaches automatically.
 		sessionName := SanitizeSessionName(inst.Name)
 		if last, ok := m.lastActive[instKey]; ok {
 			sessionName = last.sessionName
@@ -460,33 +683,35 @@ func (m model) handleEnter() (tea.Model, tea.Cmd) {
 		m.lastActive[instKey] = lastSession{sessionName: sessionName}
 
 		cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, ShellCommandForSession(m.cfg, sessionName, m.width, m.height, false))
-
 		banner := renderGradient(nameToBanner(inst.Name))
 		banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
-		return m, tea.ExecProcess(
+		return tea.ExecProcess(
 			execWithBannerCmd(banner, cmd),
 			func(err error) tea.Msg { return execDoneMsg{err} },
 		)
 	}
 
-	return m, nil
+	return nil
 }
+
+// ===========================================
+// Help Keys
+// ===========================================
 
 // contextualHelpKeys returns the help bar entries relevant to the
 // currently selected row and its state.
-func (m model) contextualHelpKeys() []string {
-	r := m.currentRow()
+func (fp *fleetPage) contextualHelpKeys(m *model) []string {
+	r := fp.currentRow()
 	if r == nil {
 		return []string{"n: new fleet", "q: quit"}
 	}
 
 	switch r.kind {
 	case rowFleetHeader:
-		keys := []string{
+		return []string{
 			"j/k: navigate", "space: expand/collapse", "enter/e: toggle",
 			"a: add instance", "n: new fleet", "d: delete fleet", "r: refresh", "q: quit",
 		}
-		return keys
 
 	case rowInstance:
 		keys := []string{"j/k: navigate"}
@@ -519,7 +744,7 @@ func (m model) contextualHelpKeys() []string {
 			"j/k: navigate", "space/enter/e: connect",
 			"a: new session", "d: delete session", "r: rename", "q: quit",
 		}
-		if m.inHostTmux && m.splitInstance != "" && m.activeGroupID != "" {
+		if m.inHostTmux && fp.splitInstance != "" && fp.activeGroupID != "" {
 			keys = append(keys[:len(keys)-1], "pgup/pgdn: cycle groups", "q: quit")
 		}
 		return keys
@@ -540,7 +765,12 @@ func (m model) contextualHelpKeys() []string {
 	return []string{"q: quit"}
 }
 
-func (m model) viewFleetList() string {
+// ===========================================
+// View
+// ===========================================
+
+// viewFleetList renders the fleet list page.
+func (fp *fleetPage) viewFleetList(m *model) string {
 	var b strings.Builder
 
 	logo := "" +
@@ -562,7 +792,6 @@ func (m model) viewFleetList() string {
 		b.WriteString("\n")
 	}
 
-	// Build the list content
 	var listContent strings.Builder
 
 	if m.st == nil || len(m.st.Fleets) == 0 {
@@ -570,8 +799,8 @@ func (m model) viewFleetList() string {
 		listContent.WriteString("\n")
 	}
 
-	for i, r := range m.rows {
-		isSelected := i == m.cursor
+	for i, r := range fp.rows {
+		isSelected := i == fp.cursor
 		cursor := "  "
 		if isSelected {
 			cursor = cursorStyle.Render("> ")
@@ -580,7 +809,7 @@ func (m model) viewFleetList() string {
 		if r.kind == rowFleetHeader {
 			arrow := "▼ "
 			style := fleetExpandedStyle
-			if m.collapsed[r.fleetName] {
+			if fp.collapsed[r.fleetName] {
 				arrow = "▶ "
 				style = fleetCollapsedStyle
 			}
@@ -607,14 +836,11 @@ func (m model) viewFleetList() string {
 			}
 			listContent.WriteString("\n")
 		} else if r.kind == rowSession {
-			// Session row: indented under its parent instance.
-			// Grouped sessions show the group ID and pane count.
 			icon := "○"
 			style := sessionStyle
-			// Use pending group during debounce, otherwise active group.
-			displayGroupID := m.activeGroupID
-			if m.pendingGroupID != "" {
-				displayGroupID = m.pendingGroupID
+			displayGroupID := fp.activeGroupID
+			if fp.pendingGroupID != "" {
+				displayGroupID = fp.pendingGroupID
 			}
 			if r.groupID != "" && r.groupID == displayGroupID {
 				icon = "●"
@@ -636,7 +862,6 @@ func (m model) viewFleetList() string {
 			listContent.WriteString("\n")
 
 		} else if r.kind == rowNewSession {
-			// "+" row for creating new sessions
 			label := "+ new session"
 			if isSelected {
 				listContent.WriteString(fmt.Sprintf("%s      %s", cursor, selectedStyle.Render(label)))
@@ -656,7 +881,6 @@ func (m model) viewFleetList() string {
 				status = renderStatus(inst.Status)
 			}
 
-			// Show expand/collapse arrow for running instances
 			instKey := r.fleetName + "/" + inst.Name
 			arrow := "  "
 			if inst.Status == fleet.StatusRunning {
@@ -667,13 +891,12 @@ func (m model) viewFleetList() string {
 				}
 			}
 
-			// Pad name to fixed width before styling to keep columns aligned
 			paddedName := fmt.Sprintf("%s%-22s", arrow, inst.Name)
 			if isSelected {
 				paddedName = selectedStyle.Render(paddedName)
 			}
 
-			backendIcon := "⬡" // devcontainer
+			backendIcon := "⬡"
 			switch inst.Backend {
 			case fleet.BackendCoder:
 				backendIcon = "⌨"
@@ -693,7 +916,6 @@ func (m model) viewFleetList() string {
 					cursor, paddedName, status, branchItem,
 				)
 			} else {
-				// Show agent tool indicator
 				agentStr := ""
 				if inst.Status == fleet.StatusRunning && m.activity != nil {
 					tool := m.activity.Tool(inst.ContainerID)
@@ -708,7 +930,6 @@ func (m model) viewFleetList() string {
 					}
 				}
 
-				// Show CPU/memory stats
 				statsStr := ""
 				if s, ok := m.stats[inst.ContainerID]; ok {
 					statsStr = dimStyle.Render(fmt.Sprintf("  %4.0f mcpu  %6.1f MB", s.CPUMillicores, s.MemoryMB))
@@ -718,7 +939,6 @@ func (m model) viewFleetList() string {
 					cursor, paddedName, status, agentStr, statsStr, branchItem,
 				)
 
-				// Show active port forwards
 				pfKey := r.fleetName + "/" + inst.Name
 				if pfLabel := m.portForwards.FormatLabels(pfKey); pfLabel != "" {
 					line += portForwardStyle.Render("  ⇄ " + pfLabel)
@@ -729,8 +949,6 @@ func (m model) viewFleetList() string {
 				}
 			}
 
-			// Truncate with ellipsis if the line exceeds the available
-			// width (border + padding = 4 characters).
 			if maxW := m.width - 4; maxW > 0 && lipgloss.Width(line) > maxW {
 				line = ansi.Truncate(line, maxW-1, "…")
 			}
@@ -748,17 +966,14 @@ func (m model) viewFleetList() string {
 		}
 	}
 
-	// Wrap in a bordered box
 	boxContent := strings.TrimRight(listContent.String(), "\n")
 	box := listBox
 	if m.width > 0 {
-		// Account for border (1 char each side) and padding (1 char each side)
 		box = box.Width(m.width - 2)
 	}
 	b.WriteString(box.Render(boxContent))
 	b.WriteString("\n")
 
-	// Totals
 	var totalCPU float64
 	var totalMem float64
 	for _, s := range m.stats {
@@ -771,20 +986,20 @@ func (m model) viewFleetList() string {
 	}
 
 	// Dialog overlay
-	switch m.mode {
+	switch fp.mode {
 	case viewConfirmDelete:
 		b.WriteString("\n")
 		var title, body string
-		if m.dialogInst == "" {
+		if fp.dialogInst == "" {
 			count := 0
-			if f, ok := m.st.Fleets[m.dialogFleet]; ok {
+			if f, ok := m.st.Fleets[fp.dialogFleet]; ok {
 				count = len(f.Instances)
 			}
 			title = "Delete fleet"
-			body = fmt.Sprintf("Remove fleet %s and all %d instance(s)? This will stop all containers and delete all workspaces.", m.dialogFleet, count)
+			body = fmt.Sprintf("Remove fleet %s and all %d instance(s)? This will stop all containers and delete all workspaces.", fp.dialogFleet, count)
 		} else {
 			title = "Delete instance"
-			body = fmt.Sprintf("Remove %s/%s? This will stop the container and delete the workspace.", m.dialogFleet, m.dialogInst)
+			body = fmt.Sprintf("Remove %s/%s? This will stop the container and delete the workspace.", fp.dialogFleet, fp.dialogInst)
 		}
 		dialog := fmt.Sprintf(
 			"%s\n\n%s\n\n%s",
@@ -798,7 +1013,7 @@ func (m model) viewFleetList() string {
 	case viewConfirmDeleteFleetWarn:
 		b.WriteString("\n")
 		count := 0
-		if f, ok := m.st.Fleets[m.dialogFleet]; ok {
+		if f, ok := m.st.Fleets[fp.dialogFleet]; ok {
 			count = len(f.Instances)
 		}
 		warnDialog := fmt.Sprintf(
@@ -806,7 +1021,7 @@ func (m model) viewFleetList() string {
 			warnBanner.Render("  !! WARNING !!  "),
 			dialogLabel.Render(fmt.Sprintf(
 				"You are about to destroy fleet %s with %d running instance(s).\nAll containers will be stopped and all workspace data will be permanently deleted.",
-				m.dialogFleet, count,
+				fp.dialogFleet, count,
 			)),
 			errorStyle.Render("This action cannot be undone."),
 			dialogHint.Render("[y] Confirm destroy  [n] Cancel"),
@@ -816,21 +1031,21 @@ func (m model) viewFleetList() string {
 
 	case viewAddInstance:
 		b.WriteString("\n")
-		bt := m.dialogBackend
+		bt := fp.dialogBackend
 		if bt == "" {
 			bt = fleet.BackendDevcontainer
 		}
 		hint := "[enter] Create  [esc] Cancel"
-		if len(m.availableBackendTypes()) > 1 {
+		if len(fp.availableBackendTypes(m)) > 1 {
 			hint = "[enter] Create  [tab] Change deploy target  [esc] Cancel"
 		}
 		dialog := fmt.Sprintf(
 			"%s\n\n%s %s\n%s %s\n%s [ %s ]\n\n%s",
 			dialogTitle.Render("New instance"),
 			dialogLabel.Render("Fleet:  "),
-			fleetExpandedStyle.Render(m.dialogFleet),
+			fleetExpandedStyle.Render(fp.dialogFleet),
 			dialogLabel.Render("Name:   "),
-			m.textInput.View(),
+			fp.textInput.View(),
 			dialogLabel.Render("Deploy: "),
 			backendTypeLabel(bt),
 			dialogHint.Render(hint),
@@ -844,7 +1059,7 @@ func (m model) viewFleetList() string {
 			"%s\n\n%s %s\n\n%s",
 			dialogTitle.Render("New fleet"),
 			dialogLabel.Render("Repo:"),
-			m.textInput.View(),
+			fp.textInput.View(),
 			dialogHint.Render("[enter] Add  [esc] Cancel"),
 		)
 		b.WriteString(dialogBox.Render(dialog))
@@ -856,9 +1071,9 @@ func (m model) viewFleetList() string {
 			"%s\n\n%s %s\n%s %s\n\n%s",
 			dialogTitle.Render("Tag instance"),
 			dialogLabel.Render("Instance:"),
-			fleetExpandedStyle.Render(m.dialogFleet+"/"+m.dialogInst),
+			fleetExpandedStyle.Render(fp.dialogFleet+"/"+fp.dialogInst),
 			dialogLabel.Render("Tag:     "),
-			m.textInput.View(),
+			fp.textInput.View(),
 			dialogHint.Render("[enter] Save  [esc] Cancel"),
 		)
 		b.WriteString(dialogBox.Render(dialog))
@@ -866,7 +1081,7 @@ func (m model) viewFleetList() string {
 
 	case viewPortForward:
 		b.WriteString("\n")
-		pfKey := m.dialogFleet + "/" + m.dialogInst
+		pfKey := fp.dialogFleet + "/" + fp.dialogInst
 		fwds := m.portForwards.List(pfKey)
 
 		var fwdLines strings.Builder
@@ -874,12 +1089,12 @@ func (m model) viewFleetList() string {
 			fwdLines.WriteString(dimStyle.Render("  No active forwards"))
 		} else {
 			for i, f := range fwds {
-				cursor := "  "
-				if i == m.pfCursor {
-					cursor = cursorStyle.Render("> ")
+				pfCursor := "  "
+				if i == fp.pfCursor {
+					pfCursor = cursorStyle.Render("> ")
 				}
 				fwdLines.WriteString(fmt.Sprintf("%s%s\n",
-					cursor,
+					pfCursor,
 					portForwardStyle.Render(f.Label()),
 				))
 			}
@@ -889,10 +1104,10 @@ func (m model) viewFleetList() string {
 			"%s\n\n%s %s\n\n%s\n\n%s %s\n\n%s",
 			dialogTitle.Render("Port forwards"),
 			dialogLabel.Render("Instance:"),
-			fleetExpandedStyle.Render(m.dialogFleet+"/"+m.dialogInst),
+			fleetExpandedStyle.Render(fp.dialogFleet+"/"+fp.dialogInst),
 			strings.TrimRight(fwdLines.String(), "\n"),
 			dialogLabel.Render("Add:"),
-			m.textInput.View(),
+			fp.textInput.View(),
 			dialogHint.Render("[enter] Add  [d] Delete selected  [j/k] Navigate  [esc] Close"),
 		)
 		b.WriteString(portForwardBox.Render(dialog))
@@ -948,9 +1163,9 @@ func (m model) viewFleetList() string {
 			"%s\n\n%s %s\n%s %s\n\n%s",
 			dialogTitle.Render("New session"),
 			dialogLabel.Render("Instance:"),
-			fleetExpandedStyle.Render(m.dialogFleet+"/"+m.dialogInst),
+			fleetExpandedStyle.Render(fp.dialogFleet+"/"+fp.dialogInst),
 			dialogLabel.Render("Name:    "),
-			m.textInput.View(),
+			fp.textInput.View(),
 			dialogHint.Render("[enter] Create (empty for auto-name)  [esc] Cancel"),
 		)
 		b.WriteString(dialogBox.Render(dialog))
@@ -962,11 +1177,11 @@ func (m model) viewFleetList() string {
 			"%s\n\n%s %s\n%s %s\n%s %s\n\n%s",
 			dialogTitle.Render("Rename session"),
 			dialogLabel.Render("Instance:"),
-			fleetExpandedStyle.Render(m.dialogFleet+"/"+m.dialogInst),
+			fleetExpandedStyle.Render(fp.dialogFleet+"/"+fp.dialogInst),
 			dialogLabel.Render("Current: "),
-			sessionStyle.Render(m.dialogSession),
+			sessionStyle.Render(fp.dialogSession),
 			dialogLabel.Render("New:     "),
-			m.textInput.View(),
+			fp.textInput.View(),
 			dialogHint.Render("[enter] Rename  [esc] Cancel"),
 		)
 		b.WriteString(dialogBox.Render(dialog))
@@ -974,47 +1189,46 @@ func (m model) viewFleetList() string {
 
 	case viewConfirmDeleteSession:
 		b.WriteString("\n")
-		displayName := m.dialogSession
-		if m.dialogGroupID != "" {
-			displayName = m.dialogGroupID
+		displayName := fp.dialogSession
+		if fp.dialogGroupID != "" {
+			displayName = fp.dialogGroupID
 		}
 		dialog := fmt.Sprintf(
 			"%s\n\n%s\n\n%s",
 			dialogTitle.Render("Delete session"),
 			dialogLabel.Render(fmt.Sprintf("Remove session %s from %s/%s?",
-				displayName, m.dialogFleet, m.dialogInst)),
+				displayName, fp.dialogFleet, fp.dialogInst)),
 			dialogHint.Render("[y] Yes  [n] No"),
 		)
 		b.WriteString(dialogBox.Render(dialog))
 		b.WriteString("\n")
 	}
 
-	// Message
 	if m.message != "" {
 		b.WriteString(messageStyle.Render(m.message))
 		b.WriteString("\n")
 	}
 
 	if m.cfg == nil || m.cfg.GeneralSettings.ShowHelpTextEnabled() {
-		b.WriteString(renderHelp(m.width, m.contextualHelpKeys()))
+		b.WriteString(renderHelp(m.width, fp.contextualHelpKeys(m)))
 	}
 
 	return b.String()
 }
 
+// ===========================================
+// Session Management
+// ===========================================
+
 // openInstanceSession opens a split pane for the given instance, reusing
-// the last active session when available. The priority is:
-//  1. Last active session (from in-memory tracking).
-//  2. First discovered session (if the instance was expanded).
-//  3. Brand new session group (fallback).
-func (m model) openInstanceSession(fleetName string, inst *fleet.Instance) tea.Cmd {
+// the last active session when available.
+func (fp *fleetPage) openInstanceSession(m *model, fleetName string, inst *fleet.Instance) tea.Cmd {
 	instKey := fleetName + "/" + inst.Name
 	sanitized := SanitizeSessionName(inst.Name)
 
-	// 1. Reopen the last active session for this instance.
 	if last, ok := m.lastActive[instKey]; ok {
 		if last.groupID != "" {
-			return m.restoreGroupCmd(fleetName, inst, last.groupID)
+			return fp.restoreGroupCmd(m, fleetName, inst, last.groupID)
 		}
 		cols, rows := tmuxWindowSize()
 		cols = cols * 70 / 100
@@ -1022,17 +1236,16 @@ func (m model) openInstanceSession(fleetName string, inst *fleet.Instance) tea.C
 			inst.WorkspaceDir,
 			ShellCommandForSession(m.cfg, last.sessionName, cols, rows, true),
 		)
-		return splitPaneCmd(m.splitPaneID, fleetName, inst.Name, last.sessionName, last.groupID, cmd)
+		return splitPaneCmd(fp.splitPaneID, fleetName, inst.Name, last.sessionName, last.groupID, cmd)
 	}
 
-	// 2. Use the first discovered session (if available).
 	if disc, ok := m.sessions[instKey]; ok && disc.err == nil && len(disc.sessions) > 0 {
 		groups := groupSessions(sanitized, disc.sessions)
 		if len(groups) > 0 {
 			g := groups[0]
 			rootName := g.Sessions[0].Name
 			if g.GroupID != "" && isGroupedSession(sanitized, rootName) {
-				return m.restoreGroupCmd(fleetName, inst, g.GroupID)
+				return fp.restoreGroupCmd(m, fleetName, inst, g.GroupID)
 			}
 			cols, rows := tmuxWindowSize()
 			cols = cols * 70 / 100
@@ -1040,11 +1253,10 @@ func (m model) openInstanceSession(fleetName string, inst *fleet.Instance) tea.C
 				inst.WorkspaceDir,
 				ShellCommandForSession(m.cfg, rootName, cols, rows, true),
 			)
-			return splitPaneCmd(m.splitPaneID, fleetName, inst.Name, rootName, g.GroupID, cmd)
+			return splitPaneCmd(fp.splitPaneID, fleetName, inst.Name, rootName, g.GroupID, cmd)
 		}
 	}
 
-	// 3. No sessions exist — create a new session group.
 	newGroupID := randomHex(3)
 	sessName := groupSessionName(sanitized, newGroupID)
 	cols, rows := tmuxWindowSize()
@@ -1053,12 +1265,11 @@ func (m model) openInstanceSession(fleetName string, inst *fleet.Instance) tea.C
 		inst.WorkspaceDir,
 		ShellCommandForSession(m.cfg, sessName, cols, rows, true),
 	)
-	return splitPaneCmd(m.splitPaneID, fleetName, inst.Name, sessName, newGroupID, cmd)
+	return splitPaneCmd(fp.splitPaneID, fleetName, inst.Name, sessName, newGroupID, cmd)
 }
 
-// instanceGroups returns the session groups for the given instance name,
-// using the current session discovery data.
-func (m *model) instanceGroups(instanceName string) []sessionGroup {
+// instanceGroups returns the session groups for the given instance name.
+func (fp *fleetPage) instanceGroups(m *model, instanceName string) []sessionGroup {
 	sanitized := SanitizeSessionName(instanceName)
 	for _, disc := range m.sessions {
 		if disc == nil || disc.err != nil {
@@ -1073,19 +1284,16 @@ func (m *model) instanceGroups(instanceName string) []sessionGroup {
 }
 
 // cycleSessionGroup moves the visual selection to the next or previous
-// session group and starts a 500ms debounce timer. The actual pane
-// switch only happens when the timer expires without further input.
-func (m model) cycleSessionGroup(prev bool) (tea.Model, tea.Cmd) {
-	groups := m.instanceGroups(m.splitInstance)
+// session group and starts a debounce timer.
+func (fp *fleetPage) cycleSessionGroup(m *model, prev bool) tea.Cmd {
+	groups := fp.instanceGroups(m, fp.splitInstance)
 	if len(groups) < 2 {
-		return m, nil
+		return nil
 	}
 
-	// Determine which group ID we're cycling FROM: if a pending
-	// selection exists, cycle from that; otherwise from the active group.
-	fromID := m.activeGroupID
-	if m.pendingGroupID != "" {
-		fromID = m.pendingGroupID
+	fromID := fp.activeGroupID
+	if fp.pendingGroupID != "" {
+		fromID = fp.pendingGroupID
 	}
 
 	currentIdx := -1
@@ -1096,10 +1304,9 @@ func (m model) cycleSessionGroup(prev bool) (tea.Model, tea.Cmd) {
 		}
 	}
 	if currentIdx < 0 {
-		return m, nil
+		return nil
 	}
 
-	// Calculate target index with wrapping.
 	targetIdx := currentIdx - 1
 	if !prev {
 		targetIdx = currentIdx + 1
@@ -1110,27 +1317,23 @@ func (m model) cycleSessionGroup(prev bool) (tea.Model, tea.Cmd) {
 		targetIdx = 0
 	}
 
-	// Update the visual selection (pendingGroupID) and bump the
-	// debounce sequence. The timer will only fire the switch if
-	// the sequence hasn't changed.
-	m.pendingGroupID = groups[targetIdx].GroupID
-	m.debounceSeq++
-	return m, groupCycleDebounce(m.debounceSeq)
+	fp.pendingGroupID = groups[targetIdx].GroupID
+	fp.debounceSeq++
+	return groupCycleDebounce(fp.debounceSeq)
 }
 
 // commitGroupCycle performs the actual pane switch after the debounce
-// timer expires. Called from the groupCycleMsg handler.
-func (m model) commitGroupCycle() (tea.Model, tea.Cmd) {
-	if m.pendingGroupID == "" || m.pendingGroupID == m.activeGroupID {
-		m.pendingGroupID = ""
-		return m, nil
+// timer expires.
+func (fp *fleetPage) commitGroupCycle(m *model) tea.Cmd {
+	if fp.pendingGroupID == "" || fp.pendingGroupID == fp.activeGroupID {
+		fp.pendingGroupID = ""
+		return nil
 	}
 
-	// Find the instance.
 	var inst *fleet.Instance
 	for _, f := range m.st.Fleets {
 		for _, i := range f.Instances {
-			if i.Name == m.splitInstance {
+			if i.Name == fp.splitInstance {
 				inst = i
 				break
 			}
@@ -1140,21 +1343,41 @@ func (m model) commitGroupCycle() (tea.Model, tea.Cmd) {
 		}
 	}
 	if inst == nil {
-		m.pendingGroupID = ""
-		return m, nil
+		fp.pendingGroupID = ""
+		return nil
 	}
 
-	targetGroupID := m.pendingGroupID
-	m.pendingGroupID = ""
+	targetGroupID := fp.pendingGroupID
+	fp.pendingGroupID = ""
 
-	// Save current layout BEFORE changing activeGroupID, so it's
-	// stored under the old group ID (not the target).
-	m.saveCurrentGroupLayout()
+	fp.saveCurrentGroupLayout()
 	killAllSplitPanes()
 
-	// Now set activeGroupID so the indicator shows the target group
-	// while restoreGroupCmd is running (~2s).
-	m.activeGroupID = targetGroupID
+	fp.activeGroupID = targetGroupID
 
-	return m, m.restoreGroupCmd(m.splitFleet, inst, targetGroupID)
+	return fp.restoreGroupCmd(m, fp.splitFleet, inst, targetGroupID)
+}
+
+// ===========================================
+// Backend Helpers
+// ===========================================
+
+// availableBackendTypes returns the subset of backend types whose
+// required CLI tool is found on the system.
+func (fp *fleetPage) availableBackendTypes(m *model) []fleet.BackendType {
+	var out []fleet.BackendType
+	for _, bt := range allBackendTypes {
+		bin := backendToolRequirements[bt]
+		if bin == "" {
+			out = append(out, bt)
+			continue
+		}
+		for _, t := range m.toolStatus {
+			if t.Binary == bin && t.Found {
+				out = append(out, bt)
+				break
+			}
+		}
+	}
+	return out
 }

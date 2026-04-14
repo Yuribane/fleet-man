@@ -4,37 +4,57 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/BenjaminBenetti/fleet-man/internal/deps"
 	"github.com/BenjaminBenetti/fleet-man/internal/version"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 // ===========================================
+// Deps Check Page
+// ===========================================
+
+// depsCheckPage holds state for the first-startup dependency check screen.
+type depsCheckPage struct {
+	result []deps.Dependency
+}
+
+// newDepsCheckPage creates a new dependency check page with the
+// given dependency results to display.
+func newDepsCheckPage(result []deps.Dependency) *depsCheckPage {
+	return &depsCheckPage{result: result}
+}
+
+// Init is called when the deps check page becomes active.
+func (dp *depsCheckPage) Init(m *model) tea.Cmd {
+	return nil
+}
+
+// ===========================================
 // Update
 // ===========================================
 
-// updateDepsCheck handles input on the first-startup dependency check screen.
-func (m model) updateDepsCheck(msg tea.Msg) (tea.Model, tea.Cmd) {
+// Update handles input on the first-startup dependency check screen.
+func (dp *depsCheckPage) Update(m *model, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "enter", "esc", " ":
-			m.mode = viewNormal
-			m.depsResult = nil
-			return m, nil
+			dp.result = nil
+			return m.ChangeRoute(routeFleetList)
 		case "q", "ctrl+c", "ctrl+q":
 			m.quitting = true
-			return m, tea.Quit
+			return tea.Quit
 		}
 	}
-	return m, nil
+	return nil
 }
 
 // ===========================================
 // View
 // ===========================================
 
-// viewDepsCheck renders the first-startup dependency check screen.
-func (m model) viewDepsCheck() string {
+// View renders the first-startup dependency check screen.
+func (dp *depsCheckPage) View(m *model) string {
 	var b strings.Builder
 
 	logo := "" +
@@ -52,7 +72,7 @@ func (m model) viewDepsCheck() string {
 	lines = append(lines, dialogTitle.Render("Dependency Check"))
 	lines = append(lines, "")
 
-	for _, d := range m.depsResult {
+	for _, d := range dp.result {
 		var status, note string
 		if d.Found {
 			status = statusRunningStyle.Render("found")

@@ -27,13 +27,15 @@ func TestUpdateNormalStopShortcutStopsRunningInstance(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	inst := &fleet.Instance{Name: "agent-1", Status: fleet.StatusRunning}
-	m := model{
+	fp := newFleetPage()
+	fp.rows = []row{{kind: rowInstance, fleetName: "alpha", instance: inst}}
+	m := &model{
 		st: &state.State{
 			Fleets: map[string]*fleet.Fleet{
 				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
 			},
 		},
-		rows: []row{{kind: rowInstance, fleetName: "alpha", instance: inst}},
+		fleetPage: fp,
 	}
 
 	calledFleet := ""
@@ -50,14 +52,12 @@ func TestUpdateNormalStopShortcutStopsRunningInstance(t *testing.T) {
 	})
 	defer restore()
 
-	_, cmd := m.updateNormal(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	cmd := fp.updateNormal(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 
-	// Instance should be in transitional "stopping" status
 	if inst.Status != fleet.StatusStopping {
 		t.Fatalf("status = %q, want %q", inst.Status, fleet.StatusStopping)
 	}
 
-	// Execute the async command and check the result
 	msg := cmd().(operationDoneMsg)
 	if calledFleet != "alpha" || calledInstance != "agent-1" {
 		t.Fatalf("toggle called with %s/%s, want alpha/agent-1", calledFleet, calledInstance)
@@ -71,13 +71,15 @@ func TestUpdateNormalStopShortcutStartsStoppedInstance(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	inst := &fleet.Instance{Name: "agent-1", Status: fleet.StatusStopped}
-	m := model{
+	fp := newFleetPage()
+	fp.rows = []row{{kind: rowInstance, fleetName: "alpha", instance: inst}}
+	m := &model{
 		st: &state.State{
 			Fleets: map[string]*fleet.Fleet{
 				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
 			},
 		},
-		rows: []row{{kind: rowInstance, fleetName: "alpha", instance: inst}},
+		fleetPage: fp,
 	}
 
 	restore := stubToggleInstance(func(fleetName, instanceName string) (*instanceops.Result, error) {
@@ -90,11 +92,8 @@ func TestUpdateNormalStopShortcutStartsStoppedInstance(t *testing.T) {
 	})
 	defer restore()
 
-	updated, cmd := m.updateNormal(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
-	got := updated.(model)
-	_ = got
+	cmd := fp.updateNormal(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 
-	// Instance should be in transitional "starting" status
 	if inst.Status != fleet.StatusStarting {
 		t.Fatalf("status = %q, want %q", inst.Status, fleet.StatusStarting)
 	}
@@ -106,9 +105,9 @@ func TestUpdateNormalStopShortcutStartsStoppedInstance(t *testing.T) {
 }
 
 func TestUpdateNormalStopShortcutRequiresInstanceRow(t *testing.T) {
-	m := model{
-		rows: []row{{kind: rowFleetHeader, fleetName: "alpha"}},
-	}
+	fp := newFleetPage()
+	fp.rows = []row{{kind: rowFleetHeader, fleetName: "alpha"}}
+	m := &model{fleetPage: fp}
 
 	called := false
 	restore := stubToggleInstance(func(fleetName, instanceName string) (*instanceops.Result, error) {
@@ -117,22 +116,21 @@ func TestUpdateNormalStopShortcutRequiresInstanceRow(t *testing.T) {
 	})
 	defer restore()
 
-	updated, _ := m.updateNormal(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
-	got := updated.(model)
+	fp.updateNormal(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 
 	if called {
 		t.Fatal("toggle should not be called for a fleet header row")
 	}
-	if got.message != "Select an instance" {
-		t.Fatalf("message = %q, want %q", got.message, "Select an instance")
+	if m.message != "Select an instance" {
+		t.Fatalf("message = %q, want %q", m.message, "Select an instance")
 	}
 }
 
 func TestUpdateNormalStopShortcutSkipsCreatingInstance(t *testing.T) {
 	inst := &fleet.Instance{Name: "agent-1", Status: fleet.StatusCreating}
-	m := model{
-		rows: []row{{kind: rowInstance, fleetName: "alpha", instance: inst}},
-	}
+	fp := newFleetPage()
+	fp.rows = []row{{kind: rowInstance, fleetName: "alpha", instance: inst}}
+	m := &model{fleetPage: fp}
 
 	called := false
 	restore := stubToggleInstance(func(fleetName, instanceName string) (*instanceops.Result, error) {
@@ -141,14 +139,13 @@ func TestUpdateNormalStopShortcutSkipsCreatingInstance(t *testing.T) {
 	})
 	defer restore()
 
-	updated, _ := m.updateNormal(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
-	got := updated.(model)
+	fp.updateNormal(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
 
 	if called {
 		t.Fatal("toggle should not be called for a creating instance")
 	}
-	if got.message != "Instance alpha/agent-1 is creating" {
-		t.Fatalf("message = %q, want %q", got.message, "Instance alpha/agent-1 is creating")
+	if m.message != "Instance alpha/agent-1 is creating" {
+		t.Fatalf("message = %q, want %q", m.message, "Instance alpha/agent-1 is creating")
 	}
 }
 
@@ -158,17 +155,21 @@ func TestViewFleetListShowsBranchItemForInstance(t *testing.T) {
 		Status:       fleet.StatusRunning,
 		WorkspaceDir: "/workspace/alpha/agent-1",
 	}
-	m := model{
+	fp := newFleetPage()
+	fp.rows = []row{
+		{kind: rowFleetHeader, fleetName: "alpha"},
+		{kind: rowInstance, fleetName: "alpha", instance: inst},
+		{kind: rowSettings},
+	}
+	m := &model{
 		st: &state.State{
 			Fleets: map[string]*fleet.Fleet{
 				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
 			},
 		},
-		rows: []row{
-			{kind: rowFleetHeader, fleetName: "alpha"},
-			{kind: rowInstance, fleetName: "alpha", instance: inst},
-			{kind: rowSettings},
-		},
+		expandedInstances: make(map[string]bool),
+		stats:             map[string]*backend.ContainerStats{},
+		fleetPage:         fp,
 	}
 
 	prevResolveBranch := resolveWorkspaceBranch
@@ -180,7 +181,7 @@ func TestViewFleetListShowsBranchItemForInstance(t *testing.T) {
 	}
 	defer func() { resolveWorkspaceBranch = prevResolveBranch }()
 
-	view := m.viewFleetList()
+	view := fp.viewFleetList(m)
 	if !strings.Contains(view, "feature/status-line") {
 		t.Fatalf("view missing branch item:\n%s", view)
 	}
@@ -192,24 +193,28 @@ func TestViewFleetListOmitsBranchItemWhenBranchIsUnavailable(t *testing.T) {
 		Status:       fleet.StatusRunning,
 		WorkspaceDir: "/workspace/alpha/agent-1",
 	}
-	m := model{
+	fp := newFleetPage()
+	fp.rows = []row{
+		{kind: rowFleetHeader, fleetName: "alpha"},
+		{kind: rowInstance, fleetName: "alpha", instance: inst},
+		{kind: rowSettings},
+	}
+	m := &model{
 		st: &state.State{
 			Fleets: map[string]*fleet.Fleet{
 				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
 			},
 		},
-		rows: []row{
-			{kind: rowFleetHeader, fleetName: "alpha"},
-			{kind: rowInstance, fleetName: "alpha", instance: inst},
-			{kind: rowSettings},
-		},
+		expandedInstances: make(map[string]bool),
+		stats:             map[string]*backend.ContainerStats{},
+		fleetPage:         fp,
 	}
 
 	prevResolveBranch := resolveWorkspaceBranch
 	resolveWorkspaceBranch = func(string) string { return "" }
 	defer func() { resolveWorkspaceBranch = prevResolveBranch }()
 
-	view := m.viewFleetList()
+	view := fp.viewFleetList(m)
 	if strings.Contains(view, "feature/status-line") {
 		t.Fatalf("view unexpectedly contains branch item:\n%s", view)
 	}
@@ -222,7 +227,13 @@ func TestViewFleetListShowsAgentWorkingIndicator(t *testing.T) {
 		ContainerID:  "abc123",
 		WorkspaceDir: "/workspace/alpha/agent-1",
 	}
-	m := model{
+	fp := newFleetPage()
+	fp.rows = []row{
+		{kind: rowFleetHeader, fleetName: "alpha"},
+		{kind: rowInstance, fleetName: "alpha", instance: inst},
+		{kind: rowSettings},
+	}
+	m := &model{
 		st: &state.State{
 			Fleets: map[string]*fleet.Fleet{
 				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
@@ -235,19 +246,16 @@ func TestViewFleetListShowsAgentWorkingIndicator(t *testing.T) {
 			map[string]agentState{"abc123": agentWorking},
 			map[string]state.AgentTool{"abc123": state.AgentToolClaude},
 		),
-		stats: map[string]*backend.ContainerStats{},
-		rows: []row{
-			{kind: rowFleetHeader, fleetName: "alpha"},
-			{kind: rowInstance, fleetName: "alpha", instance: inst},
-			{kind: rowSettings},
-		},
+		expandedInstances: make(map[string]bool),
+		stats:             map[string]*backend.ContainerStats{},
+		fleetPage:         fp,
 	}
 
 	prevResolveBranch := resolveWorkspaceBranch
 	resolveWorkspaceBranch = func(string) string { return "" }
 	defer func() { resolveWorkspaceBranch = prevResolveBranch }()
 
-	view := m.viewFleetList()
+	view := fp.viewFleetList(m)
 	if !strings.Contains(view, "\u25b6") || !strings.Contains(view, "Claude Code") {
 		t.Fatalf("view missing working indicator:\n%s", view)
 	}
@@ -260,7 +268,13 @@ func TestViewFleetListShowsAgentWaitingIndicator(t *testing.T) {
 		ContainerID:  "abc123",
 		WorkspaceDir: "/workspace/alpha/agent-1",
 	}
-	m := model{
+	fp := newFleetPage()
+	fp.rows = []row{
+		{kind: rowFleetHeader, fleetName: "alpha"},
+		{kind: rowInstance, fleetName: "alpha", instance: inst},
+		{kind: rowSettings},
+	}
+	m := &model{
 		st: &state.State{
 			Fleets: map[string]*fleet.Fleet{
 				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
@@ -273,19 +287,16 @@ func TestViewFleetListShowsAgentWaitingIndicator(t *testing.T) {
 			map[string]agentState{"abc123": agentWaiting},
 			map[string]state.AgentTool{"abc123": state.AgentToolClaude},
 		),
-		stats: map[string]*backend.ContainerStats{},
-		rows: []row{
-			{kind: rowFleetHeader, fleetName: "alpha"},
-			{kind: rowInstance, fleetName: "alpha", instance: inst},
-			{kind: rowSettings},
-		},
+		expandedInstances: make(map[string]bool),
+		stats:             map[string]*backend.ContainerStats{},
+		fleetPage:         fp,
 	}
 
 	prevResolveBranch := resolveWorkspaceBranch
 	resolveWorkspaceBranch = func(string) string { return "" }
 	defer func() { resolveWorkspaceBranch = prevResolveBranch }()
 
-	view := m.viewFleetList()
+	view := fp.viewFleetList(m)
 	if !strings.Contains(view, "\u23f8") || !strings.Contains(view, "Claude Code") {
 		t.Fatalf("view missing waiting indicator:\n%s", view)
 	}
@@ -298,7 +309,13 @@ func TestViewFleetListShowsAgentOffIndicator(t *testing.T) {
 		ContainerID:  "abc123",
 		WorkspaceDir: "/workspace/alpha/agent-1",
 	}
-	m := model{
+	fp := newFleetPage()
+	fp.rows = []row{
+		{kind: rowFleetHeader, fleetName: "alpha"},
+		{kind: rowInstance, fleetName: "alpha", instance: inst},
+		{kind: rowSettings},
+	}
+	m := &model{
 		st: &state.State{
 			Fleets: map[string]*fleet.Fleet{
 				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
@@ -313,23 +330,17 @@ func TestViewFleetListShowsAgentOffIndicator(t *testing.T) {
 		),
 		expandedInstances: make(map[string]bool),
 		stats:             map[string]*backend.ContainerStats{},
-		rows: []row{
-			{kind: rowFleetHeader, fleetName: "alpha"},
-			{kind: rowInstance, fleetName: "alpha", instance: inst},
-			{kind: rowSettings},
-		},
+		fleetPage:         fp,
 	}
 
 	prevResolveBranch := resolveWorkspaceBranch
 	resolveWorkspaceBranch = func(string) string { return "" }
 	defer func() { resolveWorkspaceBranch = prevResolveBranch }()
 
-	view := m.viewFleetList()
+	view := fp.viewFleetList(m)
 	if !strings.Contains(view, "idle") {
 		t.Fatalf("view missing off/idle indicator:\n%s", view)
 	}
-	// The working icon (▶ Claude Code) should not appear, but the
-	// expand arrow (▶ agent-1) is expected for running instances.
 	if strings.Contains(view, "\u25b6 Claude Code") || strings.Contains(view, "\u23f8") {
 		t.Fatalf("not-running instance should not show working/waiting icon:\n%s", view)
 	}
@@ -342,7 +353,13 @@ func TestViewFleetListNoAgentIndicatorForStoppedInstance(t *testing.T) {
 		ContainerID:  "abc123",
 		WorkspaceDir: "/workspace/alpha/agent-1",
 	}
-	m := model{
+	fp := newFleetPage()
+	fp.rows = []row{
+		{kind: rowFleetHeader, fleetName: "alpha"},
+		{kind: rowInstance, fleetName: "alpha", instance: inst},
+		{kind: rowSettings},
+	}
+	m := &model{
 		st: &state.State{
 			Fleets: map[string]*fleet.Fleet{
 				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
@@ -351,20 +368,17 @@ func TestViewFleetListNoAgentIndicatorForStoppedInstance(t *testing.T) {
 		cfg: &state.Config{
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
-		activity: NewActivityTracker(),
-		stats:    map[string]*backend.ContainerStats{},
-		rows: []row{
-			{kind: rowFleetHeader, fleetName: "alpha"},
-			{kind: rowInstance, fleetName: "alpha", instance: inst},
-			{kind: rowSettings},
-		},
+		activity:          NewActivityTracker(),
+		expandedInstances: make(map[string]bool),
+		stats:             map[string]*backend.ContainerStats{},
+		fleetPage:         fp,
 	}
 
 	prevResolveBranch := resolveWorkspaceBranch
 	resolveWorkspaceBranch = func(string) string { return "" }
 	defer func() { resolveWorkspaceBranch = prevResolveBranch }()
 
-	view := m.viewFleetList()
+	view := fp.viewFleetList(m)
 	if strings.Contains(view, "Claude Code") || strings.Contains(view, "idle") {
 		t.Fatalf("stopped instance should not have agent indicator:\n%s", view)
 	}

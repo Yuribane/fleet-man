@@ -273,8 +273,8 @@ func paneSessionOrder() []string {
 // saveCurrentGroupLayout saves the active group's outer tmux layout so
 // it can be restored later. Pane titles (set by fleet shell) are read
 // in pane index order to preserve the session-to-position mapping.
-func (m *model) saveCurrentGroupLayout() {
-	if m.activeGroupID == "" || m.splitInstance == "" {
+func (fp *fleetPage) saveCurrentGroupLayout() {
+	if fp.activeGroupID == "" || fp.splitInstance == "" {
 		return
 	}
 
@@ -282,13 +282,13 @@ func (m *model) saveCurrentGroupLayout() {
 	sessionNames := paneSessionOrder()
 
 	// Fallback: if pane titles aren't available, use the one we know.
-	if len(sessionNames) == 0 && m.splitSession != "" {
-		sessionNames = []string{m.splitSession}
+	if len(sessionNames) == 0 && fp.splitSession != "" {
+		sessionNames = []string{fp.splitSession}
 	}
 
-	m.savedGroups[m.activeGroupID] = savedGroup{
-		GroupID:      m.activeGroupID,
-		InstanceName: m.splitInstance,
+	fp.savedGroups[fp.activeGroupID] = savedGroup{
+		GroupID:      fp.activeGroupID,
+		InstanceName: fp.splitInstance,
 		Sessions:     sessionNames,
 		Layout:       tmuxLayoutString(),
 		PaneCount:    len(sessionNames),
@@ -299,7 +299,7 @@ func (m *model) saveCurrentGroupLayout() {
 // Instead of trusting the saved session list (which may be stale), it
 // queries the inner tmux directly for sessions matching the group prefix.
 // Each discovered session gets its own pane via `fleet shell --session`.
-func (m *model) restoreGroupCmd(fleetName string, inst *fleet.Instance, groupID string) tea.Cmd {
+func (fp *fleetPage) restoreGroupCmd(m *model, fleetName string, inst *fleet.Instance, groupID string) tea.Cmd {
 	b := m.instanceBackend(inst)
 	instanceName := inst.Name
 	qualifiedName := fleetName + "/" + instanceName
@@ -309,14 +309,14 @@ func (m *model) restoreGroupCmd(fleetName string, inst *fleet.Instance, groupID 
 
 	// Grab saved layout if available.
 	savedLayout := ""
-	if sg, ok := m.savedGroups[groupID]; ok {
+	if sg, ok := fp.savedGroups[groupID]; ok {
 		savedLayout = sg.Layout
 	}
 
 	// Prefer saved session order (from pane titles) to preserve
 	// the exact pane-to-session mapping.
 	var savedOrder []string
-	if sg, ok := m.savedGroups[groupID]; ok && len(sg.Sessions) > 0 {
+	if sg, ok := fp.savedGroups[groupID]; ok && len(sg.Sessions) > 0 {
 		savedOrder = sg.Sessions
 	}
 

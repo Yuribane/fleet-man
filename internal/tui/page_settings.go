@@ -9,9 +9,14 @@ import (
 	"github.com/BenjaminBenetti/fleet-man/internal/agent"
 	"github.com/BenjaminBenetti/fleet-man/internal/doctor"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// ===========================================
+// Settings Item Constants
+// ===========================================
 
 const (
 	settingsItemToolSelection = iota
@@ -29,20 +34,66 @@ const (
 	settingsItemCodespacesMachine = 500 // codespaces settings start here
 
 	settingsItemToolStatusBase = 1000 // tool status rows start here
-	settingsItemDoctor      = 2000 // doctor action row
-	settingsItemKeybindings = 2001 // keybindings dialog row
+	settingsItemDoctor         = 2000 // doctor action row
+	settingsItemKeybindings    = 2001 // keybindings dialog row
 )
 
 // dotfilesSetupPrompt is the instruction sent to the coding agent for
 // guided dotfiles setup.
 const dotfilesSetupPrompt = "Follow the instructions in https://raw.githubusercontent.com/BenjaminBenetti/Teeleport/main/SETUP_SKILL.md to help me set up Teeleport."
 
+// ===========================================
+// Settings Page
+// ===========================================
+
+// settingsPage holds settings-page-specific state.
+type settingsPage struct {
+	cursor          int
+	editing         bool
+	input           textinput.Model
+	showKeybindings bool
+}
+
+// newSettingsPage creates a new settings page with default state.
+func newSettingsPage() *settingsPage {
+	si := textinput.New()
+	si.CharLimit = 256
+	return &settingsPage{
+		input: si,
+	}
+}
+
+// Init is called when the settings page becomes active.
+func (sp *settingsPage) Init(m *model) tea.Cmd {
+	return nil
+}
+
+// Update dispatches settings page messages to the appropriate handler.
+func (sp *settingsPage) Update(m *model, msg tea.Msg) tea.Cmd {
+	if sp.showKeybindings {
+		return sp.updateKeybindingsDialog(m, msg)
+	}
+	if sp.editing {
+		return sp.updateSettingsEditing(m, msg)
+	}
+	return sp.updateSettingsNav(m, msg)
+}
+
+// View renders the settings page.
+func (sp *settingsPage) View(m *model) string {
+	return sp.viewSettings(m)
+}
+
+// ===========================================
+// Settings Sections
+// ===========================================
+
 // settingsSection defines a titled group of settings rows that can be
 // conditionally shown based on tool availability.
 type settingsSection struct {
-	Title string                          // section header text
-	Tool  string                          // required tool binary; "" = always visible
-	Items func(cfg *state.Config) []int   // returns navigable item IDs for this section
+	Title string                        // section header text
+	Tool  string                        // required tool binary; "" = always visible
+	Items func(cfg *state.Config) []int // returns navigable item IDs for this section
 }
 
 // settingsSections lists all settings sections in display order.
@@ -50,8 +101,6 @@ var settingsSections = []settingsSection{
 	{
 		Title: "General",
 		Items: func(_ *state.Config) []int {
-			// settingsItemUpdate is included here but filtered out
-			// by visibleItems() when no update is available.
 			return []int{settingsItemTmuxVimKeys, settingsItemShowHelpText, settingsItemUpdate}
 		},
 	},
@@ -99,9 +148,12 @@ var settingsSections = []settingsSection{
 	},
 }
 
-// sectionVisible reports whether a settings section should be shown
-// based on the current tool install status.
-func (m model) sectionVisible(s settingsSection) bool {
+// ===========================================
+// Navigation Helpers
+// ===========================================
+
+// sectionVisible reports whether a settings section should be shown.
+func (sp *settingsPage) sectionVisible(m *model, s settingsSection) bool {
 	if s.Tool == "" {
 		return true
 	}
@@ -113,16 +165,14 @@ func (m model) sectionVisible(s settingsSection) bool {
 	return false
 }
 
-// visibleItems returns the flat ordered list of navigable item IDs,
-// skipping items in hidden sections.
-func (m model) visibleItems() []int {
+// visibleItems returns the flat ordered list of navigable item IDs.
+func (sp *settingsPage) visibleItems(m *model) []int {
 	var items []int
 	for _, s := range settingsSections {
-		if !m.sectionVisible(s) {
+		if !sp.sectionVisible(m, s) {
 			continue
 		}
 		for _, id := range s.Items(m.cfg) {
-			// Hide the Update row when no update is available.
 			if id == settingsItemUpdate && m.updateAvailable == "" {
 				continue
 			}
@@ -132,41 +182,29 @@ func (m model) visibleItems() []int {
 	return items
 }
 
-// settingsCursorItem returns the item ID at the current cursor position,
-// or -1 if the cursor is out of range.
-func (m model) settingsCursorItem() int {
-	items := m.visibleItems()
-	if m.settingsCursor >= 0 && m.settingsCursor < len(items) {
-		return items[m.settingsCursor]
+// settingsCursorItem returns the item ID at the current cursor position.
+func (sp *settingsPage) settingsCursorItem(m *model) int {
+	items := sp.visibleItems(m)
+	if sp.cursor >= 0 && sp.cursor < len(items) {
+		return items[sp.cursor]
 	}
 	return -1
 }
 
 // settingsItemCount returns the total number of navigable settings rows.
-func (m model) settingsItemCount() int {
-	return len(m.visibleItems())
+func (sp *settingsPage) settingsItemCount(m *model) int {
+	return len(sp.visibleItems(m))
 }
 
-func agentToolLabel(tool state.AgentTool) string {
-	switch tool {
-	case state.AgentToolCodex:
-		return "Codex"
-	case state.AgentToolClaude:
-		return "Claude Code"
-	case state.AgentToolGemini:
-		return "Gemini"
-	case state.AgentToolCopilot:
-		return "Copilot"
-	default:
-		return "Claude Code"
-	}
-}
+// ===========================================
+// Toggle Helpers
+// ===========================================
 
-func (m *model) toggleTmuxVimKeys() {
+// toggleTmuxVimKeys toggles the tmux vim keys setting.
+func (sp *settingsPage) toggleTmuxVimKeys(m *model) {
 	if m.cfg == nil {
 		m.cfg = state.DefaultConfig()
 	}
-
 	current := m.cfg.GeneralSettings.TmuxVimKeysEnabled()
 	next := !current
 	m.cfg.GeneralSettings.TmuxVimKeys = &next
@@ -175,7 +213,6 @@ func (m *model) toggleTmuxVimKeys() {
 		m.message = fmt.Sprintf("Failed to save settings: %v", err)
 		return
 	}
-
 	label := "off"
 	if next {
 		label = "on"
@@ -184,11 +221,10 @@ func (m *model) toggleTmuxVimKeys() {
 }
 
 // toggleShowHelpText flips the show-help-text preference and saves.
-func (m *model) toggleShowHelpText() {
+func (sp *settingsPage) toggleShowHelpText(m *model) {
 	if m.cfg == nil {
 		m.cfg = state.DefaultConfig()
 	}
-
 	current := m.cfg.GeneralSettings.ShowHelpTextEnabled()
 	next := !current
 	m.cfg.GeneralSettings.ShowHelpText = &next
@@ -197,7 +233,6 @@ func (m *model) toggleShowHelpText() {
 		m.message = fmt.Sprintf("Failed to save settings: %v", err)
 		return
 	}
-
 	label := "off"
 	if next {
 		label = "on"
@@ -205,18 +240,17 @@ func (m *model) toggleShowHelpText() {
 	m.message = fmt.Sprintf("Show help text set to %s", label)
 }
 
-func (m *model) toggleAutoInstall() {
+// toggleAutoInstall toggles the dotfiles auto-install setting.
+func (sp *settingsPage) toggleAutoInstall(m *model) {
 	if m.cfg == nil {
 		m.cfg = state.DefaultConfig()
 	}
-
 	m.cfg.DotfilesSettings.AutoInstall = !m.cfg.DotfilesSettings.AutoInstall
 	if err := state.SaveConfig(m.cfg); err != nil {
 		m.cfg.DotfilesSettings.AutoInstall = !m.cfg.DotfilesSettings.AutoInstall
 		m.message = fmt.Sprintf("Failed to save settings: %v", err)
 		return
 	}
-
 	label := "off"
 	if m.cfg.DotfilesSettings.AutoInstall {
 		label = "on"
@@ -224,11 +258,11 @@ func (m *model) toggleAutoInstall() {
 	m.message = fmt.Sprintf("Auto install dotfiles set to %s", label)
 }
 
-func (m *model) cycleCoderPreset(direction int) {
+// cycleCoderPreset cycles through available coder presets.
+func (sp *settingsPage) cycleCoderPreset(m *model, direction int) {
 	if m.cfg == nil || len(m.coderPresets) == 0 {
 		return
 	}
-
 	current := m.cfg.CoderSettings.Preset
 	idx := 0
 	for i, p := range m.coderPresets {
@@ -237,7 +271,6 @@ func (m *model) cycleCoderPreset(direction int) {
 			break
 		}
 	}
-
 	idx = (idx + direction + len(m.coderPresets)) % len(m.coderPresets)
 	m.cfg.CoderSettings.Preset = m.coderPresets[idx]
 	if err := state.SaveConfig(m.cfg); err != nil {
@@ -245,15 +278,14 @@ func (m *model) cycleCoderPreset(direction int) {
 		m.message = fmt.Sprintf("Failed to save settings: %v", err)
 		return
 	}
-
 	m.message = fmt.Sprintf("Preset set to %s", m.cfg.CoderSettings.Preset)
 }
 
-func (m *model) cycleCodespacesMachine(direction int) {
+// cycleCodespacesMachine cycles through available codespace machine types.
+func (sp *settingsPage) cycleCodespacesMachine(m *model, direction int) {
 	if m.cfg == nil || len(m.codespaceMachines) == 0 {
 		return
 	}
-
 	current := m.cfg.CodespacesSettings.Machine
 	idx := 0
 	for i, mt := range m.codespaceMachines {
@@ -262,7 +294,6 @@ func (m *model) cycleCodespacesMachine(direction int) {
 			break
 		}
 	}
-
 	idx = (idx + direction + len(m.codespaceMachines)) % len(m.codespaceMachines)
 	selected := m.codespaceMachines[idx]
 	m.cfg.CodespacesSettings.Machine = selected.Name
@@ -271,13 +302,12 @@ func (m *model) cycleCodespacesMachine(direction int) {
 		m.message = fmt.Sprintf("Failed to save settings: %v", err)
 		return
 	}
-
 	m.message = fmt.Sprintf("Machine set to %s", selected.DisplayName)
 }
 
 // codespacesMachineLabel returns the display label for the currently
-// configured machine. Falls back to the raw name if no match is found.
-func (m *model) codespacesMachineLabel() string {
+// configured machine.
+func (sp *settingsPage) codespacesMachineLabel(m *model) string {
 	name := m.cfg.CodespacesSettings.Machine
 	for _, mt := range m.codespaceMachines {
 		if mt.Name == name {
@@ -287,30 +317,25 @@ func (m *model) codespacesMachineLabel() string {
 	return name
 }
 
-func (m model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.showKeybindings {
-		return m.updateKeybindingsDialog(msg)
-	}
-	if m.settingsEditing {
-		return m.updateSettingsEditing(msg)
-	}
-	return m.updateSettingsNav(msg)
-}
+// ===========================================
+// Update Handlers
+// ===========================================
 
 // updateKeybindingsDialog handles input while the keybindings overlay is shown.
-func (m model) updateKeybindingsDialog(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (sp *settingsPage) updateKeybindingsDialog(m *model, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc", "q", "ctrl+c":
-			m.showKeybindings = false
+			sp.showKeybindings = false
 		}
 	}
-	return m, nil
+	return nil
 }
 
-func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
-	count := m.settingsItemCount()
+// updateSettingsNav handles keyboard navigation in the settings page.
+func (sp *settingsPage) updateSettingsNav(m *model, msg tea.Msg) tea.Cmd {
+	count := sp.settingsItemCount(m)
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -318,94 +343,93 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.String() {
 		case "esc", "q":
-			m.page = pageFleetList
-			return m, nil
+			return m.ChangeRoute(routeFleetList)
 
 		case "ctrl+c", "ctrl+q":
 			m.quitting = true
-			return m, tea.Quit
+			return tea.Quit
 
 		case "up", "k":
-			m.settingsCursor = (m.settingsCursor - 1 + count) % count
-			return m, nil
+			sp.cursor = (sp.cursor - 1 + count) % count
+			return nil
 
 		case "down", "j":
-			m.settingsCursor = (m.settingsCursor + 1) % count
-			return m, nil
+			sp.cursor = (sp.cursor + 1) % count
+			return nil
 
 		case "left", "h":
-			item := m.settingsCursorItem()
+			item := sp.settingsCursorItem(m)
 			if item == settingsItemTmuxVimKeys {
-				m.toggleTmuxVimKeys()
+				sp.toggleTmuxVimKeys(m)
 			} else if item == settingsItemShowHelpText {
-				m.toggleShowHelpText()
+				sp.toggleShowHelpText(m)
 			} else if item == settingsItemDotfilesAutoInstall {
-				m.toggleAutoInstall()
+				sp.toggleAutoInstall(m)
 			} else if item == settingsItemCoderPreset {
-				m.cycleCoderPreset(-1)
+				sp.cycleCoderPreset(m, -1)
 			} else if item == settingsItemCodespacesMachine {
-				m.cycleCodespacesMachine(-1)
+				sp.cycleCodespacesMachine(m, -1)
 			}
-			return m, nil
+			return nil
 
 		case "right", "l":
-			item := m.settingsCursorItem()
+			item := sp.settingsCursorItem(m)
 			if item == settingsItemTmuxVimKeys {
-				m.toggleTmuxVimKeys()
+				sp.toggleTmuxVimKeys(m)
 			} else if item == settingsItemShowHelpText {
-				m.toggleShowHelpText()
+				sp.toggleShowHelpText(m)
 			} else if item == settingsItemDotfilesAutoInstall {
-				m.toggleAutoInstall()
+				sp.toggleAutoInstall(m)
 			} else if item == settingsItemCoderPreset {
-				m.cycleCoderPreset(1)
+				sp.cycleCoderPreset(m, 1)
 			} else if item == settingsItemCodespacesMachine {
-				m.cycleCodespacesMachine(1)
+				sp.cycleCodespacesMachine(m, 1)
 			}
-			return m, nil
+			return nil
 
 		case "enter", " ":
-			item := m.settingsCursorItem()
+			item := sp.settingsCursorItem(m)
 			if item == settingsItemTmuxVimKeys {
-				m.toggleTmuxVimKeys()
-				return m, nil
+				sp.toggleTmuxVimKeys(m)
+				return nil
 			}
 			if item == settingsItemShowHelpText {
-				m.toggleShowHelpText()
-				return m, nil
+				sp.toggleShowHelpText(m)
+				return nil
 			}
 			if item == settingsItemDotfilesAutoInstall {
-				m.toggleAutoInstall()
-				return m, nil
+				sp.toggleAutoInstall(m)
+				return nil
 			}
 			if item == settingsItemCoderPreset {
-				m.cycleCoderPreset(1)
+				sp.cycleCoderPreset(m, 1)
 			}
 			if item == settingsItemCodespacesMachine {
-				m.cycleCodespacesMachine(1)
-				return m, nil
+				sp.cycleCodespacesMachine(m, 1)
+				return nil
 			}
 			if item == settingsItemUpdate {
-				return m, performUpdateCmd(m.inHostTmux)
+				return performUpdateCmd(m.inHostTmux)
 			}
 			if item == settingsItemDoctor {
 				cmd, err := doctor.Command()
 				if err != nil {
 					m.message = err.Error()
-					return m, nil
+					return nil
 				}
-				return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return execDoneMsg{err} })
+				return tea.ExecProcess(cmd, func(err error) tea.Msg { return execDoneMsg{err} })
 			}
 			if item == settingsItemKeybindings {
-				m.showKeybindings = true
-				return m, nil
+				sp.showKeybindings = true
+				return nil
 			}
 			if item == settingsItemDotfilesSetup {
 				cmd, err := agent.CommandWithPrompt(dotfilesSetupPrompt)
 				if err != nil {
 					m.message = err.Error()
-					return m, nil
+					return nil
 				}
-				return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return execDoneMsg{err} })
+				return tea.ExecProcess(cmd, func(err error) tea.Msg { return execDoneMsg{err} })
 			}
 			if item >= settingsItemToolStatusBase {
 				idx := item - settingsItemToolStatusBase
@@ -413,69 +437,70 @@ func (m model) updateSettingsNav(msg tea.Msg) (tea.Model, tea.Cmd) {
 					openURL(m.toolStatus[idx].InstallURL)
 					m.message = fmt.Sprintf("Opening %s", m.toolStatus[idx].InstallURL)
 				}
-				return m, nil
+				return nil
 			}
-			return m.enterSettingsEditing()
+			return sp.enterSettingsEditing(m)
 		}
 	}
 
-	return m, nil
+	return nil
 }
 
-func (m model) enterSettingsEditing() (tea.Model, tea.Cmd) {
+// enterSettingsEditing activates text editing for the current setting.
+func (sp *settingsPage) enterSettingsEditing(m *model) tea.Cmd {
 	if m.cfg == nil {
 		m.cfg = state.DefaultConfig()
 	}
 
-	item := m.settingsCursorItem()
+	item := sp.settingsCursorItem(m)
 	var current string
 	switch {
 	case item == settingsItemDotfilesRepo:
 		current = m.cfg.DotfilesSettings.RepoURL
-		m.settingsInput.Placeholder = "https://github.com/user/dotfiles"
+		sp.input.Placeholder = "https://github.com/user/dotfiles"
 	case item == settingsItemDotfilesScript:
 		current = m.cfg.DotfilesSettings.InstallScript
-		m.settingsInput.Placeholder = "install.sh"
+		sp.input.Placeholder = "install.sh"
 	case item == settingsItemCoderTemplate:
 		current = m.cfg.CoderSettings.Template
-		m.settingsInput.Placeholder = "template-name"
+		sp.input.Placeholder = "template-name"
 	case item >= settingsItemCoderParamBase && item < settingsItemCodespacesMachine:
 		idx := item - settingsItemCoderParamBase
 		if idx < len(m.cfg.CoderSettings.Parameters) {
 			current = m.cfg.CoderSettings.Parameters[idx].Value
 			p := m.cfg.CoderSettings.Parameters[idx]
 			if p.DefaultValue != "" {
-				m.settingsInput.Placeholder = p.DefaultValue
+				sp.input.Placeholder = p.DefaultValue
 			} else {
-				m.settingsInput.Placeholder = "value"
+				sp.input.Placeholder = "value"
 			}
 		}
 	case item == settingsItemCodespacesMachine:
-		// Machine is a cycle selector, not a text field
-		m.cycleCodespacesMachine(1)
-		return m, nil
+		sp.cycleCodespacesMachine(m, 1)
+		return nil
 	default:
-		return m, nil
+		return nil
 	}
 
-	m.settingsEditing = true
-	m.settingsInput.SetValue(current)
-	m.settingsInput.Focus()
-	m.settingsInput.CursorEnd()
-	return m, m.settingsInput.Cursor.BlinkCmd()
+	sp.editing = true
+	sp.input.SetValue(current)
+	sp.input.Focus()
+	sp.input.CursorEnd()
+	return sp.input.Cursor.BlinkCmd()
 }
 
-func (m model) updateSettingsEditing(msg tea.Msg) (tea.Model, tea.Cmd) {
+// updateSettingsEditing handles input while editing a text field.
+func (sp *settingsPage) updateSettingsEditing(m *model, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyEnter:
-			value := strings.TrimSpace(m.settingsInput.Value())
+			value := strings.TrimSpace(sp.input.Value())
 			if m.cfg == nil {
 				m.cfg = state.DefaultConfig()
 			}
 
-			item := m.settingsCursorItem()
+			item := sp.settingsCursorItem(m)
 			var cmd tea.Cmd
 			switch {
 			case item == settingsItemDotfilesRepo:
@@ -485,7 +510,6 @@ func (m model) updateSettingsEditing(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case item == settingsItemCoderTemplate:
 				oldTemplate := m.cfg.CoderSettings.Template
 				m.cfg.CoderSettings.Template = value
-				// If template changed, trigger parameter fetch
 				if value != "" && value != oldTemplate {
 					m.coderFetchingParams = true
 					m.message = "Fetching template parameters..."
@@ -503,24 +527,29 @@ func (m model) updateSettingsEditing(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if cmd == nil {
 				m.message = "Saved"
 			}
-			m.settingsEditing = false
-			m.settingsInput.Blur()
-			return m, cmd
+			sp.editing = false
+			sp.input.Blur()
+			return cmd
 
 		case tea.KeyEsc:
-			m.settingsEditing = false
-			m.settingsInput.Blur()
+			sp.editing = false
+			sp.input.Blur()
 			m.message = "Cancelled"
-			return m, nil
+			return nil
 		}
 	}
 
 	var cmd tea.Cmd
-	m.settingsInput, cmd = m.settingsInput.Update(msg)
-	return m, cmd
+	sp.input, cmd = sp.input.Update(msg)
+	return cmd
 }
 
-func (m model) viewSettings() string {
+// ===========================================
+// View
+// ===========================================
+
+// viewSettings renders the settings page.
+func (sp *settingsPage) viewSettings(m *model) string {
 	var b strings.Builder
 
 	b.WriteString(renderGradient(nameToBanner("Settings")))
@@ -550,61 +579,59 @@ func (m model) viewSettings() string {
 	}
 
 	var listContent strings.Builder
-	currentItem := m.settingsCursorItem()
+	currentItem := sp.settingsCursorItem(m)
 
 	for _, s := range settingsSections {
-		if !m.sectionVisible(s) {
+		if !sp.sectionVisible(m, s) {
 			continue
 		}
 
-		// Section header
 		listContent.WriteString(fleetExpandedStyle.Render(s.Title))
 		listContent.WriteString("\n")
 		listContent.WriteString(dimStyle.Render(strings.Repeat("─", ruleWidth)))
 		listContent.WriteString("\n\n")
 
-		// Section-specific rows
 		switch s.Title {
 		case "General":
 			vimKeysValue := "[ off ]"
 			if cfg.GeneralSettings.TmuxVimKeysEnabled() {
 				vimKeysValue = "[ on ]"
 			}
-			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemTmuxVimKeys, "Tmux vim keys", vimKeysValue))
+			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemTmuxVimKeys, "Tmux vim keys", vimKeysValue))
 			listContent.WriteString("\n")
 
 			helpTextValue := "[ off ]"
 			if cfg.GeneralSettings.ShowHelpTextEnabled() {
 				helpTextValue = "[ on ]"
 			}
-			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemShowHelpText, "Show help text", helpTextValue))
+			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemShowHelpText, "Show help text", helpTextValue))
 
 			if m.updateAvailable != "" {
 				listContent.WriteString("\n")
 				updateValue := updateStyle.Render(m.updateAvailable+" available ⚡") + "  " + dimStyle.Render("press enter to update")
-				listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemUpdate, "Update", updateValue))
+				listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemUpdate, "Update", updateValue))
 			}
 
 		case "Dotfiles":
 			repoValue := cfg.DotfilesSettings.RepoURL
-			if repoValue == "" && !(m.settingsEditing && currentItem == settingsItemDotfilesRepo) {
+			if repoValue == "" && !(sp.editing && currentItem == settingsItemDotfilesRepo) {
 				repoValue = dimStyle.Render("(not set)")
 			}
-			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemDotfilesRepo, "Repository URL", repoValue))
+			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemDotfilesRepo, "Repository URL", repoValue))
 			listContent.WriteString("\n")
 
 			scriptValue := cfg.DotfilesSettings.InstallScript
-			if scriptValue == "" && !(m.settingsEditing && currentItem == settingsItemDotfilesScript) {
+			if scriptValue == "" && !(sp.editing && currentItem == settingsItemDotfilesScript) {
 				scriptValue = dimStyle.Render("(not set)")
 			}
-			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemDotfilesScript, "Install script", scriptValue))
+			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemDotfilesScript, "Install script", scriptValue))
 			listContent.WriteString("\n")
 
 			autoInstallValue := "[ off ]"
 			if cfg.DotfilesSettings.AutoInstall {
 				autoInstallValue = "[ on ]"
 			}
-			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemDotfilesAutoInstall, "Auto install", autoInstallValue))
+			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemDotfilesAutoInstall, "Auto install", autoInstallValue))
 			listContent.WriteString("\n")
 
 			agentName, _, agentErr := agent.FindAgent()
@@ -614,17 +641,17 @@ func (m model) viewSettings() string {
 			} else {
 				setupValue = statusRunningStyle.Render(agentName) + "  " + dimStyle.Render("press enter to get help setting up dotfiles")
 			}
-			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemDotfilesSetup, "Help me set this up", setupValue))
+			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemDotfilesSetup, "Help me set this up", setupValue))
 
 		case "Coder":
 			templateValue := cfg.CoderSettings.Template
-			if templateValue == "" && !(m.settingsEditing && currentItem == settingsItemCoderTemplate) {
+			if templateValue == "" && !(sp.editing && currentItem == settingsItemCoderTemplate) {
 				templateValue = dimStyle.Render("(not set)")
 			}
 			if m.coderFetchingParams {
 				templateValue += "  " + m.spinner.View() + " fetching..."
 			}
-			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemCoderTemplate, "Template", templateValue))
+			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemCoderTemplate, "Template", templateValue))
 			listContent.WriteString("\n")
 
 			presetValue := cfg.CoderSettings.Preset
@@ -633,14 +660,13 @@ func (m model) viewSettings() string {
 			} else {
 				presetValue = fmt.Sprintf("[ %s ]", presetValue)
 			}
-			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemCoderPreset, "Preset", presetValue))
+			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemCoderPreset, "Preset", presetValue))
 
-			// Dynamic parameter rows
 			for i, p := range cfg.CoderSettings.Parameters {
 				listContent.WriteString("\n")
 				paramItem := settingsItemCoderParamBase + i
 				value := p.Value
-				if value == "" && !(m.settingsEditing && currentItem == paramItem) {
+				if value == "" && !(sp.editing && currentItem == paramItem) {
 					if p.DefaultValue != "" {
 						value = dimStyle.Render(p.DefaultValue + " (default)")
 					} else {
@@ -651,7 +677,7 @@ func (m model) viewSettings() string {
 				if p.DisplayName != "" {
 					label = p.DisplayName
 				}
-				listContent.WriteString(m.renderSettingsRow(currentItem == paramItem, label, value))
+				listContent.WriteString(sp.renderSettingsRow(m, currentItem == paramItem, label, value))
 			}
 
 		case "Codespaces":
@@ -664,11 +690,11 @@ func (m model) viewSettings() string {
 				}
 			} else {
 				machineValue = fmt.Sprintf("[ %s ]", cfg.CodespacesSettings.Machine)
-				if label := m.codespacesMachineLabel(); label != cfg.CodespacesSettings.Machine {
+				if label := sp.codespacesMachineLabel(m); label != cfg.CodespacesSettings.Machine {
 					machineValue += "\n" + strings.Repeat(" ", 21) + dimStyle.Render(label)
 				}
 			}
-			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemCodespacesMachine, "Machine", machineValue))
+			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemCodespacesMachine, "Machine", machineValue))
 
 		case "Tool Status":
 			for i, t := range m.toolStatus {
@@ -683,7 +709,7 @@ func (m model) viewSettings() string {
 				}
 				value := badge + "  " + dimStyle.Render(t.Description)
 				itemID := settingsItemToolStatusBase + i
-				listContent.WriteString(m.renderSettingsRow(currentItem == itemID, t.Name, value))
+				listContent.WriteString(sp.renderSettingsRow(m, currentItem == itemID, t.Name, value))
 			}
 
 		case "Help":
@@ -694,9 +720,9 @@ func (m model) viewSettings() string {
 			} else {
 				value = statusRunningStyle.Render(agentName) + "  " + dimStyle.Render("press enter to diagnose your setup")
 			}
-			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemDoctor, "Run Doctor", value))
+			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemDoctor, "Run Doctor", value))
 			listContent.WriteString("\n")
-			listContent.WriteString(m.renderSettingsRow(currentItem == settingsItemKeybindings, "Keybindings", dimStyle.Render("press enter to view all keybindings")))
+			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemKeybindings, "Keybindings", dimStyle.Render("press enter to view all keybindings")))
 		}
 
 		listContent.WriteString("\n\n")
@@ -705,14 +731,12 @@ func (m model) viewSettings() string {
 	b.WriteString(box.Render(strings.TrimRight(listContent.String(), "\n")))
 	b.WriteString("\n")
 
-	// Keybindings dialog overlay
-	if m.showKeybindings {
+	if sp.showKeybindings {
 		b.WriteString("\n")
-		b.WriteString(keybindingsDialogBox.Render(m.renderKeybindingsDialog()))
+		b.WriteString(keybindingsDialogBox.Render(sp.renderKeybindingsDialog()))
 		b.WriteString("\n")
 	}
 
-	// Substitution variable hint
 	if currentItem >= settingsItemCoderParamBase && currentItem < settingsItemToolStatusBase {
 		b.WriteString(dimStyle.Render("  Variables: ${GIT_URL} = fleet repo URL, ${INSTANCE_NAME} = workspace name"))
 		b.WriteString("\n")
@@ -723,7 +747,7 @@ func (m model) viewSettings() string {
 		b.WriteString("\n")
 	}
 
-	if m.settingsEditing {
+	if sp.editing {
 		b.WriteString(renderHelp(m.width, []string{
 			"enter: save", "esc: cancel",
 		}))
@@ -736,7 +760,9 @@ func (m model) viewSettings() string {
 	return b.String()
 }
 
-func (m model) renderSettingsRow(active bool, label string, value string) string {
+// renderSettingsRow renders a single settings row with optional cursor
+// and editing state.
+func (sp *settingsPage) renderSettingsRow(m *model, active bool, label string, value string) string {
 	cursor := "  "
 	if active {
 		cursor = cursorStyle.Render("> ")
@@ -744,9 +770,8 @@ func (m model) renderSettingsRow(active bool, label string, value string) string
 
 	formattedLabel := fmt.Sprintf("%-18s", label)
 
-	// If editing this row, show the text input instead of the static value
-	if m.settingsEditing && active {
-		value = m.settingsInput.View()
+	if sp.editing && active {
+		value = sp.input.View()
 	}
 
 	if active {
@@ -755,7 +780,11 @@ func (m model) renderSettingsRow(active bool, label string, value string) string
 	return fmt.Sprintf("%s%s %s", cursor, formattedLabel, value)
 }
 
-// keybindingEntry represents a single key → description row.
+// ===========================================
+// Keybindings
+// ===========================================
+
+// keybindingEntry represents a single key/description row.
 type keybindingEntry struct {
 	Key  string
 	Desc string
@@ -851,9 +880,8 @@ func renderKeybindingColumn(groups []keybindingGroup) string {
 	return b.String()
 }
 
-// renderKeybindingsDialog builds the content for the keybindings overlay
-// using a two-column layout.
-func (m model) renderKeybindingsDialog() string {
+// renderKeybindingsDialog builds the content for the keybindings overlay.
+func (sp *settingsPage) renderKeybindingsDialog() string {
 	var b strings.Builder
 
 	b.WriteString(dialogTitle.Render("Keybindings"))
@@ -861,14 +889,9 @@ func (m model) renderKeybindingsDialog() string {
 
 	groups := keybindingsData()
 
-	// Split groups roughly in half by total line count.
-	type measured struct {
-		lines int
-		idx   int
-	}
 	var totalLines int
 	for _, g := range groups {
-		totalLines += len(g.Entries) + 2 // +2 for title + blank separator
+		totalLines += len(g.Entries) + 2
 	}
 	half := totalLines / 2
 	splitAt := len(groups)
@@ -895,6 +918,10 @@ func (m model) renderKeybindingsDialog() string {
 
 	return b.String()
 }
+
+// ===========================================
+// URL Helper
+// ===========================================
 
 // openURL opens the given URL in the user's default browser.
 func openURL(url string) {
