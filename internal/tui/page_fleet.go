@@ -11,6 +11,7 @@ import (
 	"github.com/BenjaminBenetti/fleet-man/internal/gitutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/instanceops"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
+	"github.com/BenjaminBenetti/fleet-man/internal/version"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -548,6 +549,9 @@ func (m model) viewFleetList() string {
 		"|  _| / -_) -_)  _|\n" +
 		"|_| |_\\___\\___|\\___|"
 	b.WriteString(renderGradient(logo))
+	if version.Version != "" {
+		b.WriteString(" " + dimStyle.Render(version.Version))
+	}
 	if m.updateAvailable != "" {
 		b.WriteString("  " + updateStyle.Render(fmt.Sprintf("A new version: %s is available ⚡ Settings to update", m.updateAvailable)))
 	}

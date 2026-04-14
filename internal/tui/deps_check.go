@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/BenjaminBenetti/fleet-man/internal/version"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -42,6 +43,9 @@ func (m model) viewDepsCheck() string {
 		"|  _| / -_) -_)  _|\n" +
 		"|_| |_\\___\\___|\\___|"
 	b.WriteString(renderGradient(logo))
+	if version.Version != "" {
+		b.WriteString(" " + dimStyle.Render(version.Version))
+	}
 	b.WriteString("\n\n")
 
 	var lines []string
