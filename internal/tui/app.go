@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -755,7 +756,27 @@ func sortedFleetNames(fleets map[string]*fleet.Fleet) []string {
 
 // Run starts the TUI.
 func Run() error {
-	p := tea.NewProgram(newModel(), tea.WithAltScreen())
+	m := newModel()
+
+	// Start clipboard buffer polling when running inside tmux.
+	// A goroutine polls `tmux show-buffer` and copies changes to the
+	// system clipboard (wl-copy / xclip / pbcopy). This is the
+	// universal clipboard mechanism that works on ALL terminals,
+	// including those without OSC 52 support.
+	var clipCancel context.CancelFunc
+	if m.inHostTmux {
+		if cs := newClipboardSync(); cs != nil {
+			ctx, cancel := context.WithCancel(context.Background())
+			clipCancel = cancel
+			go cs.Start(ctx)
+		}
+	}
+
+	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
+
+	if clipCancel != nil {
+		clipCancel()
+	}
 	return err
 }

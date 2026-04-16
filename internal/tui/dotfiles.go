@@ -131,18 +131,26 @@ func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, n
 	if statusRight != "" {
 		statusConf = fmt.Sprintf(` \; set status-right '%s'`, statusRight)
 	}
-	// OSC 52 clipboard: allows tmux to send copied text to the terminal
-	// emulator's system clipboard via escape sequences. Works transparently
-	// over SSH and inside containers. terminal-features (tmux 3.2+) tells
-	// tmux to add the Ms clipboard capability for all terminal types.
-	// It is appended last so a failure on older tmux does not prevent
-	// preceding commands from executing.
-	clipboardConf := ` \; set -g set-clipboard on`
-	clipboardFeatures := ` \; set -as terminal-features ',*:clipboard'`
-	inner := setup + tmuxEnsureInstalled + sizefix + sshAgentFix + hookClear + fmt.Sprintf(
-		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on`+clipboardConf+detachKeys+statusConf+prefixConf+sessionKeys+resizeHook+clipboardFeatures,
+	// OSC 52 clipboard: create a DETACHED session first, configure the
+	// server (terminal-features, set-clipboard), then attach. Features
+	// must be set before the client connects (attach) so the terminal's
+	// Ms capability is detected at attach time. The detached session
+	// keeps the server alive between the two tmux invocations. Errors
+	// from terminal-features are suppressed for tmux <3.2 compat.
+	// Override MouseDragEnd1Pane so the view stays at the scroll
+	// position after copying (default copy-selection-and-cancel exits
+	// copy-mode and jumps to the bottom).
+	mouseBindings := ` \; bind -T copy-mode MouseDragEnd1Pane send-keys -X copy-selection` +
+		` \; bind -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-selection`
+	sessionSetup := fmt.Sprintf(
+		`tmux -u new-session -d -A -s %s`+tmuxSize+
+			` \; set -g set-clipboard on \; set -g mouse on`+
+			mouseBindings+detachKeys+statusConf+prefixConf+sessionKeys+resizeHook+
+			` \; set -as terminal-features ',*:clipboard' 2>/dev/null; `,
 		shQuote(session),
 	)
+	attach := fmt.Sprintf(`exec tmux -u attach -t %s`, shQuote(session))
+	inner := setup + tmuxEnsureInstalled + sizefix + sshAgentFix + hookClear + sessionSetup + attach
 	return []string{"sh", "-c", inner}
 }
 

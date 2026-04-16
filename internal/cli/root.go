@@ -82,30 +82,49 @@ func relaunchInTmux() error {
 	_, _ = rand.Read(suffix[:])
 	session := "fleet-" + hex.EncodeToString(suffix[:])
 
-	// exec into tmux: create a session running fleet, then enable mouse
-	// and OSC 52 clipboard support. tmux processes `;`-separated commands
-	// as part of startup. Vim-style pane navigation (h/l) is injected
-	// only when the user has enabled the "tmux vim keys" setting.
-	args := []string{
-		"tmux", "new-session", "-s", session, self,
-		";", "set", "-g", "mouse", "on",
+	// Create a DETACHED session first, then configure the server, then
+	// attach. terminal-features and set-clipboard must be set before the
+	// client connects (attach) so the terminal's Ms clipboard capability
+	// is detected at attach time. The detached session keeps the server
+	// alive between the two tmux invocations. terminal-features (tmux
+	// 3.2+) is last so older versions just lose clipboard, not everything.
+	setupArgs := []string{
+		"tmux", "new-session", "-d", "-s", session, self,
 		";", "set", "-g", "set-clipboard", "on",
+		";", "set", "-g", "mouse", "on",
 	}
 
 	cfg, _ := state.LoadConfig()
 	if cfg == nil || cfg.GeneralSettings.TmuxVimKeysEnabled() {
-		args = append(args,
+		setupArgs = append(setupArgs,
 			";", "bind-key", "h", "if", "-F", "#{pane_at_left}", "", "select-pane -L",
 			";", "bind-key", "l", "if", "-F", "#{pane_at_right}", "", "select-pane -R",
 			";", "bind-key", "j", "if", "-F", "#{pane_at_bottom}", "", "select-pane -D",
 			";", "bind-key", "k", "if", "-F", "#{pane_at_top}", "", "select-pane -U",
 		)
 	}
-	// terminal-features requires tmux 3.2+. Append last so that a
-	// failure on older versions does not prevent preceding commands.
-	args = append(args,
+	// Override MouseDragEnd1Pane to use copy-selection so the
+	// view stays at the scroll position after copying instead of
+	// jumping back to the bottom (the default copy-selection-and-cancel
+	// exits copy-mode which resets the scroll).
+	setupArgs = append(setupArgs,
+		";", "bind", "-T", "copy-mode", "MouseDragEnd1Pane",
+		"send-keys", "-X", "copy-selection",
+		";", "bind", "-T", "copy-mode-vi", "MouseDragEnd1Pane",
+		"send-keys", "-X", "copy-selection",
+	)
+	// terminal-features tells tmux the terminal supports OSC 52
+	// clipboard (tmux 3.2+). Appended last so older versions just
+	// lose this feature without breaking the session.
+	setupArgs = append(setupArgs,
 		";", "set", "-as", "terminal-features", ",*:clipboard",
 	)
+	//nolint:errcheck // terminal-features may fail on tmux <3.2
+	exec.Command(setupArgs[0], setupArgs[1:]...).Run()
 
-	return syscall.Exec(tmuxBin, args, os.Environ())
+	// Attach: the client connects with terminal-features already set,
+	// so Ms (clipboard) is available from the start.
+	return syscall.Exec(tmuxBin, []string{
+		"tmux", "attach", "-t", session,
+	}, os.Environ())
 }
