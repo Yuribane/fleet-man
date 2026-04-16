@@ -138,9 +138,14 @@ func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, n
 	// It is appended last so a failure on older tmux does not prevent
 	// preceding commands from executing.
 	clipboardConf := ` \; set -g set-clipboard on`
+	// Override MouseDragEnd1Pane to use copy-selection (instead of the
+	// default copy-selection-and-cancel) so the scroll position is
+	// preserved after copying. The user presses q to exit copy-mode.
+	mouseBindings := ` \; bind -T copy-mode MouseDragEnd1Pane send-keys -X copy-selection` +
+		` \; bind -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-selection`
 	clipboardFeatures := ` \; set -as terminal-features ',*:clipboard'`
 	inner := setup + tmuxEnsureInstalled + sizefix + sshAgentFix + hookClear + fmt.Sprintf(
-		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on`+clipboardConf+detachKeys+statusConf+prefixConf+sessionKeys+resizeHook+clipboardFeatures,
+		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on`+clipboardConf+mouseBindings+detachKeys+statusConf+prefixConf+sessionKeys+resizeHook+clipboardFeatures,
 		shQuote(session),
 	)
 	return []string{"sh", "-c", inner}
