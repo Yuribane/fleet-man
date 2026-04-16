@@ -73,6 +73,48 @@ func TestShellCommandProducesTmux(t *testing.T) {
 	}
 }
 
+func TestShellCommandClipboard(t *testing.T) {
+	cfg := state.DefaultConfig()
+	got := shellCommand(cfg, "agent-1", 0, 0, false)
+	script := got[2]
+	if !strings.Contains(script, "set -g set-clipboard on") {
+		t.Errorf("script missing set-clipboard on: %s", script)
+	}
+	if !strings.Contains(script, "terminal-features") || !strings.Contains(script, "clipboard") {
+		t.Errorf("script missing terminal-features clipboard: %s", script)
+	}
+}
+
+func TestShellCommandClipboardNested(t *testing.T) {
+	cfg := state.DefaultConfig()
+	got := shellCommand(cfg, "agent-1", 80, 24, true)
+	script := got[2]
+	if !strings.Contains(script, "set -g set-clipboard on") {
+		t.Errorf("nested script missing set-clipboard on: %s", script)
+	}
+	if !strings.Contains(script, "terminal-features") {
+		t.Errorf("nested script missing terminal-features: %s", script)
+	}
+}
+
+func TestShellCommandClipboardFeaturesIsLast(t *testing.T) {
+	cfg := state.DefaultConfig()
+	got := shellCommand(cfg, "agent-1", 80, 24, false)
+	script := got[2]
+	featIdx := strings.LastIndex(script, "terminal-features")
+	mouseIdx := strings.Index(script, "set -g mouse on")
+	clipIdx := strings.Index(script, "set-clipboard on")
+	if featIdx < 0 || mouseIdx < 0 || clipIdx < 0 {
+		t.Fatalf("script missing expected settings: %s", script)
+	}
+	if featIdx < clipIdx {
+		t.Errorf("terminal-features should come after set-clipboard (for tmux <3.2 compat): %s", script)
+	}
+	if featIdx < mouseIdx {
+		t.Errorf("terminal-features should come after mouse on: %s", script)
+	}
+}
+
 func TestShellCommandWithDotfilesAndTmux(t *testing.T) {
 	cfg := state.DefaultConfig()
 	cfg.DotfilesSettings.RepoURL = "https://github.com/user/dots"

@@ -131,8 +131,16 @@ func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, n
 	if statusRight != "" {
 		statusConf = fmt.Sprintf(` \; set status-right '%s'`, statusRight)
 	}
+	// OSC 52 clipboard: allows tmux to send copied text to the terminal
+	// emulator's system clipboard via escape sequences. Works transparently
+	// over SSH and inside containers. terminal-features (tmux 3.2+) tells
+	// tmux to add the Ms clipboard capability for all terminal types.
+	// It is appended last so a failure on older tmux does not prevent
+	// preceding commands from executing.
+	clipboardConf := ` \; set -g set-clipboard on`
+	clipboardFeatures := ` \; set -as terminal-features ',*:clipboard'`
 	inner := setup + tmuxEnsureInstalled + sizefix + sshAgentFix + hookClear + fmt.Sprintf(
-		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on`+detachKeys+statusConf+prefixConf+sessionKeys+resizeHook,
+		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on`+clipboardConf+detachKeys+statusConf+prefixConf+sessionKeys+resizeHook+clipboardFeatures,
 		shQuote(session),
 	)
 	return []string{"sh", "-c", inner}

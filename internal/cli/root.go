@@ -82,13 +82,14 @@ func relaunchInTmux() error {
 	_, _ = rand.Read(suffix[:])
 	session := "fleet-" + hex.EncodeToString(suffix[:])
 
-	// exec into tmux: create a session running fleet, then enable mouse.
-	// tmux processes `;`-separated commands as part of startup.
-	// Vim-style pane navigation (h/l) is injected only when the user
-	// has enabled the "tmux vim keys" setting.
+	// exec into tmux: create a session running fleet, then enable mouse
+	// and OSC 52 clipboard support. tmux processes `;`-separated commands
+	// as part of startup. Vim-style pane navigation (h/l) is injected
+	// only when the user has enabled the "tmux vim keys" setting.
 	args := []string{
 		"tmux", "new-session", "-s", session, self,
 		";", "set", "-g", "mouse", "on",
+		";", "set", "-g", "set-clipboard", "on",
 	}
 
 	cfg, _ := state.LoadConfig()
@@ -100,6 +101,11 @@ func relaunchInTmux() error {
 			";", "bind-key", "k", "if", "-F", "#{pane_at_top}", "", "select-pane -U",
 		)
 	}
+	// terminal-features requires tmux 3.2+. Append last so that a
+	// failure on older versions does not prevent preceding commands.
+	args = append(args,
+		";", "set", "-as", "terminal-features", ",*:clipboard",
+	)
 
 	return syscall.Exec(tmuxBin, args, os.Environ())
 }
