@@ -62,11 +62,8 @@ func TestShellCommandProducesTmux(t *testing.T) {
 	if !strings.Contains(script, "command -v tmux") {
 		t.Errorf("script missing tmux install check: %s", script)
 	}
-	if !strings.Contains(script, "new-session -d -A -s 'agent-1'") {
-		t.Errorf("script missing tmux new-session -d -A: %s", script)
-	}
-	if !strings.Contains(script, "attach -t 'agent-1'") {
-		t.Errorf("script missing tmux attach: %s", script)
+	if !strings.Contains(script, "exec tmux -u new-session -A -s 'agent-1'") {
+		t.Errorf("script missing tmux new-session -A: %s", script)
 	}
 	if !strings.Contains(script, "bind-key -n C-q detach-client") {
 		t.Errorf("script missing ctrl+q keybinding: %s", script)
@@ -100,21 +97,21 @@ func TestShellCommandClipboardNested(t *testing.T) {
 	}
 }
 
-func TestShellCommandDetachedThenAttach(t *testing.T) {
+func TestShellCommandClipboardFeaturesIsLast(t *testing.T) {
 	cfg := state.DefaultConfig()
 	got := shellCommand(cfg, "agent-1", 80, 24, false)
 	script := got[2]
-	setupIdx := strings.Index(script, "new-session -d -A")
-	attachIdx := strings.Index(script, "attach -t")
-	featIdx := strings.Index(script, "terminal-features")
-	if setupIdx < 0 || attachIdx < 0 || featIdx < 0 {
-		t.Fatalf("script missing expected commands: %s", script)
+	featIdx := strings.LastIndex(script, "terminal-features")
+	mouseIdx := strings.Index(script, "set -g mouse on")
+	clipIdx := strings.Index(script, "set-clipboard on")
+	if featIdx < 0 || mouseIdx < 0 || clipIdx < 0 {
+		t.Fatalf("script missing expected settings: %s", script)
 	}
-	if attachIdx < setupIdx {
-		t.Errorf("attach must come after detached new-session: %s", script)
+	if featIdx < clipIdx {
+		t.Errorf("terminal-features should come after set-clipboard (for tmux <3.2 compat): %s", script)
 	}
-	if featIdx > attachIdx {
-		t.Errorf("terminal-features must be set before attach: %s", script)
+	if featIdx < mouseIdx {
+		t.Errorf("terminal-features should come after mouse on: %s", script)
 	}
 }
 
@@ -150,7 +147,7 @@ func TestShellCommandSanitizesSessionName(t *testing.T) {
 	cfg := state.DefaultConfig()
 	got := shellCommand(cfg, "my.instance:1", 0, 0, false)
 	script := got[2]
-	if !strings.Contains(script, "new-session -d -A -s 'my-instance-1'") {
+	if !strings.Contains(script, "tmux -u new-session -A -s 'my-instance-1'") {
 		t.Errorf("script should sanitize session name: %s", script)
 	}
 }
