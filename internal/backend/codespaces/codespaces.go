@@ -123,12 +123,10 @@ func (b *CodespacesBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 	}
 
 	cmd := exec.Command("gh", args...)
+	// Always tee stderr to os.Stderr so output reaches the log file
+	// when run from the TUI background process.
 	var stderrBuf strings.Builder
-	if b.verbose {
-		cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
-	} else {
-		cmd.Stderr = &stderrBuf
-	}
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
 
 	out, err := cmd.Output()
 	if err != nil {

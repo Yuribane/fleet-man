@@ -98,10 +98,10 @@ func (b *CoderBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 	}
 
 	cmd := exec.Command("coder", args...)
-	if b.verbose {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	}
+	// Always write to os.Stdout/os.Stderr so output reaches the log
+	// file when run from the TUI background process.
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("coder create failed: %w", err)

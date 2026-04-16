@@ -1,6 +1,7 @@
 package devcontainer
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -68,18 +69,28 @@ func (b *DevcontainerBackend) Up(workspaceDir string) (*backend.UpResult, error)
 	args := []string{"up", "--workspace-folder", workspaceDir}
 	args = append(args, sshUpArgs()...)
 	cmd := exec.Command("devcontainer", args...)
-	if b.verbose {
-		cmd.Stderr = os.Stderr
-	}
 
-	out, err := cmd.Output()
-	if err != nil {
+	// Capture stdout for JSON parsing, tee to os.Stdout so it appears
+	// in log files when run from the TUI background process.
+	var stdoutBuf bytes.Buffer
+	cmd.Stdout = io.MultiWriter(os.Stdout, &stdoutBuf)
+
+	// Always tee stderr to os.Stderr so build output reaches the log
+	// file. A buffer captures it for inclusion in error messages.
+	var stderrBuf strings.Builder
+	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
+
+	if err := cmd.Run(); err != nil {
+		detail := strings.TrimSpace(stderrBuf.String())
+		if detail != "" {
+			return nil, fmt.Errorf("devcontainer up failed: %w\n%s", err, detail)
+		}
 		return nil, fmt.Errorf("devcontainer up failed: %w", err)
 	}
 
 	var result backend.UpResult
-	if err := json.Unmarshal(out, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse devcontainer up output: %w\nraw: %s", err, out)
+	if err := json.Unmarshal(stdoutBuf.Bytes(), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse devcontainer up output: %w\nraw: %s", err, stdoutBuf.String())
 	}
 
 	if result.Outcome != "success" {

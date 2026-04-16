@@ -227,21 +227,25 @@ func repoFromRemote(remoteURL string) string {
 }
 
 // logsCommand returns an *exec.Cmd for viewing instance logs.
-// For failed or creating instances it shows the local creation log file.
-// For running instances it delegates to the backend's logs command.
+// It always shows the creation log file first (devcontainer up output),
+// then appends container runtime logs for running instances.
 // Output is always followed by a "press Enter" prompt so the user
 // has time to read before the TUI redraws.
 func logsCommand(b backend.Backend, fleetName string, inst *fleet.Instance) *exec.Cmd {
-	var inner string
-
 	logPath := filepath.Join(state.FleetDir(), "logs", fleetName+"-"+inst.Name+".log")
+	creationLog := fmt.Sprintf("cat %q 2>/dev/null", logPath)
+
+	var inner string
 	switch inst.Status {
 	case fleet.StatusFailed, fleet.StatusCreating:
-		inner = fmt.Sprintf("cat %q 2>/dev/null || echo 'No creation log found.'", logPath)
+		inner = fmt.Sprintf("%s || echo 'No creation log found.'", creationLog)
 	default:
-		// Build the backend logs command and extract its full invocation.
+		// Show creation log, then container runtime logs.
 		logsCmd := b.LogsCommand(inst.ContainerID, false)
-		inner = logsCmd.String()
+		inner = fmt.Sprintf(
+			"%s; echo; echo '=== Container runtime logs ==='; echo; %s",
+			creationLog, logsCmd.String(),
+		)
 	}
 
 	// Wrap in a shell that pauses after the output.

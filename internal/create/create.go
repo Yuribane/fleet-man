@@ -1,7 +1,9 @@
 package create
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,20 +44,15 @@ func Run(fleetName, instanceName, remoteURL string, verbose bool, bt fleet.Backe
 		}
 
 		gitClone := exec.Command("git", "clone", remoteURL, wsDir)
-		if verbose {
-			gitClone.Stdout = os.Stdout
-			gitClone.Stderr = os.Stderr
-			if err := gitClone.Run(); err != nil {
-				wrapped := fmt.Errorf("git clone failed: %w", err)
-				setFailed(fleetName, instanceName, wrapped)
-				return wrapped
-			}
-		} else {
-			if out, err := gitClone.CombinedOutput(); err != nil {
-				wrapped := fmt.Errorf("git clone: %w\n%s", err, out)
-				setFailed(fleetName, instanceName, wrapped)
-				return wrapped
-			}
+		// Tee output to os.Stdout/os.Stderr (the log file when run from
+		// the TUI) while capturing it for inclusion in error messages.
+		var cloneBuf bytes.Buffer
+		gitClone.Stdout = io.MultiWriter(os.Stdout, &cloneBuf)
+		gitClone.Stderr = io.MultiWriter(os.Stderr, &cloneBuf)
+		if err := gitClone.Run(); err != nil {
+			wrapped := fmt.Errorf("git clone failed: %w\n%s", err, cloneBuf.String())
+			setFailed(fleetName, instanceName, wrapped)
+			return wrapped
 		}
 	}
 
