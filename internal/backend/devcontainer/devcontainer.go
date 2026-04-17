@@ -208,40 +208,20 @@ func (b *DevcontainerBackend) LogsCommand(containerID string, follow bool) *exec
 	return exec.Command("docker", args...)
 }
 
-// CaptureScreen runs `tmux capture-pane` inside a container.
-func (b *DevcontainerBackend) CaptureScreen(containerID, tmuxSession string) backend.ScreenCapture {
+// CaptureAllSessions lists and captures every tmux session inside a
+// container in one docker exec call.
+func (b *DevcontainerBackend) CaptureAllSessions(containerID string) backend.AllSessions {
 	args := []string{"exec"}
 	if u := b.containerUser(containerID); u != "" {
 		args = append(args, "-u", u)
 	}
-	args = append(args, containerID, "tmux", "capture-pane", "-t", tmuxSession, "-p")
+	args = append(args, containerID, "sh", "-c", backend.CaptureAllScript)
 	cmd := exec.Command("docker", args...)
 	out, err := cmd.Output()
 	if err != nil {
-		return backend.ScreenCapture{}
+		return backend.AllSessions{OK: false}
 	}
-	return backend.ScreenCapture{Content: string(out), OK: true}
-}
-
-// activeSessionScript queries the most recently active tmux client and
-// returns its session name. Sorting by client_activity ensures we pick
-// the client the user is currently interacting with, not a stale one
-// left behind by previous split-pane connections.
-const activeSessionScript = `tmux list-clients -F "#{client_activity}:#{session_name}" 2>/dev/null | sort -rn | head -1 | cut -d: -f2-`
-
-// ActiveSession returns the tmux session with the most recently active client.
-func (b *DevcontainerBackend) ActiveSession(containerID string) string {
-	args := []string{"exec"}
-	if u := b.containerUser(containerID); u != "" {
-		args = append(args, "-u", u)
-	}
-	args = append(args, containerID, "sh", "-c", activeSessionScript)
-	cmd := exec.Command("docker", args...)
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	return backend.AllSessions{Sessions: backend.ParseAllSessionsOutput(string(out)), OK: true}
 }
 
 // AgentToolProbe detects which agent tool is running inside a container.
@@ -250,13 +230,13 @@ func (b *DevcontainerBackend) AgentToolProbe(containerID string) (string, bool) 
 	if u := b.containerUser(containerID); u != "" {
 		args = append(args, "-u", u)
 	}
-	args = append(args, containerID, "sh", "-c", toolProbeScript)
+	args = append(args, containerID, "sh", "-c", backend.ToolProbeScript)
 	cmd := exec.Command("docker", args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", false
 	}
-	return parseToolProbeOutput(string(out))
+	return backend.ParseToolProbeOutput(string(out))
 }
 
 // EditorURI returns a VS Code devcontainer remote URI.

@@ -52,27 +52,6 @@ func isCodespaceLimitError(stderr string) bool {
 		strings.Contains(lower, "out of codespaces")
 }
 
-// ===========================================
-// Tool Probe
-// ===========================================
-
-// toolProbeScript is the shell script run inside each codespace to
-// detect which agent tool is running. Formatted as a single line to
-// avoid argument parsing issues with gh codespace ssh.
-const toolProbeScript = `for t in claude copilot codex gemini; do pids=$(ps aux 2>/dev/null | awk -v t="$t" '($11 ~ "(^|/)"t"$" || $12 ~ "(^|/)"t"$") {print $2}'); [ -n "$pids" ] && { echo "$t"; exit 0; }; done; echo "-"`
-
-// parseToolProbeOutput parses the tool probe script output.
-func parseToolProbeOutput(output string) (string, bool) {
-	tool := strings.TrimSpace(output)
-	if tool == "" {
-		return "", false
-	}
-	if tool == "-" {
-		return "", true
-	}
-	return tool, true
-}
-
 // parseFloat parses a trimmed string into a float64.
 func parseFloat(s string) (float64, error) {
 	return strconv.ParseFloat(strings.TrimSpace(s), 64)

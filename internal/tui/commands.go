@@ -42,9 +42,9 @@ type forceRepaintTickMsg struct{}
 
 type statsMsg struct {
 	stats        map[string]*backend.ContainerStats
-	screens      map[string]backend.ScreenCapture
-	probes       map[string]string // containerID → detected tool name (from ps aux)
-	containerIDs []string          // containers that were probed (for staleness detection)
+	screens      map[string]backend.AllSessions // containerID → per-session captures (multi-session aware)
+	probes       map[string]string              // containerID → detected tool name (from ps aux)
+	containerIDs []string                       // containers that were probed (for staleness detection)
 }
 
 // Commands
@@ -68,7 +68,7 @@ func forceRepaintCmd() tea.Cmd {
 	})
 }
 
-func fetchStatsCmd(dc backend.Backend, ids []string, sessions map[string]string, delay bool) tea.Cmd {
+func fetchStatsCmd(dc backend.Backend, ids []string, delay bool) tea.Cmd {
 	return func() tea.Msg {
 		if delay {
 			time.Sleep(3 * time.Second)
@@ -77,7 +77,7 @@ func fetchStatsCmd(dc backend.Backend, ids []string, sessions map[string]string,
 			return statsMsg{}
 		}
 		stats, _ := dc.Stats(ids)
-		screens := backend.CaptureScreens(dc, sessions)
+		screens := backend.CaptureAllSessionsForAll(dc, ids)
 		probes := backend.AgentToolProbes(dc, ids)
 		return statsMsg{stats: stats, screens: screens, probes: probes, containerIDs: ids}
 	}

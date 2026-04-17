@@ -219,10 +219,11 @@ func (m *model) instanceBackend(inst *fleet.Instance) backend.Backend {
 	return b
 }
 
-// backendGroup holds container IDs and sessions grouped by backend type.
+// backendGroup holds container IDs grouped by backend type. Sessions
+// no longer need to be tracked here — CaptureAllSessions discovers
+// every tmux session inside each container at capture time.
 type backendGroup struct {
-	ids      []string
-	sessions map[string]string
+	ids []string
 }
 
 // containersByBackend groups running instances by their backend type.
@@ -239,11 +240,10 @@ func (m *model) containersByBackend() map[fleet.BackendType]*backendGroup {
 			}
 			g, ok := groups[bt]
 			if !ok {
-				g = &backendGroup{sessions: make(map[string]string)}
+				g = &backendGroup{}
 				groups[bt] = g
 			}
 			g.ids = append(g.ids, inst.ContainerID)
-			g.sessions[inst.ContainerID] = SanitizeSessionName(inst.Name)
 		}
 	}
 	return groups
@@ -289,26 +289,24 @@ func (m *model) refreshInstanceSessions(instanceName string) tea.Cmd {
 func (m model) fetchAllStatsCmd(delay bool) tea.Cmd {
 	groups := m.containersByBackend()
 	if len(groups) == 0 {
-		return fetchStatsCmd(nil, nil, nil, delay)
+		return fetchStatsCmd(nil, nil, delay)
 	}
 
 	type fetchInput struct {
-		dc       backend.Backend
-		ids      []string
-		sessions map[string]string
+		dc  backend.Backend
+		ids []string
 	}
 	var inputs []fetchInput
 	for bt, g := range groups {
 		inputs = append(inputs, fetchInput{
-			dc:       m.backendFor(bt),
-			ids:      g.ids,
-			sessions: g.sessions,
+			dc:  m.backendFor(bt),
+			ids: g.ids,
 		})
 	}
 
 	// If only one backend type, use the simple path
 	if len(inputs) == 1 {
-		return fetchStatsCmd(inputs[0].dc, inputs[0].ids, inputs[0].sessions, delay)
+		return fetchStatsCmd(inputs[0].dc, inputs[0].ids, delay)
 	}
 
 	// Multiple backend types: fetch concurrently and merge
@@ -318,25 +316,25 @@ func (m model) fetchAllStatsCmd(delay bool) tea.Cmd {
 		}
 
 		allStats := make(map[string]*backend.ContainerStats)
-		allScreens := make(map[string]backend.ScreenCapture)
+		allScreens := make(map[string]backend.AllSessions)
 		allProbes := make(map[string]string)
 		var allIDs []string
 
 		type result struct {
 			stats   map[string]*backend.ContainerStats
-			screens map[string]backend.ScreenCapture
+			screens map[string]backend.AllSessions
 			probes  map[string]string
 			ids     []string
 		}
 
 		ch := make(chan result, len(inputs))
 		for _, inp := range inputs {
-			go func(dc backend.Backend, ids []string, sessions map[string]string) {
+			go func(dc backend.Backend, ids []string) {
 				stats, _ := dc.Stats(ids)
-				screens := backend.CaptureScreens(dc, sessions)
+				screens := backend.CaptureAllSessionsForAll(dc, ids)
 				probes := backend.AgentToolProbes(dc, ids)
 				ch <- result{stats, screens, probes, ids}
-			}(inp.dc, inp.ids, inp.sessions)
+			}(inp.dc, inp.ids)
 		}
 
 		for range inputs {

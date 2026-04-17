@@ -5,28 +5,6 @@ import (
 	"strings"
 )
 
-// toolProbeScript is the shell script run inside each container to
-// detect which agent tool is running.
-const toolProbeScript = `
-for t in claude copilot codex gemini; do
-  pids=$(ps aux 2>/dev/null | awk -v t="$t" '($11 ~ "(^|/)"t"$" || $12 ~ "(^|/)"t"$") {print $2}')
-  [ -n "$pids" ] && { echo "$t"; exit 0; }
-done
-echo "-"
-`
-
-// parseToolProbeOutput parses the tool probe script output.
-func parseToolProbeOutput(output string) (string, bool) {
-	tool := strings.TrimSpace(output)
-	if tool == "" {
-		return "", false
-	}
-	if tool == "-" {
-		return "", true
-	}
-	return tool, true
-}
-
 func parseFloat(s string) (float64, error) {
 	return strconv.ParseFloat(strings.TrimSpace(s), 64)
 }

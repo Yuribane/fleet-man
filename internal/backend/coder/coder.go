@@ -268,28 +268,16 @@ func (b *CoderBackend) LogsCommand(containerID string, follow bool) *exec.Cmd {
 	return exec.Command("coder", args...)
 }
 
-// CaptureScreen runs `tmux capture-pane` inside a Coder workspace via SSH.
-func (b *CoderBackend) CaptureScreen(containerID, tmuxSession string) backend.ScreenCapture {
+// CaptureAllSessions lists and captures every tmux session inside a
+// Coder workspace in a single SSH round trip.
+func (b *CoderBackend) CaptureAllSessions(containerID string) backend.AllSessions {
 	target := b.resolveSSHTarget(containerID)
-	cmd := exec.Command("coder", sshArgs(target, []string{"tmux", "capture-pane", "-t", tmuxSession, "-p"})...)
+	cmd := exec.Command("coder", sshArgs(target, []string{backend.CaptureAllScript})...)
 	out, err := cmd.Output()
 	if err != nil {
-		return backend.ScreenCapture{}
+		return backend.AllSessions{OK: false}
 	}
-	return backend.ScreenCapture{Content: string(out), OK: true}
-}
-
-// ActiveSession returns the tmux session with the most recently active client.
-func (b *CoderBackend) ActiveSession(containerID string) string {
-	target := b.resolveSSHTarget(containerID)
-	cmd := exec.Command("coder", sshArgs(target, []string{
-		`tmux list-clients -F "#{client_activity}:#{session_name}" 2>/dev/null | sort -rn | head -1 | cut -d: -f2-`,
-	})...)
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	return backend.AllSessions{Sessions: backend.ParseAllSessionsOutput(string(out)), OK: true}
 }
 
 // AgentToolProbe detects which agent tool is running inside a Coder workspace.
@@ -297,12 +285,12 @@ func (b *CoderBackend) AgentToolProbe(containerID string) (string, bool) {
 	// coder ssh wraps everything after -- in a shell invocation, so we
 	// pass the script directly rather than via sh -c.
 	target := b.resolveSSHTarget(containerID)
-	cmd := exec.Command("coder", sshArgs(target, []string{toolProbeScript})...)
+	cmd := exec.Command("coder", sshArgs(target, []string{backend.ToolProbeScript})...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", false
 	}
-	return parseToolProbeOutput(string(out))
+	return backend.ParseToolProbeOutput(string(out))
 }
 
 // PortForwardCommand returns an unstarted *exec.Cmd that forwards localPort

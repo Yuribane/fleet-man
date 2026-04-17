@@ -25,12 +25,14 @@ const screenChangeThreshold = 3
 const screenActivityWindow = 12 * time.Second
 
 // ActivityTracker determines agent working/waiting/idle state by
-// diffing consecutive tmux screen captures.
+// diffing consecutive tmux screen captures. State is aggregated
+// across every session inside a container — a working agent in any
+// session marks the container as working.
 type ActivityTracker struct {
 	states     map[string]agentState
 	tools      map[string]state.AgentTool
-	prevScreen map[string]string
-	lastChange map[string]time.Time
+	prevScreen map[string]map[string]string    // containerID → sessionName → last content
+	lastChange map[string]map[string]time.Time // containerID → sessionName → last change
 }
 
 // NewActivityTracker returns an initialized tracker.
@@ -38,8 +40,8 @@ func NewActivityTracker() *ActivityTracker {
 	return &ActivityTracker{
 		states:     make(map[string]agentState),
 		tools:      make(map[string]state.AgentTool),
-		prevScreen: make(map[string]string),
-		lastChange: make(map[string]time.Time),
+		prevScreen: make(map[string]map[string]string),
+		lastChange: make(map[string]map[string]time.Time),
 	}
 }
 
@@ -53,27 +55,32 @@ func (t *ActivityTracker) Tool(containerID string) state.AgentTool {
 	return t.tools[containerID]
 }
 
-// Update processes new screen captures and probe results to derive
-// agent states and tool identifications.
+// Update processes new captures and probe results to derive agent
+// states and tool identifications.
 //
-// Tool detection uses process-based probes (ps aux inside containers).
-// State detection uses tmux screen diffs:
-//   - Missing from captures → preserve previous state (transient failure)
-//   - Present with OK=false → agentNotRunning (no tmux session)
-//   - Present with OK=true  → diff against previous capture to determine
-//     working (≥3 chars changed within 12s) or waiting
+// Tool detection uses process-based probes (ps aux inside containers)
+// and is independent of screen capture success — a probe finding
+// claude is recorded even if every tmux capture failed transiently.
 //
-// Containers not in expectedIDs are cleaned up.
-func (t *ActivityTracker) Update(captures map[string]backend.ScreenCapture, probes map[string]string, expectedIDs []string, now time.Time) {
+// State detection iterates over every session captured per container:
+//   - Container missing from captures → preserve previous state
+//   - Container OK=false → agentNotRunning (exec failed entirely)
+//   - Container OK=true with no sessions → agentNotRunning
+//   - Container OK=true with sessions → diff each session against its
+//     previous capture; container is agentWorking if ANY session had
+//     ≥ threshold change within the activity window
+//
+// Containers absent from expectedIDs are dropped (cleanup).
+func (t *ActivityTracker) Update(captures map[string]backend.AllSessions, probes map[string]string, expectedIDs []string, now time.Time) {
 	newStates := make(map[string]agentState, len(expectedIDs))
 	newTools := make(map[string]state.AgentTool, len(expectedIDs))
-	newPrev := make(map[string]string, len(expectedIDs))
-	newLastChange := make(map[string]time.Time, len(expectedIDs))
+	newPrev := make(map[string]map[string]string, len(expectedIDs))
+	newLastChange := make(map[string]map[string]time.Time, len(expectedIDs))
 
 	for _, id := range expectedIDs {
-		sc, captured := captures[id]
-		if !captured {
-			// Capture failed — preserve previous state to avoid flicker
+		all, captured := captures[id]
+		if !captured || !all.OK {
+			// Capture exec failed — preserve previous state to avoid flicker
 			if prev, ok := t.states[id]; ok {
 				newStates[id] = prev
 			}
@@ -89,14 +96,9 @@ func (t *ActivityTracker) Update(captures map[string]backend.ScreenCapture, prob
 			continue
 		}
 
-		if !sc.OK {
-			newStates[id] = agentNotRunning
-			continue
-		}
-
-		// Detect which tool is running from process probes.
-		// probeConfirmedEmpty is true only when the probe ran
-		// successfully and found no agent process.
+		// Tool detection runs independently of session capture — a
+		// probe that found claude must be recorded even when no
+		// sessions match a tracked baseline.
 		probeConfirmedEmpty := false
 		if probes != nil {
 			if probeTool, probed := probes[id]; probed {
@@ -106,39 +108,70 @@ func (t *ActivityTracker) Update(captures map[string]backend.ScreenCapture, prob
 					probeConfirmedEmpty = true
 				}
 			} else if tool, ok := t.tools[id]; ok {
-				// probe didn't run for this container (docker exec failure) → preserve
 				newTools[id] = tool
 			}
 		} else if tool, ok := t.tools[id]; ok {
-			newTools[id] = tool // no probes this cycle, preserve
+			newTools[id] = tool
 		}
 
-		// If the probe confirmed no agent is running, mark idle
-		// regardless of tmux session state — a shell prompt with no
-		// agent process is not a "waiting" agent.
+		// Snapshot every captured session as the new baseline. Doing
+		// this even when probeConfirmedEmpty / no-sessions ensures
+		// the next cycle has prev content to diff against once an
+		// agent starts.
+		nextPrev := make(map[string]string, len(all.Sessions))
+		for sName, sc := range all.Sessions {
+			if sc.OK {
+				nextPrev[sName] = sc.Content
+			}
+		}
+		newPrev[id] = nextPrev
+
 		if probeConfirmedEmpty {
 			newStates[id] = agentNotRunning
-			newPrev[id] = sc.Content
 			continue
 		}
 
-		// Compare with previous screen
-		prev, hasPrev := t.prevScreen[id]
-		lc := t.lastChange[id]
-
-		if hasPrev && countDiffs(prev, sc.Content) >= screenChangeThreshold {
-			lc = now
+		if len(all.Sessions) == 0 {
+			newStates[id] = agentNotRunning
+			continue
 		}
 
-		newPrev[id] = sc.Content
-		newLastChange[id] = lc
+		prevBySession := t.prevScreen[id]
+		lcBySession := t.lastChange[id]
 
-		if !lc.IsZero() && now.Sub(lc) < screenActivityWindow {
+		nextLC := make(map[string]time.Time, len(all.Sessions))
+		anyHadHistory := false
+		workingDetected := false
+
+		for sName, sc := range all.Sessions {
+			if !sc.OK {
+				continue
+			}
+			prev, hasPrev := prevBySession[sName]
+			var lc time.Time
+			if lcBySession != nil {
+				lc = lcBySession[sName]
+			}
+			if hasPrev {
+				anyHadHistory = true
+				if countDiffs(prev, sc.Content) >= screenChangeThreshold {
+					lc = now
+				}
+			}
+			nextLC[sName] = lc
+			if !lc.IsZero() && now.Sub(lc) < screenActivityWindow {
+				workingDetected = true
+			}
+		}
+		newLastChange[id] = nextLC
+
+		switch {
+		case workingDetected:
 			newStates[id] = agentWorking
-		} else if hasPrev {
+		case anyHadHistory:
 			newStates[id] = agentWaiting
-		} else {
-			// First capture — no history yet, assume waiting
+		default:
+			// First capture(s) — no history yet, assume waiting
 			newStates[id] = agentWaiting
 		}
 	}
@@ -170,4 +203,3 @@ func countDiffs(a, b string) int {
 	}
 	return diffs
 }
-

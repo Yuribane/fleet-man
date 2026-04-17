@@ -2,32 +2,12 @@ package backend
 
 import "sync"
 
-// CaptureScreens runs CaptureScreen concurrently for all containers.
-// The sessions map is containerID -> tmux session name.
-func CaptureScreens(b Backend, sessions map[string]string) map[string]ScreenCapture {
-	result := make(map[string]ScreenCapture, len(sessions))
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-
-	for id, sess := range sessions {
-		wg.Add(1)
-		go func(cid, session string) {
-			defer wg.Done()
-			sc := b.CaptureScreen(cid, session)
-			mu.Lock()
-			result[cid] = sc
-			mu.Unlock()
-		}(id, sess)
-	}
-
-	wg.Wait()
-	return result
-}
-
-// ActiveSessions runs ActiveSession concurrently for all containers.
-// Returns a map of containerID → active session name (empty string omitted).
-func ActiveSessions(b Backend, containerIDs []string) map[string]string {
-	result := make(map[string]string, len(containerIDs))
+// CaptureAllSessionsForAll runs CaptureAllSessions concurrently for
+// every container. Returns a map keyed by containerID. Entries with
+// OK=false indicate the container's exec failed and the previous
+// activity state should be preserved by the caller.
+func CaptureAllSessionsForAll(b Backend, containerIDs []string) map[string]AllSessions {
+	result := make(map[string]AllSessions, len(containerIDs))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -35,12 +15,10 @@ func ActiveSessions(b Backend, containerIDs []string) map[string]string {
 		wg.Add(1)
 		go func(cid string) {
 			defer wg.Done()
-			sess := b.ActiveSession(cid)
-			if sess != "" {
-				mu.Lock()
-				result[cid] = sess
-				mu.Unlock()
-			}
+			all := b.CaptureAllSessions(cid)
+			mu.Lock()
+			result[cid] = all
+			mu.Unlock()
 		}(id)
 	}
 

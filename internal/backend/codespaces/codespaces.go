@@ -274,36 +274,25 @@ func (b *CodespacesBackend) LogsCommand(containerID string, follow bool) *exec.C
 	return exec.Command("gh", args...)
 }
 
-// CaptureScreen runs `tmux capture-pane` inside a codespace via SSH.
-func (b *CodespacesBackend) CaptureScreen(containerID, tmuxSession string) backend.ScreenCapture {
-	cmd := b.sshCommand(containerID, []string{"tmux", "capture-pane", "-t", tmuxSession, "-p"}, false)
+// CaptureAllSessions lists and captures every tmux session inside a
+// codespace in a single SSH round trip.
+func (b *CodespacesBackend) CaptureAllSessions(containerID string) backend.AllSessions {
+	cmd := b.sshCommand(containerID, []string{backend.CaptureAllScript}, false)
 	out, err := cmd.Output()
 	if err != nil {
-		return backend.ScreenCapture{}
+		return backend.AllSessions{OK: false}
 	}
-	return backend.ScreenCapture{Content: string(out), OK: true}
-}
-
-// ActiveSession returns the tmux session with the most recently active client.
-func (b *CodespacesBackend) ActiveSession(containerID string) string {
-	cmd := b.sshCommand(containerID, []string{
-		`tmux list-clients -F "#{client_activity}:#{session_name}" 2>/dev/null | sort -rn | head -1 | cut -d: -f2-`,
-	}, false)
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	return backend.AllSessions{Sessions: backend.ParseAllSessionsOutput(string(out)), OK: true}
 }
 
 // AgentToolProbe detects which agent tool is running inside a codespace.
 func (b *CodespacesBackend) AgentToolProbe(containerID string) (string, bool) {
-	cmd := b.sshCommand(containerID, []string{toolProbeScript}, false)
+	cmd := b.sshCommand(containerID, []string{backend.ToolProbeScript}, false)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", false
 	}
-	return parseToolProbeOutput(string(out))
+	return backend.ParseToolProbeOutput(string(out))
 }
 
 // ===========================================

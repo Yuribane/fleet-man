@@ -1,6 +1,10 @@
 package coder
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/BenjaminBenetti/fleet-man/internal/backend"
+)
 
 func TestParseToolProbeOutput(t *testing.T) {
 	tests := []struct {
@@ -19,9 +23,9 @@ func TestParseToolProbeOutput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tool, ok := parseToolProbeOutput(tt.input)
+			tool, ok := backend.ParseToolProbeOutput(tt.input)
 			if tool != tt.wantTool || ok != tt.wantOK {
-				t.Errorf("parseToolProbeOutput(%q) = (%q, %v), want (%q, %v)",
+				t.Errorf("ParseToolProbeOutput(%q) = (%q, %v), want (%q, %v)",
 					tt.input, tool, ok, tt.wantTool, tt.wantOK)
 			}
 		})

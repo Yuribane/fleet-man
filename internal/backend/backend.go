@@ -35,18 +35,16 @@ type Backend interface {
 	// LogsCommand returns an unstarted *exec.Cmd for streaming logs.
 	LogsCommand(containerID string, follow bool) *exec.Cmd
 
-	// CaptureScreen captures the visible content of a tmux session
-	// running inside a container.
-	CaptureScreen(containerID, tmuxSession string) ScreenCapture
+	// CaptureAllSessions lists every tmux session inside a container
+	// and captures each pane's visible content in a single shell
+	// invocation. Used to detect agent activity across all sessions
+	// without knowing their names in advance.
+	CaptureAllSessions(containerID string) AllSessions
 
 	// AgentToolProbe detects which agent tool (if any) is running
 	// inside a container. Returns (tool, true) on success,
 	// ("", false) on probe failure.
 	AgentToolProbe(containerID string) (string, bool)
-
-	// ActiveSession returns the name of the tmux session that currently
-	// has an attached client inside the container, or "" if none.
-	ActiveSession(containerID string) string
 
 	// EditorURI returns a URI string that an editor (e.g. VS Code)
 	// can use to connect to this workspace. Returns ("", false) if
