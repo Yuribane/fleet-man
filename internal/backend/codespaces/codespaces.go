@@ -319,8 +319,11 @@ func (b *CodespacesBackend) EditorURI(workspaceDir string, projectName string) (
 
 // PortForwardCommand returns an unstarted *exec.Cmd that forwards localPort
 // on the host to remotePort inside the codespace using `gh codespace ports forward`.
+//
+// gh expects the mapping as "<remote-port>:<local-port>", which is the
+// opposite order from `coder port-forward --tcp=<local>:<remote>`.
 func (b *CodespacesBackend) PortForwardCommand(containerID string, localPort, remotePort int) *exec.Cmd {
-	mapping := fmt.Sprintf("%d:%d", localPort, remotePort)
+	mapping := fmt.Sprintf("%d:%d", remotePort, localPort)
 	return exec.Command("gh", "codespace", "ports", "forward", mapping, "-c", containerID)
 }
 
