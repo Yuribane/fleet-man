@@ -4,11 +4,12 @@ import "os/exec"
 
 // Dependency describes a binary dependency and how to install it.
 type Dependency struct {
-	Name       string
-	Binary     string
-	Required   bool
-	InstallURL string
-	Found      bool
+	Name        string
+	Binary      string
+	Required    bool
+	InstallURL  string
+	Description string
+	Found       bool
 }
 
 // Check looks up whether the devcontainer and coder binaries are
@@ -26,6 +27,20 @@ func Check() []Dependency {
 			Binary:     "coder",
 			Required:   false,
 			InstallURL: "https://coder.com/docs/install",
+		},
+		{
+			Name:        "wl-clipboard",
+			Binary:      "wl-copy",
+			Required:    false,
+			InstallURL:  wlClipboardInstallURL(),
+			Description: "Copy/paste support on Wayland (only one of wl-clipboard or xclip needed).",
+		},
+		{
+			Name:        "xclip",
+			Binary:      "xclip",
+			Required:    false,
+			InstallURL:  "https://github.com/astrand/xclip",
+			Description: "Copy/paste support on X11 (only one of wl-copy or xclip needed).",
 		},
 	}
 
@@ -77,6 +92,18 @@ func CheckTools() []ToolStatus {
 			Binary:      "coder",
 			Description: "Adds remote coder workspace development.",
 			InstallURL:  "https://coder.com/docs/install",
+		},
+		{
+			Name:        "wl-clipboard",
+			Binary:      "wl-copy",
+			Description: "Optional — copy/paste support on Wayland (only one of wl-clipboard or xclip needed).",
+			InstallURL:  wlClipboardInstallURL(),
+		},
+		{
+			Name:        "xclip",
+			Binary:      "xclip",
+			Description: "Optional — copy/paste support on X11 (only one of wl-copy or xclip needed).",
+			InstallURL:  "https://github.com/astrand/xclip",
 		},
 	}
 

@@ -38,6 +38,10 @@ const (
 	settingsItemKeybindings    = 2001 // keybindings dialog row
 )
 
+// toolStatusCount is the number of rows rendered in the Tool Status
+// section. Must match the length of deps.CheckTools().
+const toolStatusCount = 5
+
 // dotfilesSetupPrompt is the instruction sent to the coding agent for
 // guided dotfiles setup.
 const dotfilesSetupPrompt = "Follow the instructions in https://raw.githubusercontent.com/BenjaminBenetti/Teeleport/main/SETUP_SKILL.md to help me set up Teeleport."
@@ -133,11 +137,11 @@ var settingsSections = []settingsSection{
 	{
 		Title: "Tool Status",
 		Items: func(_ *state.Config) []int {
-			return []int{
-				settingsItemToolStatusBase,
-				settingsItemToolStatusBase + 1,
-				settingsItemToolStatusBase + 2,
+			items := make([]int, toolStatusCount)
+			for i := range items {
+				items[i] = settingsItemToolStatusBase + i
 			}
+			return items
 		},
 	},
 	{

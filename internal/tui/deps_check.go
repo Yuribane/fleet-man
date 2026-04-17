@@ -86,6 +86,10 @@ func (dp *depsCheckPage) View(m *model) string {
 
 		lines = append(lines, fmt.Sprintf("  %s  %s%s", status, dialogLabel.Render(d.Name), note))
 
+		if d.Description != "" {
+			lines = append(lines, fmt.Sprintf("    %s", dimStyle.Render(d.Description)))
+		}
+
 		if !d.Found {
 			lines = append(lines, fmt.Sprintf("    Install: %s", dimStyle.Render(d.InstallURL)))
 		}
@@ -94,7 +98,11 @@ func (dp *depsCheckPage) View(m *model) string {
 	lines = append(lines, "")
 	lines = append(lines, dialogHint.Render("[enter] Continue"))
 
-	b.WriteString(dialogBox.Render(strings.Join(lines, "\n")))
+	box := dialogBox.Width(80)
+	if m.width > 0 && m.width-2 < 80 {
+		box = dialogBox.Width(max(1, m.width-2))
+	}
+	b.WriteString(box.Render(strings.Join(lines, "\n")))
 	b.WriteString("\n")
 
 	return b.String()

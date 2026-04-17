@@ -17,6 +17,8 @@ func allToolsFound() []deps.ToolStatus {
 		{Name: "devcontainer", Binary: "devcontainer", Found: true},
 		{Name: "gh", Binary: "gh", Found: true},
 		{Name: "coder", Binary: "coder", Found: true},
+		{Name: "wl-clipboard", Binary: "wl-copy", Found: true},
+		{Name: "xclip", Binary: "xclip", Found: true},
 	}
 }
 

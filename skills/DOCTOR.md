@@ -350,7 +350,49 @@ If the user wants to install one:
 
 ---
 
-## 12. xdg-open (optional)
+## 12. Clipboard Tools (optional)
+
+Fleet-man's copy/paste support relies on a system clipboard CLI.
+**Only one** of `wl-copy` (Wayland) or `xclip` (X11) is required — the
+user does **not** need both. Which one applies depends on their display
+server:
+
+- Wayland sessions → `wl-copy`
+- X11 sessions → `xclip`
+
+This is **optional**. If neither is present, do not report it as an
+issue unless the user asks about copy/paste or has already chosen a
+display server that implies one. If at least one is installed, copy/paste
+is satisfied.
+
+```bash
+have_wl=0; have_xclip=0
+command -v wl-copy > /dev/null 2>&1 && have_wl=1
+command -v xclip  > /dev/null 2>&1 && have_xclip=1
+
+if [ "$have_wl" = "1" ] || [ "$have_xclip" = "1" ]; then
+  echo "OK: clipboard tool present (wl-copy=$have_wl, xclip=$have_xclip)"
+else
+  echo "MISSING: neither wl-copy nor xclip installed"
+  echo "Detected display server: ${XDG_SESSION_TYPE:-unknown} (WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-unset}, DISPLAY=${DISPLAY:-unset})"
+fi
+```
+
+- **Fix (Wayland — install wl-clipboard):**
+  ```bash
+  sudo apt-get update && sudo apt-get install -y wl-clipboard
+  ```
+- **Fix (X11 — install xclip):**
+  ```bash
+  sudo apt-get update && sudo apt-get install -y xclip
+  ```
+
+Pick whichever matches `XDG_SESSION_TYPE` / the presence of
+`WAYLAND_DISPLAY` vs `DISPLAY`. Do not install both.
+
+---
+
+## 13. xdg-open (optional)
 
 The TUI settings page can open install URLs in your browser. This is **optional** — do not report it missing as an issue.
 
@@ -365,7 +407,7 @@ If installed but broken, reinstall with:
 
 ---
 
-## 13. Devcontainer Project Requirements
+## 14. Devcontainer Project Requirements
 
 For a repository to work with fleet-man's devcontainer backend, it needs a `.devcontainer/devcontainer.json` file.
 
@@ -384,7 +426,7 @@ fi
 
 ---
 
-## 14. Workspace Directory Permissions
+## 15. Workspace Directory Permissions
 
 ```bash
 # Check fleet workspaces directory
@@ -411,7 +453,7 @@ fi
 
 ---
 
-## 15. Orphaned Containers
+## 16. Orphaned Containers
 
 If fleet-man crashes or state becomes inconsistent, Docker containers may be left running without fleet-man tracking them.
 
