@@ -21,20 +21,23 @@ import (
 // Alacritty, Kitty), the goroutine is harmless since it re-copies
 // the same content that OSC 52 already placed on the clipboard.
 type clipboardSync struct {
-	clipCmd    string
+	clipCmds   []string
 	lastBuffer string
 }
 
-// clipboardCmd returns the system clipboard command for the current
-// platform and display server.
-func clipboardCmd() string {
+// clipboardCmds returns the system clipboard commands for the current
+// platform and display server. On Linux, two commands are returned so
+// the content is written to both the regular clipboard (Ctrl+V) and
+// the primary selection (middle-click). On macOS, only pbcopy is
+// returned because there is no primary selection concept.
+func clipboardCmds() []string {
 	if runtime.GOOS == "darwin" {
-		return "pbcopy"
+		return []string{"pbcopy"}
 	}
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
-		return "wl-copy"
+		return []string{"wl-copy", "wl-copy --primary"}
 	}
-	return "xclip -sel clip -i"
+	return []string{"xclip -sel clip -i", "xclip -sel primary -i"}
 }
 
 // newClipboardSync creates a clipboard synchroniser. Returns nil if
@@ -43,12 +46,12 @@ func newClipboardSync() *clipboardSync {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return nil
 	}
-	cmd := clipboardCmd()
-	bin := strings.SplitN(cmd, " ", 2)[0]
+	cmds := clipboardCmds()
+	bin := strings.SplitN(cmds[0], " ", 2)[0]
 	if _, err := exec.LookPath(bin); err != nil {
 		return nil
 	}
-	return &clipboardSync{clipCmd: cmd}
+	return &clipboardSync{clipCmds: cmds}
 }
 
 // Start begins polling the tmux paste buffer and synchronising
@@ -82,7 +85,10 @@ func (cs *clipboardSync) poll(ctx context.Context) {
 	}
 	cs.lastBuffer = buf
 
-	cmd := exec.CommandContext(ctx, "sh", "-c",
-		fmt.Sprintf("printf '%%s' %s | %s", shQuote(buf), cs.clipCmd))
-	_ = cmd.Run()
+	quoted := shQuote(buf)
+	for _, cc := range cs.clipCmds {
+		cmd := exec.CommandContext(ctx, "sh", "-c",
+			fmt.Sprintf("printf '%%s' %s | %s", quoted, cc))
+		_ = cmd.Run()
+	}
 }
