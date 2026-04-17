@@ -175,12 +175,51 @@ func backendTypeLabel(bt fleet.BackendType) string {
 // Add Instance Dialog
 // ===========================================
 
+// addInstanceRow identifies a focusable row in the add-instance dialog.
+const (
+	addInstanceRowName = iota
+	addInstanceRowColor
+	addInstanceRowDeploy
+	addInstanceRowCount
+)
+
+// openEditInstanceDialog opens the add-instance dialog in edit mode for
+// the currently selected instance. Name and deploy target are disabled;
+// only the color is editable.
+func (fp *fleetPage) openEditInstanceDialog(m *model) tea.Cmd {
+	f, inst := fp.selectedInstance(m)
+	if inst == nil || f == nil {
+		m.message = "Select an instance to edit"
+		return nil
+	}
+
+	fp.mode = viewAddInstance
+	fp.dialogEditing = true
+	fp.dialogFleet = f.Name
+	fp.dialogInst = inst.Name
+	fp.dialogBackend = inst.Backend
+	if fp.dialogBackend == "" {
+		fp.dialogBackend = fleet.BackendDevcontainer
+	}
+	fp.dialogColor = inst.Color
+	if fp.dialogColor == "" {
+		fp.dialogColor = instanceColorWhite
+	}
+	fp.dialogRow = addInstanceRowColor
+	fp.textInput.SetValue(inst.Name)
+	fp.textInput.Blur()
+	return nil
+}
+
 // updateAddInstance handles the add-instance dialog.
 func (fp *fleetPage) updateAddInstance(m *model, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "enter":
+			if fp.dialogEditing {
+				return fp.saveInstanceEdits(m)
+			}
 			name := strings.TrimSpace(fp.textInput.Value())
 			if name == "" {
 				m.message = "Name cannot be empty"
@@ -207,6 +246,11 @@ func (fp *fleetPage) updateAddInstance(m *model, msg tea.Msg) tea.Cmd {
 				bt = fleet.BackendDevcontainer
 			}
 
+			color := fp.dialogColor
+			if color == instanceColorWhite {
+				color = ""
+			}
+
 			wsDir := filepath.Join(state.WorkspacesDir(), fleetName, name, fleetName)
 			inst := &fleet.Instance{
 				Name:         name,
@@ -215,6 +259,7 @@ func (fp *fleetPage) updateAddInstance(m *model, msg tea.Msg) tea.Cmd {
 				CreatedAt:    time.Now(),
 				Status:       fleet.StatusCreating,
 				Backend:      bt,
+				Color:        color,
 			}
 			_ = f.AddInstance(inst)
 			_ = state.Save(m.st)
@@ -234,11 +279,54 @@ func (fp *fleetPage) updateAddInstance(m *model, msg tea.Msg) tea.Cmd {
 			return createInstanceCmd(fleetName, name, f.Remote, bt)
 
 		case "tab":
+			if fp.dialogEditing {
+				return nil
+			}
 			opts := fp.availableBackendTypes(m)
 			if len(opts) > 1 {
 				fp.dialogBackend = nextBackendType(fp.dialogBackend, 1, opts)
 			}
 			return nil
+
+		case "shift+tab":
+			fp.dialogColor = nextInstanceColor(fp.dialogColor, 1)
+			return nil
+
+		case "up":
+			fp.dialogRow = fp.prevAddInstanceRow(fp.dialogRow)
+			fp.syncAddInstanceFocus()
+			return nil
+
+		case "down":
+			fp.dialogRow = fp.nextAddInstanceRow(fp.dialogRow)
+			fp.syncAddInstanceFocus()
+			return nil
+
+		case "left":
+			if fp.dialogRow == addInstanceRowDeploy && !fp.dialogEditing {
+				opts := fp.availableBackendTypes(m)
+				if len(opts) > 1 {
+					fp.dialogBackend = nextBackendType(fp.dialogBackend, -1, opts)
+				}
+				return nil
+			}
+			if fp.dialogRow == addInstanceRowColor {
+				fp.dialogColor = nextInstanceColor(fp.dialogColor, -1)
+				return nil
+			}
+
+		case "right", " ":
+			if fp.dialogRow == addInstanceRowDeploy && !fp.dialogEditing {
+				opts := fp.availableBackendTypes(m)
+				if len(opts) > 1 {
+					fp.dialogBackend = nextBackendType(fp.dialogBackend, 1, opts)
+				}
+				return nil
+			}
+			if fp.dialogRow == addInstanceRowColor {
+				fp.dialogColor = nextInstanceColor(fp.dialogColor, 1)
+				return nil
+			}
 
 		case "esc", "ctrl+c":
 			fp.mode = viewNormal
@@ -248,9 +336,91 @@ func (fp *fleetPage) updateAddInstance(m *model, msg tea.Msg) tea.Cmd {
 		}
 	}
 
+	// Only forward key input to the name field when it is focused; other
+	// rows are cycled with arrow keys and should swallow character input.
+	if fp.dialogRow != addInstanceRowName {
+		return nil
+	}
 	var cmd tea.Cmd
 	fp.textInput, cmd = fp.textInput.Update(msg)
 	return cmd
+}
+
+// syncAddInstanceFocus focuses the text input only when the name row is
+// selected so the cursor visually reflects the current focus. In edit mode
+// the name is immutable so focus is never granted.
+func (fp *fleetPage) syncAddInstanceFocus() {
+	if fp.dialogRow == addInstanceRowName && !fp.dialogEditing {
+		fp.textInput.Focus()
+	} else {
+		fp.textInput.Blur()
+	}
+}
+
+// addInstanceRowEnabled reports whether a given row is selectable in the
+// current dialog mode. Name and deploy are locked while editing.
+func (fp *fleetPage) addInstanceRowEnabled(row int) bool {
+	if !fp.dialogEditing {
+		return true
+	}
+	return row == addInstanceRowColor
+}
+
+// nextAddInstanceRow advances the focused row forward, skipping any rows
+// that are disabled in the current dialog mode.
+func (fp *fleetPage) nextAddInstanceRow(current int) int {
+	for i := 1; i <= addInstanceRowCount; i++ {
+		candidate := (current + i) % addInstanceRowCount
+		if fp.addInstanceRowEnabled(candidate) {
+			return candidate
+		}
+	}
+	return current
+}
+
+// prevAddInstanceRow advances the focused row backward, skipping any rows
+// that are disabled in the current dialog mode.
+func (fp *fleetPage) prevAddInstanceRow(current int) int {
+	for i := 1; i <= addInstanceRowCount; i++ {
+		candidate := (current - i + addInstanceRowCount) % addInstanceRowCount
+		if fp.addInstanceRowEnabled(candidate) {
+			return candidate
+		}
+	}
+	return current
+}
+
+// saveInstanceEdits commits color edits to the selected instance and
+// closes the dialog.
+func (fp *fleetPage) saveInstanceEdits(m *model) tea.Cmd {
+	f, ok := m.st.Fleets[fp.dialogFleet]
+	if !ok {
+		fp.mode = viewNormal
+		fp.dialogEditing = false
+		m.message = fmt.Sprintf("Fleet %s not found", fp.dialogFleet)
+		return nil
+	}
+	inst, err := f.GetInstance(fp.dialogInst)
+	if err != nil {
+		fp.mode = viewNormal
+		fp.dialogEditing = false
+		m.message = fmt.Sprintf("Instance %s/%s not found", fp.dialogFleet, fp.dialogInst)
+		return nil
+	}
+
+	color := fp.dialogColor
+	if color == instanceColorWhite {
+		color = ""
+	}
+	inst.Color = color
+	_ = state.Save(m.st)
+
+	fp.buildRows(m)
+	fp.mode = viewNormal
+	fp.dialogEditing = false
+	fp.textInput.Blur()
+	m.message = fmt.Sprintf("Updated %s/%s", fp.dialogFleet, fp.dialogInst)
+	return nil
 }
 
 // ===========================================

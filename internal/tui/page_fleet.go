@@ -57,6 +57,9 @@ type fleetPage struct {
 	dialogFleet   string
 	dialogInst    string
 	dialogBackend fleet.BackendType
+	dialogColor   string
+	dialogRow     int
+	dialogEditing bool
 	dialogGroupID string
 	dialogSession string
 	textInput     textinput.Model
@@ -445,6 +448,9 @@ func (fp *fleetPage) updateNormal(m *model, msg tea.Msg) tea.Cmd {
 					}
 				}
 			}
+			fp.dialogColor = instanceColorWhite
+			fp.dialogRow = addInstanceRowName
+			fp.dialogEditing = false
 			fp.textInput.SetValue("")
 			fp.textInput.Placeholder = "instance-name"
 			fp.textInput.CharLimit = 64
@@ -464,8 +470,11 @@ func (fp *fleetPage) updateNormal(m *model, msg tea.Msg) tea.Cmd {
 				return fp.cycleSessionGroup(m, msg.String() == "pgup")
 			}
 
-		case "enter", "e":
+		case "enter":
 			return fp.handleEnter(m)
+
+		case "e":
+			return fp.openEditInstanceDialog(m)
 
 		case "o":
 			_, inst := fp.selectedInstance(m)
@@ -916,8 +925,13 @@ func (fp *fleetPage) viewFleetList(m *model) string {
 			}
 
 			paddedName := fmt.Sprintf("%s%-22s", arrow, inst.Name)
-			if isSelected {
+			switch {
+			case isSelected && instanceColorHasCustom(inst.Color):
+				paddedName = instanceColorStyle(inst.Color).Bold(true).Render(paddedName)
+			case isSelected:
 				paddedName = selectedStyle.Render(paddedName)
+			case instanceColorHasCustom(inst.Color):
+				paddedName = instanceColorStyle(inst.Color).Render(paddedName)
 			}
 
 			backendIcon := "⬡"
@@ -1059,19 +1073,52 @@ func (fp *fleetPage) viewFleetList(m *model) string {
 		if bt == "" {
 			bt = fleet.BackendDevcontainer
 		}
-		hint := "[enter] Create  [esc] Cancel"
-		if len(fp.availableBackendTypes(m)) > 1 {
-			hint = "[enter] Create  [tab] Change deploy target  [esc] Cancel"
+		colorName := fp.dialogColor
+		if colorName == "" {
+			colorName = instanceColorWhite
 		}
+
+		var title, hint, nameField, deployField string
+		if fp.dialogEditing {
+			title = "Edit instance"
+			hint = "[←→/space] Cycle color  [shift+tab] Color  [enter] Save  [esc] Cancel"
+			nameField = dimStyle.Render(fp.dialogInst)
+			deployField = dimStyle.Render(fmt.Sprintf("[ %s ]", backendTypeLabel(bt)))
+		} else {
+			title = "New instance"
+			hint = "[↑↓] Select  [←→/space] Cycle  [shift+tab] Color  [enter] Create  [esc] Cancel"
+			if len(fp.availableBackendTypes(m)) > 1 {
+				hint = "[↑↓] Select  [←→/space/tab] Cycle  [shift+tab] Color  [enter] Create  [esc] Cancel"
+			}
+			nameField = fp.textInput.View()
+			deployField = fmt.Sprintf("[ %s ]", backendTypeLabel(bt))
+		}
+
+		rowMarker := func(r int) string {
+			if fp.dialogEditing && r != addInstanceRowColor {
+				return "  "
+			}
+			if fp.dialogRow == r {
+				return cursorStyle.Render("> ")
+			}
+			return "  "
+		}
+
+		colorPreview := instanceColorStyle(colorName).Render(colorName)
 		dialog := fmt.Sprintf(
-			"%s\n\n%s %s\n%s %s\n%s [ %s ]\n\n%s",
-			dialogTitle.Render("New instance"),
+			"%s\n\n  %s %s\n%s%s %s\n%s%s [ %s ]\n%s%s %s\n\n%s",
+			dialogTitle.Render(title),
 			dialogLabel.Render("Fleet:  "),
 			fleetExpandedStyle.Render(fp.dialogFleet),
+			rowMarker(addInstanceRowName),
 			dialogLabel.Render("Name:   "),
-			fp.textInput.View(),
+			nameField,
+			rowMarker(addInstanceRowColor),
+			dialogLabel.Render("Color:  "),
+			colorPreview,
+			rowMarker(addInstanceRowDeploy),
 			dialogLabel.Render("Deploy: "),
-			backendTypeLabel(bt),
+			deployField,
 			dialogHint.Render(hint),
 		)
 		b.WriteString(dialogBox.Render(dialog))
