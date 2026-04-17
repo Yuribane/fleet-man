@@ -36,6 +36,10 @@ type instanceCreateErrMsg struct {
 
 type pollCreatingTickMsg struct{}
 
+// forceRepaintTickMsg fires once per second to trigger a full redraw,
+// clearing any stale characters left behind by tmux pane resizes.
+type forceRepaintTickMsg struct{}
+
 type statsMsg struct {
 	stats        map[string]*backend.ContainerStats
 	screens      map[string]backend.ScreenCapture
@@ -48,6 +52,19 @@ type statsMsg struct {
 func pollCreatingCmd() tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
 		return pollCreatingTickMsg{}
+	})
+}
+
+// forceRepaintCmd schedules a forceRepaintTickMsg one second from now.
+// The handler in app.Update responds by emitting a synthetic
+// tea.WindowSizeMsg with the current dimensions, which invalidates
+// bubbletea's line cache and causes every line to be rewritten on the
+// next flush. This cleans stale characters left behind by tmux pane
+// resizes without flicker — no erase-screen escape is written ahead of
+// the redraw, so the terminal never sees a blank frame.
+func forceRepaintCmd() tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg {
+		return forceRepaintTickMsg{}
 	})
 }
 

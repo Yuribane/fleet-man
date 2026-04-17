@@ -368,6 +368,7 @@ func (m model) Init() tea.Cmd {
 		m.fetchAllStatsCmd(false),
 		m.sessionDiscoveryLoop(),
 		checkUpdateCmd(),
+		forceRepaintCmd(),
 		m.currentPage.Init(&m),
 	}
 	if len(m.creating) > 0 {
@@ -468,6 +469,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_ = state.SaveConfig(m.cfg)
 		}
 		return m, spinCmd
+
+	case forceRepaintTickMsg:
+		// Emit a synthetic WindowSizeMsg with the current dimensions.
+		// bubbletea's renderer responds to WindowSizeMsg by invalidating
+		// its line cache (see standard_renderer.go → handleMessages),
+		// so the next flush rewrites every line with EraseLineRight
+		// appended. That scrubs any stale characters the outer tmux
+		// left behind during a pane resize — without writing a clear
+		// escape first, so the terminal never shows a blank frame.
+		width, height := m.width, m.height
+		return m, tea.Batch(
+			spinCmd,
+			func() tea.Msg { return tea.WindowSizeMsg{Width: width, Height: height} },
+			forceRepaintCmd(),
+		)
 	}
 
 	// 4. Mixed messages — handle shared part, then forward to page
