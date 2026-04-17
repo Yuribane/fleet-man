@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backend"
@@ -68,6 +69,13 @@ type model struct {
 
 	// Update check
 	updateAvailable string // non-empty = new version tag from GitHub
+
+	// Pending exec after quit: after a successful update the TUI
+	// quits, then Run() replaces the current process with the new
+	// fleet binary via syscall.Exec so the new fleet is NOT nested
+	// inside the old fleet process.
+	pendingExecPath string
+	pendingExecArgs []string
 
 	message  string
 	quitting bool
@@ -415,6 +423,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateAvailable = msg.latestVersion
 		}
 		return m, spinCmd
+
+	case updateInstalledMsg:
+		if msg.err != nil {
+			m.message = fmt.Sprintf("Update failed: %v", msg.err)
+			return m, spinCmd
+		}
+		// Installer succeeded. Record the new binary, quit the TUI,
+		// and let Run() syscall.Exec into it — replacing the current
+		// process so the new fleet is NOT nested inside the old one.
+		m.pendingExecPath = msg.path
+		m.pendingExecArgs = msg.args
+		m.quitting = true
+		return m, tea.Quit
 
 	case coderParamsFetchedMsg:
 		m.coderFetchingParams = false
@@ -800,10 +821,26 @@ func Run() error {
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
-	_, err := p.Run()
+	finalModel, err := p.Run()
 
 	if clipCancel != nil {
 		clipCancel()
+	}
+
+	// If the user just performed a successful auto-update, replace
+	// the current process with the freshly installed binary. Doing
+	// the exec here (in the old fleet's Go process, after the TUI
+	// has fully torn down) means the new fleet takes over this
+	// process ID — it is NOT a child of the old fleet. That way ^C
+	// in the new fleet exits cleanly instead of dropping back into
+	// the old fleet.
+	if err == nil {
+		if fm, ok := finalModel.(model); ok && fm.pendingExecPath != "" {
+			if execErr := syscall.Exec(fm.pendingExecPath, fm.pendingExecArgs, os.Environ()); execErr != nil {
+				return fmt.Errorf("failed to launch updated fleet %q: %w", fm.pendingExecPath, execErr)
+			}
+			// syscall.Exec does not return on success.
+		}
 	}
 	return err
 }

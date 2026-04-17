@@ -2,11 +2,9 @@ package tui
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/version"
@@ -16,6 +14,22 @@ import (
 // updateCheckMsg is sent when the background update check completes.
 type updateCheckMsg struct {
 	latestVersion string // empty if no update or error
+}
+
+// updateInstalledMsg is sent after the install script finishes.
+//
+// On success the top-level model stores path/args and quits the TUI;
+// Run() then replaces the current process with the new binary via
+// syscall.Exec. This is why the install script itself must NOT exec
+// the new binary: doing so would leave the new fleet running as a
+// grandchild of the old fleet (old-fleet → tea.ExecProcess shell →
+// exec'd new fleet), so ^C'ing the new fleet would drop the user back
+// into the old fleet. syscall.Exec from the Go process replaces the
+// old fleet outright — no nesting.
+type updateInstalledMsg struct {
+	err  error
+	path string   // absolute path to the new binary
+	args []string // full argv for the replacement process (argv[0] == path)
 }
 
 // checkUpdateCmd queries the GitHub API for the latest release of fleet-man
@@ -55,36 +69,38 @@ func checkUpdateCmd() tea.Cmd {
 	}
 }
 
-// performUpdateCmd runs the install script and then re-execs fleet.
-// If inHostTmux is true the --tmux flag is preserved on relaunch.
+// performUpdateCmd runs the install script via tea.ExecProcess and, on
+// success, signals Run() (via updateInstalledMsg) to quit the TUI and
+// exec-replace this process with the new fleet binary. If inHostTmux
+// is true the --tmux flag is preserved on the replacement argv.
 func performUpdateCmd(inHostTmux bool) tea.Cmd {
-	return tea.ExecProcess(
-		updateShellCmd(inHostTmux),
-		func(err error) tea.Msg { return execDoneMsg{err} },
-	)
-}
-
-// updateShellCmd builds the shell command that downloads the latest
-// binary via install.sh, then re-execs fleet (preserving --tmux).
-func updateShellCmd(inHostTmux bool) *exec.Cmd {
 	self, err := os.Executable()
 	if err != nil {
 		self = "fleet"
 	}
 
-	relaunch := self
+	args := []string{self}
 	if inHostTmux {
-		relaunch = fmt.Sprintf("%s --tmux", self)
+		args = append(args, "--tmux")
 	}
 
-	script := fmt.Sprintf(
-		`curl -sL https://raw.githubusercontent.com/BenjaminBenetti/fleet-man/main/install.sh | sh && exec %s`,
-		relaunch,
+	return tea.ExecProcess(
+		updateShellCmd(),
+		func(err error) tea.Msg {
+			return updateInstalledMsg{err: err, path: self, args: args}
+		},
 	)
+}
+
+// updateShellCmd builds the shell command that downloads and installs
+// the latest fleet binary via install.sh. It intentionally stops after
+// install — the caller replaces the current process with the new
+// binary (see the updateInstalledMsg doc comment for why).
+func updateShellCmd() *exec.Cmd {
+	script := `curl -sL https://raw.githubusercontent.com/BenjaminBenetti/fleet-man/main/install.sh | sh`
 	cmd := exec.Command("sh", "-c", script)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{}
 	return cmd
 }
