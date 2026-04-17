@@ -1297,6 +1297,12 @@ func (fp *fleetPage) openInstanceSession(m *model, fleetName string, inst *fleet
 	instKey := fleetName + "/" + inst.Name
 	sanitized := SanitizeSessionName(inst.Name)
 
+	// The session discovery loop only runs for expanded instances, so
+	// hitting enter on a collapsed row with no lastActive entry would
+	// otherwise always spawn a new group. Load sessions on demand here
+	// so we can attach to an existing one when available.
+	ensureSessionsLoaded(m, m.instanceBackend(inst), inst.WorkspaceDir, instKey)
+
 	if last, ok := m.lastActive[instKey]; ok {
 		if last.groupID != "" {
 			return fp.restoreGroupCmd(m, fleetName, inst, last.groupID)

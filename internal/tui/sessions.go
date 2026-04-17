@@ -148,6 +148,30 @@ func sessionDiscoveryCmd(
 	}
 }
 
+// ensureSessionsLoaded synchronously populates m.sessions[instKey] when
+// it has not been loaded yet. This is needed before opening an instance
+// session from a row that was never expanded, so the attach-vs-new
+// decision can see existing tmux sessions instead of always spawning a
+// new group.
+func ensureSessionsLoaded(m *model, b backend.Backend, workspaceDir, instanceKey string) {
+	if _, ok := m.sessions[instanceKey]; ok {
+		return
+	}
+	cmd := b.ExecCommand(workspaceDir, []string{
+		"sh", "-c",
+		`tmux list-sessions -F "#{session_name}:#{session_windows}:#{session_attached}" 2>/dev/null`,
+	})
+	out, err := cmd.Output()
+	if err != nil {
+		m.sessions[instanceKey] = &sessionDiscovery{err: err, fetchedAt: time.Now()}
+		return
+	}
+	m.sessions[instanceKey] = &sessionDiscovery{
+		sessions:  parseTmuxSessions(string(out)),
+		fetchedAt: time.Now(),
+	}
+}
+
 // listSessionsCmd returns a tea.Cmd that execs `tmux list-sessions`
 // inside the container and parses the output into tmuxSession structs.
 func listSessionsCmd(b backend.Backend, workspaceDir, instanceKey string) tea.Cmd {
