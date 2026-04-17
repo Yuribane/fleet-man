@@ -471,17 +471,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, spinCmd
 
 	case forceRepaintTickMsg:
-		// Emit a synthetic WindowSizeMsg with the current dimensions.
-		// bubbletea's renderer responds to WindowSizeMsg by invalidating
-		// its line cache (see standard_renderer.go → handleMessages),
-		// so the next flush rewrites every line with EraseLineRight
-		// appended. That scrubs any stale characters the outer tmux
-		// left behind during a pane resize — without writing a clear
-		// escape first, so the terminal never shows a blank frame.
-		width, height := m.width, m.height
+		// Scrub artifacts left by outer-tmux pane resizes without
+		// flicker. A synthetic WindowSizeMsg (with the current
+		// dimensions so no app-level resize happens) causes
+		// bubbletea's renderer to invalidate its per-line cache; on
+		// the next flush every tracked line is rewritten with
+		// EraseLineRight appended, scrubbing stale chars inside the
+		// TUI's bounds. The trailing EraseScreenBelow escape that
+		// View() tacks onto the last line then clears everything
+		// beneath the TUI — and because that escape is part of the
+		// view string, the clear lands in the same atomic buffer
+		// flush as the redraw, so the terminal never sees a blank
+		// frame (unlike tea.ClearScreen which writes the erase
+		// ahead of the next render tick).
 		return m, tea.Batch(
 			spinCmd,
-			func() tea.Msg { return tea.WindowSizeMsg{Width: width, Height: height} },
+			func() tea.Msg { return tea.WindowSizeMsg{Width: m.width, Height: m.height} },
 			forceRepaintCmd(),
 		)
 	}
@@ -717,7 +722,15 @@ func (m model) View() string {
 		}
 		return ""
 	}
-	return m.currentPage.View(&m)
+	// Append EraseScreenBelow (\x1b[0J) so that whenever bubbletea
+	// rewrites the last line, it also scrubs any stale characters
+	// sitting beneath the TUI. This is a no-op while the last line's
+	// content is unchanged (bubbletea's line-diff skips the line, the
+	// escape is not re-executed). On the 1-second repaint tick the
+	// accompanying WindowSizeMsg invalidates the full line cache,
+	// forcing the last line — and thus this escape — to be rewritten
+	// inside the same atomic buffer flush as the rest of the redraw.
+	return m.currentPage.View(&m) + "\x1b[0J"
 }
 
 // ===========================================
