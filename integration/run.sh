@@ -64,6 +64,8 @@ fi
 passed=0
 failed=0
 failed_tests=()
+# Per-test result rows for the step summary: "<name>|<status>|<duration>s"
+result_rows=()
 
 # Sourced common.sh in tests provides teardown_test — we need it here too.
 # shellcheck disable=SC1091
@@ -76,13 +78,17 @@ for test_file in "${tests[@]}"; do
   t_start=$(date +%s)
   if bash "${test_file}"; then
     t_end=$(date +%s)
-    printf "%b==>%b %bPASS%b ${test_name} (%ds)\n" "${BOLD}" "${RESET}" "${GREEN}" "${RESET}" "$((t_end - t_start))"
+    dur=$((t_end - t_start))
+    printf "%b==>%b %bPASS%b ${test_name} (%ds)\n" "${BOLD}" "${RESET}" "${GREEN}" "${RESET}" "${dur}"
     passed=$((passed + 1))
+    result_rows+=("${test_name}|pass|${dur}")
   else
     t_end=$(date +%s)
-    printf "%b==>%b %bFAIL%b ${test_name} (%ds)\n" "${BOLD}" "${RESET}" "${RED}" "${RESET}" "$((t_end - t_start))"
+    dur=$((t_end - t_start))
+    printf "%b==>%b %bFAIL%b ${test_name} (%ds)\n" "${BOLD}" "${RESET}" "${RED}" "${RESET}" "${dur}"
     failed=$((failed + 1))
     failed_tests+=("${test_name}")
+    result_rows+=("${test_name}|fail|${dur}")
   fi
 
   say "teardown ${test_name}"
@@ -93,6 +99,36 @@ printf "\n%b==>%b Summary: %b%d passed%b, %b%d failed%b\n" \
   "${BOLD}" "${RESET}" \
   "${GREEN}" "${passed}" "${RESET}" \
   "${RED}"   "${failed}" "${RESET}"
+
+# Emit a GitHub Actions step summary if running inside a workflow.
+# GITHUB_STEP_SUMMARY is a file path the runner publishes as markdown on
+# the job summary page. Outside Actions this env var is unset and we skip.
+if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+  total=$((passed + failed))
+  if [ "${failed}" -eq 0 ]; then
+    overall="✅ all green"
+  else
+    overall="❌ ${failed} failing"
+  fi
+  {
+    printf '## Integration Tests — %s\n\n' "${overall}"
+    printf '**%d passed**, **%d failed** out of %d.\n\n' "${passed}" "${failed}" "${total}"
+    printf '| Test | Status | Duration |\n'
+    printf '| --- | --- | ---: |\n'
+    for row in "${result_rows[@]}"; do
+      IFS='|' read -r name status dur <<< "${row}"
+      if [ "${status}" = "pass" ]; then
+        icon="✅ pass"
+      else
+        icon="❌ fail"
+      fi
+      printf '| `%s` | %s | %ss |\n' "${name}" "${icon}" "${dur}"
+    done
+    if [ "${failed}" -gt 0 ]; then
+      printf '\n**Failed:** %s\n' "${failed_tests[*]}"
+    fi
+  } >> "${GITHUB_STEP_SUMMARY}"
+fi
 
 if [ "${failed}" -gt 0 ]; then
   printf "Failed: %s\n" "${failed_tests[*]}"
