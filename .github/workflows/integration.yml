@@ -1,0 +1,36 @@
+name: Integration Tests
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install devcontainer CLI
+        run: npm install -g @devcontainers/cli
+
+      - name: Verify docker
+        run: |
+          docker version
+          docker info
+
+      - name: Build fleet binary
+        run: go build -o /usr/local/bin/fleet ./cmd/fleet
+
+      - name: Run integration tests
+        env:
+          FLEET_BIN: /usr/local/bin/fleet
+        run: ./integration/run.sh

@@ -1,0 +1,4 @@
+{
+  "name": "fleet-man integration fixture",
+  "image": "mcr.microsoft.com/devcontainers/base:debian-12"
+}
