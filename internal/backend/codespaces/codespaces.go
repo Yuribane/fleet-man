@@ -44,6 +44,12 @@ func WithDevcontainerPath(path string) Option {
 	return func(b *CodespacesBackend) { b.devcontainerPath = path }
 }
 
+// WithBranch sets the repository branch the codespace is created from.
+// An empty string lets GitHub pick the repository's default branch.
+func WithBranch(branch string) Option {
+	return func(b *CodespacesBackend) { b.branch = branch }
+}
+
 // ===========================================
 // Backend
 // ===========================================
@@ -57,6 +63,7 @@ type CodespacesBackend struct {
 	machine          string // machine type (e.g. "basicLinux32gb")
 	idleTimeout      string // idle timeout (e.g. "30m")
 	devcontainerPath string // path to devcontainer.json in repo
+	branch           string // git branch (empty = repo default)
 
 	// nameCache maps workspaceDir to the real codespace name assigned by
 	// GitHub. Populated by Up() so that subsequent ExecCommand calls on
@@ -112,6 +119,9 @@ func (b *CodespacesBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 	displayName := codespaceName(workspaceDir)
 
 	args := []string{"codespace", "create", "--repo", b.repo, "--display-name", displayName}
+	if b.branch != "" {
+		args = append(args, "--branch", b.branch)
+	}
 	if b.machine != "" {
 		args = append(args, "--machine", b.machine)
 	}

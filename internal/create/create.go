@@ -33,9 +33,9 @@ func Run(fleetName, instanceName, remoteURL, branch string, verbose bool, bt fle
 	var dc backend.Backend
 	switch bt {
 	case fleet.BackendCoder:
-		dc = buildCoderBackend(fleetName, instanceName, remoteURL, verbose)
+		dc = buildCoderBackend(fleetName, instanceName, remoteURL, branch, verbose)
 	case fleet.BackendCodespaces:
-		dc = buildCodespacesBackend(remoteURL, verbose)
+		dc = buildCodespacesBackend(remoteURL, branch, verbose)
 	default:
 		dc = backendutil.New(bt, verbose)
 	}
@@ -105,8 +105,10 @@ func Run(fleetName, instanceName, remoteURL, branch string, verbose bool, bt fle
 }
 
 // buildCoderBackend creates a CoderBackend configured from ~/.fleet/config.json
-// with template, preset, and resolved parameter bindings.
-func buildCoderBackend(fleetName, instanceName, remoteURL string, verbose bool) backend.Backend {
+// with template, preset, and resolved parameter bindings. The branch is
+// exposed to template parameters via the ${GIT_BRANCH} substitution so
+// Coder templates can clone the requested ref.
+func buildCoderBackend(fleetName, instanceName, remoteURL, branch string, verbose bool) backend.Backend {
 	opts := []coderbackend.Option{}
 	if verbose {
 		opts = append(opts, coderbackend.WithVerbose(true))
@@ -135,6 +137,7 @@ func buildCoderBackend(fleetName, instanceName, remoteURL string, verbose bool) 
 				val = p.DefaultValue
 			}
 			val = strings.ReplaceAll(val, "${GIT_URL}", remoteURL)
+			val = strings.ReplaceAll(val, "${GIT_BRANCH}", branch)
 			val = strings.ReplaceAll(val, "${INSTANCE_NAME}", wsName)
 			if val != "" {
 				resolved[p.Name] = val
@@ -147,8 +150,10 @@ func buildCoderBackend(fleetName, instanceName, remoteURL string, verbose bool) 
 }
 
 // buildCodespacesBackend creates a CodespacesBackend configured from
-// ~/.fleet/config.json with machine type and other preferences.
-func buildCodespacesBackend(remoteURL string, verbose bool) backend.Backend {
+// ~/.fleet/config.json with machine type and other preferences. When
+// branch is non-empty it is passed to `gh codespace create --branch`
+// so the codespace is created from that ref instead of the repo default.
+func buildCodespacesBackend(remoteURL, branch string, verbose bool) backend.Backend {
 	opts := []codespacesbackend.Option{}
 	if verbose {
 		opts = append(opts, codespacesbackend.WithVerbose(true))
@@ -158,6 +163,10 @@ func buildCodespacesBackend(remoteURL string, verbose bool) backend.Backend {
 	repo := repoFromRemoteURL(remoteURL)
 	if repo != "" {
 		opts = append(opts, codespacesbackend.WithRepo(repo))
+	}
+
+	if branch != "" {
+		opts = append(opts, codespacesbackend.WithBranch(branch))
 	}
 
 	cfg, err := state.LoadConfig()

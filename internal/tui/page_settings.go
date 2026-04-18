@@ -742,7 +742,7 @@ func (sp *settingsPage) viewSettings(m *model) string {
 	}
 
 	if currentItem >= settingsItemCoderParamBase && currentItem < settingsItemToolStatusBase {
-		b.WriteString(dimStyle.Render("  Variables: ${GIT_URL} = fleet repo URL, ${INSTANCE_NAME} = workspace name"))
+		b.WriteString(dimStyle.Render("  Variables: ${GIT_URL} = fleet repo URL, ${GIT_BRANCH} = git branch (blank = default), ${INSTANCE_NAME} = workspace name"))
 		b.WriteString("\n")
 	}
 
