@@ -65,7 +65,8 @@ jobs:
           python3 - <<'PY'
           import os
 
-          version = os.environ["VERSION"]
+          # Strip leading "v" — the landing page already prefixes the version.
+          version = os.environ["VERSION"].lstrip("v")
           path = "_site/index.html"
 
           script = (
