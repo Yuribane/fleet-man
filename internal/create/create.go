@@ -23,7 +23,11 @@ import (
 // git clone + devcontainer up. For coder backends it runs coder create.
 // On success it updates the instance to StatusRunning. On failure it sets
 // StatusFailed with the error message.
-func Run(fleetName, instanceName, remoteURL string, verbose bool, bt fleet.BackendType) error {
+//
+// When branch is non-empty, the devcontainer clone uses `git clone
+// --branch <branch>` so the instance is provisioned against that ref
+// rather than the repository's default branch.
+func Run(fleetName, instanceName, remoteURL, branch string, verbose bool, bt fleet.BackendType) error {
 	wsDir := filepath.Join(state.WorkspacesDir(), fleetName, instanceName, fleetName)
 
 	var dc backend.Backend
@@ -43,7 +47,12 @@ func Run(fleetName, instanceName, remoteURL string, verbose bool, bt fleet.Backe
 			return fmt.Errorf("mkdir: %w", err)
 		}
 
-		gitClone := exec.Command("git", "clone", remoteURL, wsDir)
+		cloneArgs := []string{"clone"}
+		if branch != "" {
+			cloneArgs = append(cloneArgs, "--branch", branch)
+		}
+		cloneArgs = append(cloneArgs, remoteURL, wsDir)
+		gitClone := exec.Command("git", cloneArgs...)
 		// Tee output to os.Stdout/os.Stderr (the log file when run from
 		// the TUI) while capturing it for inclusion in error messages.
 		var cloneBuf bytes.Buffer

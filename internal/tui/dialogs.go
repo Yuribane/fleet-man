@@ -178,6 +178,7 @@ func backendTypeLabel(bt fleet.BackendType) string {
 // addInstanceRow identifies a focusable row in the add-instance dialog.
 const (
 	addInstanceRowName = iota
+	addInstanceRowBranch
 	addInstanceRowColor
 	addInstanceRowDeploy
 	addInstanceRowCount
@@ -208,6 +209,8 @@ func (fp *fleetPage) openEditInstanceDialog(m *model) tea.Cmd {
 	fp.dialogRow = addInstanceRowColor
 	fp.textInput.SetValue(inst.Name)
 	fp.textInput.Blur()
+	fp.branchInput.SetValue(inst.Branch)
+	fp.branchInput.Blur()
 	return nil
 }
 
@@ -251,6 +254,8 @@ func (fp *fleetPage) updateAddInstance(m *model, msg tea.Msg) tea.Cmd {
 				color = ""
 			}
 
+			branch := strings.TrimSpace(fp.branchInput.Value())
+
 			wsDir := filepath.Join(state.WorkspacesDir(), fleetName, name, fleetName)
 			inst := &fleet.Instance{
 				Name:         name,
@@ -260,6 +265,7 @@ func (fp *fleetPage) updateAddInstance(m *model, msg tea.Msg) tea.Cmd {
 				Status:       fleet.StatusCreating,
 				Backend:      bt,
 				Color:        color,
+				Branch:       branch,
 			}
 			_ = f.AddInstance(inst)
 			_ = state.Save(m.st)
@@ -274,9 +280,10 @@ func (fp *fleetPage) updateAddInstance(m *model, msg tea.Msg) tea.Cmd {
 			fp.buildRows(m)
 			fp.mode = viewNormal
 			fp.textInput.Blur()
+			fp.branchInput.Blur()
 			m.message = fmt.Sprintf("Creating %s (%s)...", key, backendTypeLabel(bt))
 
-			return createInstanceCmd(fleetName, name, f.Remote, bt)
+			return createInstanceCmd(fleetName, name, f.Remote, branch, bt)
 
 		case "tab":
 			if fp.dialogEditing {
@@ -331,34 +338,52 @@ func (fp *fleetPage) updateAddInstance(m *model, msg tea.Msg) tea.Cmd {
 		case "esc", "ctrl+c":
 			fp.mode = viewNormal
 			fp.textInput.Blur()
+			fp.branchInput.Blur()
 			m.message = "Cancelled"
 			return nil
 		}
 	}
 
-	// Only forward key input to the name field when it is focused; other
-	// rows are cycled with arrow keys and should swallow character input.
-	if fp.dialogRow != addInstanceRowName {
-		return nil
+	// Forward key input to whichever text field currently has focus. The
+	// color and deploy rows are cycled with arrow keys and should swallow
+	// character input rather than mutate either field.
+	switch fp.dialogRow {
+	case addInstanceRowName:
+		var cmd tea.Cmd
+		fp.textInput, cmd = fp.textInput.Update(msg)
+		return cmd
+	case addInstanceRowBranch:
+		var cmd tea.Cmd
+		fp.branchInput, cmd = fp.branchInput.Update(msg)
+		return cmd
 	}
-	var cmd tea.Cmd
-	fp.textInput, cmd = fp.textInput.Update(msg)
-	return cmd
+	return nil
 }
 
-// syncAddInstanceFocus focuses the text input only when the name row is
-// selected so the cursor visually reflects the current focus. In edit mode
-// the name is immutable so focus is never granted.
+// syncAddInstanceFocus focuses the text input of the currently selected
+// row so the cursor visually reflects the current focus. In edit mode
+// the name and branch are immutable so focus is never granted to them.
 func (fp *fleetPage) syncAddInstanceFocus() {
-	if fp.dialogRow == addInstanceRowName && !fp.dialogEditing {
+	nameFocus := fp.dialogRow == addInstanceRowName && !fp.dialogEditing
+	branchFocus := fp.dialogRow == addInstanceRowBranch && !fp.dialogEditing
+
+	if nameFocus {
 		fp.textInput.Focus()
 	} else {
 		fp.textInput.Blur()
 	}
+
+	if branchFocus {
+		fp.branchInput.Focus()
+	} else {
+		fp.branchInput.Blur()
+	}
 }
 
 // addInstanceRowEnabled reports whether a given row is selectable in the
-// current dialog mode. Name and deploy are locked while editing.
+// current dialog mode. Name, branch, and deploy are locked while editing
+// because they describe how the workspace was originally provisioned and
+// cannot be retroactively changed without recreating the instance.
 func (fp *fleetPage) addInstanceRowEnabled(row int) bool {
 	if !fp.dialogEditing {
 		return true

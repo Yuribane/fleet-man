@@ -14,6 +14,7 @@ import (
 func newUpCmd() *cobra.Command {
 	var repoFlag string
 	var backendFlag string
+	var branchFlag string
 
 	cmd := &cobra.Command{
 		Use:   "up <name>",
@@ -69,6 +70,7 @@ func newUpCmd() *cobra.Command {
 				CreatedAt:    time.Now(),
 				Status:       fleet.StatusCreating,
 				Backend:      bt,
+				Branch:       branchFlag,
 			}
 			if err := f.AddInstance(inst); err != nil {
 				return err
@@ -78,7 +80,7 @@ func newUpCmd() *cobra.Command {
 			}
 
 			fmt.Printf("Creating %s/%s (backend: %s)...\n", target.Fleet, target.Instance, bt)
-			if err := create.Run(target.Fleet, target.Instance, remoteURL, true, bt); err != nil {
+			if err := create.Run(target.Fleet, target.Instance, remoteURL, branchFlag, true, bt); err != nil {
 				return err
 			}
 
@@ -98,5 +100,6 @@ func newUpCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&repoFlag, "repo", "", "Git remote URL to clone from")
 	cmd.Flags().StringVar(&backendFlag, "backend", "devcontainer", "Backend type: devcontainer, coder, or codespaces")
+	cmd.Flags().StringVar(&branchFlag, "branch", "", "Git branch to check out (defaults to the repository's default branch)")
 	return cmd
 }

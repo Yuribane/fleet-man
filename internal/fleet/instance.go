@@ -34,4 +34,5 @@ type Instance struct {
 	Backend     BackendType    `json:"backend,omitempty"`
 	Tag         string         `json:"tag,omitempty"`
 	Color       string         `json:"color,omitempty"`
+	Branch      string         `json:"branch,omitempty"`
 }

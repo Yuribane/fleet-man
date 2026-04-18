@@ -63,6 +63,7 @@ type fleetPage struct {
 	dialogGroupID string
 	dialogSession string
 	textInput     textinput.Model
+	branchInput   textinput.Model
 
 	pfCursor      int
 	pfContainerID string
@@ -84,10 +85,15 @@ func newFleetPage() *fleetPage {
 	ti.Placeholder = "instance-name"
 	ti.CharLimit = 64
 
+	bi := textinput.New()
+	bi.Placeholder = "default branch"
+	bi.CharLimit = 128
+
 	return &fleetPage{
 		collapsed:   make(map[string]bool),
 		savedGroups: make(map[string]savedGroup),
 		textInput:   ti,
+		branchInput: bi,
 	}
 }
 
@@ -455,6 +461,10 @@ func (fp *fleetPage) updateNormal(m *model, msg tea.Msg) tea.Cmd {
 			fp.textInput.Placeholder = "instance-name"
 			fp.textInput.CharLimit = 64
 			fp.textInput.Focus()
+			fp.branchInput.SetValue("")
+			fp.branchInput.Placeholder = "default branch"
+			fp.branchInput.CharLimit = 128
+			fp.branchInput.Blur()
 			return fp.textInput.Cursor.BlinkCmd()
 
 		case "n":
@@ -1078,11 +1088,16 @@ func (fp *fleetPage) viewFleetList(m *model) string {
 			colorName = instanceColorWhite
 		}
 
-		var title, hint, nameField, deployField string
+		var title, hint, nameField, branchField, deployField string
 		if fp.dialogEditing {
 			title = "Edit instance"
 			hint = "[←→/space] Cycle color  [shift+tab] Color  [enter] Save  [esc] Cancel"
 			nameField = dimStyle.Render(fp.dialogInst)
+			branchDisplay := fp.branchInput.Value()
+			if branchDisplay == "" {
+				branchDisplay = "default"
+			}
+			branchField = dimStyle.Render(branchDisplay)
 			deployField = dimStyle.Render(fmt.Sprintf("[ %s ]", backendTypeLabel(bt)))
 		} else {
 			title = "New instance"
@@ -1091,6 +1106,7 @@ func (fp *fleetPage) viewFleetList(m *model) string {
 				hint = "[↑↓] Select  [←→/space/tab] Cycle  [shift+tab] Color  [enter] Create  [esc] Cancel"
 			}
 			nameField = fp.textInput.View()
+			branchField = fp.branchInput.View()
 			deployField = fmt.Sprintf("[ %s ]", backendTypeLabel(bt))
 		}
 
@@ -1106,13 +1122,16 @@ func (fp *fleetPage) viewFleetList(m *model) string {
 
 		colorPreview := instanceColorStyle(colorName).Render(colorName)
 		dialog := fmt.Sprintf(
-			"%s\n\n  %s %s\n%s%s %s\n%s%s [ %s ]\n%s%s %s\n\n%s",
+			"%s\n\n  %s %s\n%s%s %s\n%s%s %s\n%s%s [ %s ]\n%s%s %s\n\n%s",
 			dialogTitle.Render(title),
 			dialogLabel.Render("Fleet:  "),
 			fleetExpandedStyle.Render(fp.dialogFleet),
 			rowMarker(addInstanceRowName),
 			dialogLabel.Render("Name:   "),
 			nameField,
+			rowMarker(addInstanceRowBranch),
+			dialogLabel.Render("Branch: "),
+			branchField,
 			rowMarker(addInstanceRowColor),
 			dialogLabel.Render("Color:  "),
 			colorPreview,

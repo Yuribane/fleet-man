@@ -270,14 +270,22 @@ func logsCommand(b backend.Backend, fleetName string, inst *fleet.Instance) *exe
 	return exec.Command("sh", "-c", script)
 }
 
-func createInstanceCmd(fleetName, instanceName, remoteURL string, bt fleet.BackendType) tea.Cmd {
+// createInstanceCmd spawns the hidden _create-instance subcommand as a
+// detached child process to provision an instance asynchronously.
+// branch selects the git ref to check out; an empty string uses the
+// repository's default branch.
+func createInstanceCmd(fleetName, instanceName, remoteURL, branch string, bt fleet.BackendType) tea.Cmd {
 	return func() tea.Msg {
 		self, err := os.Executable()
 		if err != nil {
 			return instanceCreateErrMsg{fleetName, instanceName, fmt.Errorf("os.Executable: %w", err)}
 		}
 
-		cmd := exec.Command(self, "_create-instance", fleetName, instanceName, remoteURL, string(bt))
+		args := []string{"_create-instance", fleetName, instanceName, remoteURL, "--backend", string(bt)}
+		if branch != "" {
+			args = append(args, "--branch", branch)
+		}
+		cmd := exec.Command(self, args...)
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 		// Log output for debugging
