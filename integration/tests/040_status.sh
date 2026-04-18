@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verifies `fleet status` reports fleet / instance counts correctly.
+# Description: `fleet status` reports fleet and instance running/stopped counts.
 set -euo pipefail
 
 source "$(dirname "$0")/../common.sh"

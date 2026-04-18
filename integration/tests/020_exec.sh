@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Verifies `fleet exec` runs a command inside the container and returns
-# its stdout to the caller.
+# Description: `fleet exec` runs commands inside the container and propagates exit codes.
 set -euo pipefail
 
 source "$(dirname "$0")/../common.sh"

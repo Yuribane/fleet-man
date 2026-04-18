@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verifies `fleet up` creates a running instance and `fleet ls` reports it.
+# Description: `fleet up` creates a running container and `fleet ls` reports it.
 set -euo pipefail
 
 source "$(dirname "$0")/../common.sh"

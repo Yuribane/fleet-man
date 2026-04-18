@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Verifies the stop -> start lifecycle: status transitions are persisted
-# and the underlying docker container is actually stopped/started.
+# Description: `fleet stop`/`start` transition state and the underlying docker container correctly.
 set -euo pipefail
 
 source "$(dirname "$0")/../common.sh"

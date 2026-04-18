@@ -64,8 +64,21 @@ fi
 passed=0
 failed=0
 failed_tests=()
-# Per-test result rows for the step summary: "<name>|<status>|<duration>s"
+# Per-test result rows for the step summary: "<name>|<status>|<duration>s|<description>"
 result_rows=()
+
+# Pull a short test description out of a "# Description: ..." header line,
+# or fall back to "(no description)" if the file does not declare one.
+test_description() {
+  local file="$1"
+  local desc
+  desc=$(grep -m1 -E '^# Description: *' "${file}" 2>/dev/null | sed -E 's/^# Description: *//')
+  if [ -z "${desc}" ]; then
+    echo "(no description)"
+  else
+    echo "${desc}"
+  fi
+}
 
 # Sourced common.sh in tests provides teardown_test — we need it here too.
 # shellcheck disable=SC1091
@@ -73,22 +86,23 @@ source "${INTEGRATION_DIR}/common.sh"
 
 for test_file in "${tests[@]}"; do
   test_name=$(basename "${test_file}" .sh)
+  test_desc=$(test_description "${test_file}")
   printf "\n"
-  say "${BOLD}RUN${RESET}  ${test_name}"
+  say "${BOLD}RUN${RESET}  ${test_name} — ${test_desc}"
   t_start=$(date +%s)
   if bash "${test_file}"; then
     t_end=$(date +%s)
     dur=$((t_end - t_start))
     printf "%b==>%b %bPASS%b ${test_name} (%ds)\n" "${BOLD}" "${RESET}" "${GREEN}" "${RESET}" "${dur}"
     passed=$((passed + 1))
-    result_rows+=("${test_name}|pass|${dur}")
+    result_rows+=("${test_name}|pass|${dur}|${test_desc}")
   else
     t_end=$(date +%s)
     dur=$((t_end - t_start))
     printf "%b==>%b %bFAIL%b ${test_name} (%ds)\n" "${BOLD}" "${RESET}" "${RED}" "${RESET}" "${dur}"
     failed=$((failed + 1))
     failed_tests+=("${test_name}")
-    result_rows+=("${test_name}|fail|${dur}")
+    result_rows+=("${test_name}|fail|${dur}|${test_desc}")
   fi
 
   say "teardown ${test_name}"
@@ -113,16 +127,16 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {
     printf '## Integration Tests — %s\n\n' "${overall}"
     printf '**%d passed**, **%d failed** out of %d.\n\n' "${passed}" "${failed}" "${total}"
-    printf '| Test | Status | Duration |\n'
-    printf '| --- | --- | ---: |\n'
+    printf '| Test | Status | Duration | Description |\n'
+    printf '| --- | --- | ---: | --- |\n'
     for row in "${result_rows[@]}"; do
-      IFS='|' read -r name status dur <<< "${row}"
+      IFS='|' read -r name status dur desc <<< "${row}"
       if [ "${status}" = "pass" ]; then
         icon="✅ pass"
       else
         icon="❌ fail"
       fi
-      printf '| `%s` | %s | %ss |\n' "${name}" "${icon}" "${dur}"
+      printf '| `%s` | %s | %ss | %s |\n' "${name}" "${icon}" "${dur}" "${desc}"
     done
     if [ "${failed}" -gt 0 ]; then
       printf '\n**Failed:** %s\n' "${failed_tests[*]}"

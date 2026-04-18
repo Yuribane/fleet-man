@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Verifies `fleet down` removes the container, wipes the workspace dir,
-# and drops the instance from state.
+# Description: `fleet down` removes the container, wipes the workspace, and drops the state entry.
 set -euo pipefail
 
 source "$(dirname "$0")/../common.sh"

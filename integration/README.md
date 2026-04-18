@@ -26,12 +26,14 @@ integration/
 
 Every test file is standalone:
 
-1. `source common.sh` at the top.
-2. Call `setup_test` first — this wipes `~/.fleet` and re-creates a fresh
+1. Declare a short description in the header as `# Description: <text>` —
+   `run.sh` greps this out and includes it in the Actions step summary.
+2. `source common.sh` at the top.
+3. Call `setup_test` first — this wipes `~/.fleet` and re-creates a fresh
    git fixture repo at `${FIXTURE_REPO_DIR}`.
-3. Drive the CLI with `"${FLEET_BIN}"` (set by `run.sh`) and assert with
+4. Drive the CLI with `"${FLEET_BIN}"` (set by `run.sh`) and assert with
    the `assert_*` helpers.
-4. `exit 0` on success. `fail` helpers `exit 1`.
+5. `exit 0` on success. `fail` helpers `exit 1`.
 
 `run.sh` calls `teardown_test` after every test to nuke containers and
 state so the next test starts clean.

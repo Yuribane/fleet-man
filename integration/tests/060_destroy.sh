@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Verifies `fleet destroy` removes every instance in a fleet and the
-# fleet record itself. Creates two instances to prove it handles more
-# than one.
+# Description: `fleet destroy` removes every instance in a fleet and the fleet record itself.
 set -euo pipefail
 
 source "$(dirname "$0")/../common.sh"
