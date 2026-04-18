@@ -141,8 +141,17 @@ func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, n
 	// Override MouseDragEnd1Pane to use copy-selection (instead of the
 	// default copy-selection-and-cancel) so the scroll position is
 	// preserved after copying. The user presses q to exit copy-mode.
+	//
+	// Also unbind MouseDown2Pane. The outer host tmux handles
+	// middle-click paste (reading the host PRIMARY selection and
+	// pasting the result), so the inner tmux should do nothing if a
+	// mouse event ever reaches it. The default binding
+	// (select-pane; send-keys -M) is harmless but defensive-unbinding
+	// eliminates any path where the inner tmux could paste its own
+	// buffer and masquerade as the outer paste.
 	mouseBindings := ` \; bind -T copy-mode MouseDragEnd1Pane send-keys -X copy-selection` +
-		` \; bind -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-selection`
+		` \; bind -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-selection` +
+		` \; unbind -n MouseDown2Pane`
 	clipboardFeatures := ` \; set -as terminal-features ',*:clipboard'`
 	inner := setup + tmuxEnsureInstalled + sizefix + sshAgentFix + hookClear + fmt.Sprintf(
 		`exec tmux -u new-session -A -s %s`+tmuxSize+` \; set -g mouse on`+clipboardConf+mouseBindings+detachKeys+statusConf+prefixConf+sessionKeys+resizeHook+clipboardFeatures,

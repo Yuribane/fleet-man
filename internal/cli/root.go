@@ -113,6 +113,34 @@ func relaunchInTmux() error {
 		";", "bind", "-T", "copy-mode-vi", "MouseDragEnd1Pane",
 		"send-keys", "-X", "copy-selection",
 	)
+	// Middle-click paste: `mouse on` makes terminals forward MMB
+	// to tmux as an escape sequence instead of doing local X11
+	// PRIMARY paste. The outer (host) tmux has access to
+	// xclip/wl-paste, so we intercept MouseDown2Pane here, read
+	// the host PRIMARY selection, and feed it into the clicked
+	// pane as bracketed paste. The text flows transparently
+	// through any inner container tmux and into the app. Missing
+	// clipboard tool or empty clipboard is a silent no-op. xsel
+	// is tried before xclip because xclip has a stdout-close bug
+	// that can stall run-shell; xclip is wrapped in timeout as a
+	// belt-and-braces guard.
+	//
+	// The buffer is given a unique name (__fleet_primary) and
+	// deleted after paste. Without this, paste-buffer picks "the
+	// most recent buffer" — which can race with OSC 52 writes
+	// from the inner tmux (sent whenever the user drag-selects
+	// inside a container pane, because set-clipboard on makes
+	// tmux accept OSC 52 from its pane contents). The race would
+	// cause middle-click to paste the inner tmux's last drag
+	// selection instead of the host PRIMARY a fraction of the
+	// time.
+	setupArgs = append(setupArgs,
+		";", "bind-key", "-n", "MouseDown2Pane",
+		"run-shell",
+		`tmux select-pane -t "$TMUX_PANE"; `+
+			`CLIP=$(wl-paste -p 2>/dev/null || xsel -op 2>/dev/null || timeout 0.5 xclip -o -selection primary 2>/dev/null || pbpaste 2>/dev/null); `+
+			`[ -n "$CLIP" ] && { tmux set-buffer -b __fleet_primary -- "$CLIP"; tmux paste-buffer -p -d -b __fleet_primary -t "$TMUX_PANE"; }`,
+	)
 	// terminal-features tells tmux the terminal supports OSC 52
 	// clipboard (tmux 3.2+). Appended last so older versions just
 	// lose this feature without breaking the session.
