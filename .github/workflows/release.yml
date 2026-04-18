@@ -7,6 +7,12 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -37,3 +43,66 @@ jobs:
             --title "Fleet ${GITHUB_REF_NAME}" \
             --generate-notes \
             dist/*
+
+  pages:
+    needs: release
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage site with version injection
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p _site
+          cp -r web/. _site/
+
+          # Inject a runtime placeholder-replacement script before </body>.
+          # Walks all text nodes and swaps ${version} with the release tag.
+          python3 - <<'PY'
+          import os
+
+          version = os.environ["VERSION"]
+          path = "_site/index.html"
+
+          script = (
+              "<script>\n"
+              "(function () {\n"
+              f"  var v = {version!r};\n"
+              "  var w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);\n"
+              "  var n;\n"
+              "  while ((n = w.nextNode())) {\n"
+              "    if (n.nodeValue.indexOf('${version}') !== -1) {\n"
+              "      n.nodeValue = n.nodeValue.split('${version}').join(v);\n"
+              "    }\n"
+              "  }\n"
+              "})();\n"
+              "</script>\n"
+          )
+
+          with open(path, "r", encoding="utf-8") as f:
+              html = f.read()
+
+          if "</body>" in html:
+              html = html.replace("</body>", script + "</body>", 1)
+          else:
+              html += "\n" + script
+
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(html)
+          PY
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
