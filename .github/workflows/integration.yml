@@ -1,0 +1,42 @@
+name: Integration Tests
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: Install devcontainer CLI
+        run: npm install -g @devcontainers/cli
+
+      - name: Install tmux (used by TUI tests)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+          tmux -V
+
+      - name: Verify docker
+        run: |
+          docker version
+          docker info
+
+      - name: Build fleet binary
+        run: go build -o /usr/local/bin/fleet ./cmd/fleet
+
+      - name: Run integration tests
+        env:
+          FLEET_BIN: /usr/local/bin/fleet
+        run: ./integration/run.sh
