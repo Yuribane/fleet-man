@@ -63,10 +63,11 @@ tui_wait_for "Delete session" 5
 tui_send y
 tui_wait_for "Deleted session" 15
 
-# Wait for re-render; the status message contains "tokill" so we can't
-# immediately assert absence. Let the status message clear first.
-tui_wait_for "+ new session" 15
-sleep 3
-tui_assert_not_contains "tokill" "session row should be gone after delete"
+# Wait for re-render. The status message "Deleted session alpha~tokill"
+# contains "tokill" and is not auto-cleared by time — it's only cleared
+# on the next keypress that triggers updateNormal. So check for the
+# ROW format "○ tokill" (with the session icon) which won't match the
+# status message text.
+tui_wait_for_absent "○ tokill" 15
 
 pass "TUI delete tmux session — cancel + confirm"
