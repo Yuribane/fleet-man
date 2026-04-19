@@ -22,6 +22,12 @@ jobs:
       - name: Install devcontainer CLI
         run: npm install -g @devcontainers/cli
 
+      - name: Install tmux (used by TUI tests)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+          tmux -V
+
       - name: Verify docker
         run: |
           docker version

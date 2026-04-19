@@ -37,6 +37,11 @@ FIXTURE_REPO_NAME="itest-fleet"
 FIXTURE_REPO_DIR="${TEST_SCRATCH_DIR}/${FIXTURE_REPO_NAME}"
 FIXTURE_REPO_URL="file://${FIXTURE_REPO_DIR}"
 
+# Default tmux session name used by TUI tests. Overridable per-test.
+TUI_SESSION="${TUI_SESSION:-fleetman-itest}"
+TUI_WIDTH="${TUI_WIDTH:-140}"
+TUI_HEIGHT="${TUI_HEIGHT:-40}"
+
 # === Logging ===
 
 info()  { printf "%b[info]%b  %s\n" "${C_YELLOW}" "${C_RESET}" "$*"; }
@@ -108,6 +113,12 @@ setup_test() {
 # It tears down every fleet in state, then wipes state files. Called by
 # run.sh after each test whether it passed or failed.
 teardown_test() {
+  # Kill any TUI tmux session left over from a TUI test. Safe if there
+  # is none. Done first so nothing else is holding the state file open.
+  if command -v tmux >/dev/null 2>&1; then
+    tmux kill-session -t "${TUI_SESSION}" >/dev/null 2>&1 || true
+  fi
+
   # Tear down containers. Best effort — a test that never reached
   # "up" will have no fleets; a test that left state in a weird place
   # is recovered by the fallback docker sweep below.
@@ -144,4 +155,113 @@ teardown_test() {
 fleet_up() {
   local name="$1"
   "${FLEET_BIN}" up "${name}" --repo "${FIXTURE_REPO_URL}"
+}
+
+# === TUI helpers ===
+#
+# The fleet TUI is a bubbletea app. Tests drive it the same way a human
+# would: launch `fleet` inside a detached tmux session of fixed size,
+# then send keys + capture the rendered screen.
+
+# tui_spawn [session] [args...]
+# Start the TUI inside a detached tmux session. Any extra arguments are
+# passed through to the fleet binary.
+tui_spawn() {
+  local session="${1:-${TUI_SESSION}}"
+  shift || true
+  tmux kill-session -t "${session}" >/dev/null 2>&1 || true
+
+  # Force TERM to something tmux+lipgloss render predictably on CI.
+  tmux new-session -d -s "${session}" -x "${TUI_WIDTH}" -y "${TUI_HEIGHT}" \
+    "env TERM=xterm-256color ${FLEET_BIN} $*"
+}
+
+# tui_capture [session]
+# Print the current visible screen of the tmux session to stdout.
+tui_capture() {
+  local session="${1:-${TUI_SESSION}}"
+  tmux capture-pane -t "${session}" -p
+}
+
+# tui_send <key> [session]
+# Send a single key / chord to the session. Use tmux key names: j, k,
+# Enter, Escape, Space, C-c, etc.
+tui_send() {
+  local key="$1"
+  local session="${2:-${TUI_SESSION}}"
+  tmux send-keys -t "${session}" "${key}"
+}
+
+# tui_wait_for <needle> [timeout_s] [session]
+# Poll capture-pane for up to timeout seconds waiting for `needle` (plain
+# substring) to appear. Default timeout 10s. Returns 0 on match, 1 on
+# timeout. On timeout also dumps the final screen to stderr.
+tui_wait_for() {
+  local needle="$1"
+  local timeout="${2:-10}"
+  local session="${3:-${TUI_SESSION}}"
+  local deadline=$(( $(date +%s) + timeout ))
+  local screen=""
+  while [ "$(date +%s)" -lt "${deadline}" ]; do
+    screen=$(tui_capture "${session}" || true)
+    if printf '%s' "${screen}" | grep -qF -- "${needle}"; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  printf '%b[fail]%b tui_wait_for timed out after %ss waiting for: %s\n' \
+    "${C_RED}" "${C_RESET}" "${timeout}" "${needle}" >&2
+  printf -- '--- final screen ---\n%s\n--- end screen ---\n' "${screen}" >&2
+  return 1
+}
+
+# tui_wait_for_absent <needle> [timeout_s] [session]
+# Inverse of tui_wait_for — poll until the needle disappears from screen.
+tui_wait_for_absent() {
+  local needle="$1"
+  local timeout="${2:-10}"
+  local session="${3:-${TUI_SESSION}}"
+  local deadline=$(( $(date +%s) + timeout ))
+  local screen=""
+  while [ "$(date +%s)" -lt "${deadline}" ]; do
+    screen=$(tui_capture "${session}" || true)
+    if ! printf '%s' "${screen}" | grep -qF -- "${needle}"; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  printf '%b[fail]%b tui_wait_for_absent timed out after %ss waiting for: %s\n' \
+    "${C_RED}" "${C_RESET}" "${timeout}" "${needle}" >&2
+  printf -- '--- final screen ---\n%s\n--- end screen ---\n' "${screen}" >&2
+  return 1
+}
+
+# tui_kill [session]
+# Kill the tmux session if it is still around. Safe to call multiple times.
+tui_kill() {
+  local session="${1:-${TUI_SESSION}}"
+  tmux kill-session -t "${session}" >/dev/null 2>&1 || true
+}
+
+# tui_assert_contains <needle> [message]
+# Fails the test if the current screen does NOT contain needle.
+tui_assert_contains() {
+  local needle="$1"; local msg="${2:-screen missing expected text}"
+  local screen
+  screen=$(tui_capture)
+  if ! printf '%s' "${screen}" | grep -qF -- "${needle}"; then
+    printf -- '--- screen ---\n%s\n--- end ---\n' "${screen}" >&2
+    fail "${msg}: needle=[${needle}]"
+  fi
+}
+
+# tui_assert_not_contains <needle> [message]
+tui_assert_not_contains() {
+  local needle="$1"; local msg="${2:-screen unexpectedly contains text}"
+  local screen
+  screen=$(tui_capture)
+  if printf '%s' "${screen}" | grep -qF -- "${needle}"; then
+    printf -- '--- screen ---\n%s\n--- end ---\n' "${screen}" >&2
+    fail "${msg}: needle=[${needle}]"
+  fi
 }

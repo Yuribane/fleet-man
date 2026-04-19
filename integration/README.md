@@ -14,13 +14,23 @@ integration/
 │   └── .devcontainer/
 │       └── devcontainer.json
 └── tests/
-    ├── 010_up_and_ls.sh
-    ├── 020_exec.sh
-    ├── 030_stop_start.sh
-    ├── 040_status.sh
-    ├── 050_down.sh
-    └── 060_destroy.sh
+    ├── 010_up_and_ls.sh        # CLI — up + ls
+    ├── 020_exec.sh             # CLI — exec
+    ├── 030_stop_start.sh       # CLI — stop / start
+    ├── 040_status.sh           # CLI — status
+    ├── 050_down.sh             # CLI — down
+    ├── 060_destroy.sh          # CLI — destroy
+    ├── 100_tui_startup.sh      # TUI — launch + render
+    ├── 110_tui_collapse.sh     # TUI — space collapses / expands fleet
+    ├── 120_tui_stop_start.sh   # TUI — s toggles instance status
+    ├── 130_tui_delete_cancel.sh# TUI — d opens dialog, n cancels
+    ├── 140_tui_quit.sh         # TUI — q exits cleanly
+    └── 150_tui_refresh.sh      # TUI — r re-reads state
 ```
+
+TUI tests drive the real `fleet` binary inside a detached `tmux` session
+using `send-keys` and read back rendered state via `capture-pane` —
+see `common.sh` `tui_*` helpers.
 
 ## Contract
 
@@ -43,6 +53,7 @@ state so the next test starts clean.
 - Go toolchain (for building `fleet`)
 - Docker daemon reachable (`docker info` works)
 - `devcontainer` CLI (`npm install -g @devcontainers/cli`)
+- `tmux` (used by the TUI tests as a headless terminal)
 
 ## Running
 
