@@ -4,6 +4,12 @@ on:
   pull_request:
     branches: [main]
 
+# Opt every JavaScript-based action (checkout / setup-go / setup-node)
+# into the Node.js 24 runtime. Suppresses the deprecation warning and
+# the forced flip is scheduled for 2026-06-02 anyway.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   integration:
     runs-on: ubuntu-latest
