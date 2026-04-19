@@ -165,8 +165,12 @@ assert_file_absent() {
 #   2. recreates the fixture git repo at $FIXTURE_REPO_DIR
 # Called at the top of each test.
 setup_test() {
-  # 1. Wipe fleet state.
+  # 1. Wipe fleet state. Leave an empty ~/.fleet behind — its presence
+  #    suppresses the first-launch deps-check splash, which is not what
+  #    these tests are trying to exercise and would otherwise block key
+  #    input to the fleet list page.
   rm -rf "${HOME}/.fleet"
+  mkdir -p "${HOME}/.fleet"
 
   # 2. Re-create the fixture repo from the committed fixture template.
   rm -rf "${TEST_SCRATCH_DIR}"
@@ -239,7 +243,8 @@ fleet_up() {
 
 # tui_spawn [session] [args...]
 # Start the TUI inside a detached tmux session. Any extra arguments are
-# passed through to the fleet binary.
+# passed through to the fleet binary. The TMUX env var is implicitly set
+# by running inside tmux, which the TUI uses to enable split pane mode.
 tui_spawn() {
   local session="${1:-${TUI_SESSION}}"
   shift || true
@@ -248,6 +253,80 @@ tui_spawn() {
   # Force TERM to something tmux+lipgloss render predictably on CI.
   tmux new-session -d -s "${session}" -x "${TUI_WIDTH}" -y "${TUI_HEIGHT}" \
     "env TERM=xterm-256color ${FLEET_BIN} $*"
+}
+
+# tui_send_text <text> [session]
+# Type a string literally into the TUI (safe for URLs / names that
+# contain tmux-reserved key words).
+tui_send_text() {
+  local text="$1"
+  local session="${2:-${TUI_SESSION}}"
+  tmux send-keys -t "${session}" -l "${text}"
+}
+
+# tui_send_pane <pane_index> <key> [session]
+# Send a key to a specific pane by its visible index (0 = TUI, 1 = first
+# split, 2 = second split, ...). Needed once a split pane is open and
+# we want to talk to the shell rather than the TUI.
+tui_send_pane() {
+  local pane="$1"; local key="$2"; local session="${3:-${TUI_SESSION}}"
+  tmux send-keys -t "${session}:.${pane}" "${key}"
+}
+
+# tui_send_pane_text <pane_index> <text> [session]
+tui_send_pane_text() {
+  local pane="$1"; local text="$2"; local session="${3:-${TUI_SESSION}}"
+  tmux send-keys -t "${session}:.${pane}" -l "${text}"
+}
+
+# tui_capture_pane <pane_index> [session]
+# Capture the visible contents of a specific pane, scrolled from the
+# history so we see output that has already scrolled off-screen.
+tui_capture_pane() {
+  local pane="$1"; local session="${2:-${TUI_SESSION}}"
+  tmux capture-pane -t "${session}:.${pane}" -p -S -200
+}
+
+# tui_pane_count [session] — number of panes in the active window.
+tui_pane_count() {
+  local session="${1:-${TUI_SESSION}}"
+  tmux list-panes -t "${session}" 2>/dev/null | wc -l
+}
+
+# tui_wait_for_pane <expected_count> [timeout_s] [session]
+# Wait until the tmux window has `expected_count` panes (e.g. 2 after a
+# split opens, 1 after it's closed).
+tui_wait_for_pane() {
+  local expected="$1"; local timeout="${2:-10}"
+  local session="${3:-${TUI_SESSION}}"
+  local deadline=$(( $(date +%s) + timeout ))
+  while [ "$(date +%s)" -lt "${deadline}" ]; do
+    [ "$(tui_pane_count "${session}")" -eq "${expected}" ] && return 0
+    sleep 0.25
+  done
+  printf '%b[fail]%b tui_wait_for_pane timed out — expected %s panes, have %s\n' \
+    "${C_RED}" "${C_RESET}" "${expected}" "$(tui_pane_count "${session}")" >&2
+  return 1
+}
+
+# tui_wait_for_in_pane <pane_index> <needle> [timeout_s] [session]
+# Poll a specific pane's capture for a substring.
+tui_wait_for_in_pane() {
+  local pane="$1"; local needle="$2"; local timeout="${3:-10}"
+  local session="${4:-${TUI_SESSION}}"
+  local deadline=$(( $(date +%s) + timeout ))
+  local screen=""
+  while [ "$(date +%s)" -lt "${deadline}" ]; do
+    screen=$(tui_capture_pane "${pane}" "${session}" || true)
+    if printf '%s' "${screen}" | grep -qF -- "${needle}"; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  printf '%b[fail]%b timed out after %ss waiting in pane %s for: %s\n' \
+    "${C_RED}" "${C_RESET}" "${timeout}" "${pane}" "${needle}" >&2
+  printf -- '--- pane %s ---\n%s\n--- end ---\n' "${pane}" "${screen}" >&2
+  return 1
 }
 
 # tui_capture [session]
