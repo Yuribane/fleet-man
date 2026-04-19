@@ -42,11 +42,85 @@ TUI_SESSION="${TUI_SESSION:-fleetman-itest}"
 TUI_WIDTH="${TUI_WIDTH:-140}"
 TUI_HEIGHT="${TUI_HEIGHT:-40}"
 
-# === Logging ===
+# === Logging / result emission ===
+#
+# Each test is responsible for emitting its OWN result row — not the
+# runner. `itest_begin` is called at the top of every test: it records
+# the start time and installs an EXIT trap so a row is always emitted,
+# even if the script crashes or `set -e` trips.
+#
+# `pass` / `fail` both print and emit the row explicitly. The EXIT trap
+# only emits if neither was reached (catch-all for unexpected bash exits).
+# The row format written to ${FLEET_ITEST_RESULTS} is:
+#   <name>|<pass|fail>|<duration_s>|<description>
+# run.sh aggregates this file into the final table. No central list
+# needs editing when a new test is added.
 
 info()  { printf "%b[info]%b  %s\n" "${C_YELLOW}" "${C_RESET}" "$*"; }
-pass()  { printf "%b[pass]%b  %s\n" "${C_GREEN}"  "${C_RESET}" "$*"; }
-fail()  { printf "%b[fail]%b  %s\n" "${C_RED}"    "${C_RESET}" "$*" >&2; exit 1; }
+
+pass()  {
+  printf "%b[pass]%b  %s\n" "${C_GREEN}"  "${C_RESET}" "$*"
+  _itest_emit pass
+  exit 0
+}
+
+fail()  {
+  printf "%b[fail]%b  %s\n" "${C_RED}" "${C_RESET}" "$*" >&2
+  _itest_emit fail
+  exit 1
+}
+
+# itest_cleanup is a hook tests can override to run cleanup (e.g. kill a
+# tmux session) before the EXIT trap emits the result row. Default: no-op.
+itest_cleanup() { :; }
+
+# itest_begin: call once per test, right after sourcing common.sh and
+# before the test body. Records metadata and installs the result-emit
+# EXIT trap.
+itest_begin() {
+  TEST_NAME="$(basename "$0" .sh)"
+  TEST_DESCRIPTION="$(grep -m1 -E '^# Description:' "$0" 2>/dev/null \
+    | sed -E 's/^# Description: *//')"
+  if [ -z "${TEST_DESCRIPTION}" ]; then
+    TEST_DESCRIPTION="(no description)"
+  fi
+  TEST_START="$(date +%s)"
+  TEST_EMITTED=""
+  trap _itest_exit_handler EXIT
+}
+
+# Internal: runs on EXIT. Calls itest_cleanup, then emits a row if the
+# test did not already do so via pass/fail.
+_itest_exit_handler() {
+  local rc=$?
+  itest_cleanup || true
+  if [ -z "${TEST_EMITTED:-}" ]; then
+    local status="fail"
+    [ "${rc}" -eq 0 ] && status="pass"
+    _itest_emit "${status}"
+  fi
+  # Preserve the original exit code.
+  exit "${rc}"
+}
+
+# Internal: append one row to the shared results file. Safe to call
+# outside a runner (just becomes a no-op when FLEET_ITEST_RESULTS is unset).
+_itest_emit() {
+  TEST_EMITTED=1
+  local status="$1"
+  local dur=0
+  if [ -n "${TEST_START:-}" ]; then
+    dur=$(( $(date +%s) - TEST_START ))
+  fi
+  if [ -n "${FLEET_ITEST_RESULTS:-}" ]; then
+    printf '%s|%s|%s|%s\n' \
+      "${TEST_NAME:-unknown}" \
+      "${status}" \
+      "${dur}" \
+      "${TEST_DESCRIPTION:-(no description)}" \
+      >> "${FLEET_ITEST_RESULTS}"
+  fi
+}
 
 # === Assertions ===
 

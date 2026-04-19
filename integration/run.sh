@@ -61,24 +61,11 @@ if [ "${#tests[@]}" -eq 0 ]; then
   exit 2
 fi
 
-passed=0
-failed=0
-failed_tests=()
-# Per-test result rows for the step summary: "<name>|<status>|<duration>s|<description>"
-result_rows=()
-
-# Pull a short test description out of a "# Description: ..." header line,
-# or fall back to "(no description)" if the file does not declare one.
-test_description() {
-  local file="$1"
-  local desc
-  desc=$(grep -m1 -E '^# Description: *' "${file}" 2>/dev/null | sed -E 's/^# Description: *//')
-  if [ -z "${desc}" ]; then
-    echo "(no description)"
-  else
-    echo "${desc}"
-  fi
-}
+# Shared results file — tests append one row each via common.sh helpers.
+# run.sh does NOT judge results; it only aggregates this file at the end.
+FLEET_ITEST_RESULTS="$(mktemp)"
+export FLEET_ITEST_RESULTS
+trap 'rm -f "${FLEET_ITEST_RESULTS}"' EXIT
 
 # Sourced common.sh in tests provides teardown_test — we need it here too.
 # shellcheck disable=SC1091
@@ -86,27 +73,45 @@ source "${INTEGRATION_DIR}/common.sh"
 
 for test_file in "${tests[@]}"; do
   test_name=$(basename "${test_file}" .sh)
-  test_desc=$(test_description "${test_file}")
   printf "\n"
-  say "${BOLD}RUN${RESET}  ${test_name} — ${test_desc}"
-  t_start=$(date +%s)
-  if bash "${test_file}"; then
-    t_end=$(date +%s)
-    dur=$((t_end - t_start))
-    printf "%b==>%b %bPASS%b ${test_name} (%ds)\n" "${BOLD}" "${RESET}" "${GREEN}" "${RESET}" "${dur}"
-    passed=$((passed + 1))
-    result_rows+=("${test_name}|pass|${dur}|${test_desc}")
-  else
-    t_end=$(date +%s)
-    dur=$((t_end - t_start))
-    printf "%b==>%b %bFAIL%b ${test_name} (%ds)\n" "${BOLD}" "${RESET}" "${RED}" "${RESET}" "${dur}"
-    failed=$((failed + 1))
-    failed_tests+=("${test_name}")
-    result_rows+=("${test_name}|fail|${dur}|${test_desc}")
-  fi
-
+  say "${BOLD}RUN${RESET}  ${test_name}"
+  bash "${test_file}" || true
   say "teardown ${test_name}"
   teardown_test || true
+done
+
+# Aggregate the per-test rows.
+passed=0
+failed=0
+failed_tests=()
+result_rows=()
+if [ -s "${FLEET_ITEST_RESULTS}" ]; then
+  while IFS='|' read -r name status dur desc; do
+    [ -z "${name}" ] && continue
+    result_rows+=("${name}|${status}|${dur}|${desc}")
+    if [ "${status}" = "pass" ]; then
+      passed=$((passed + 1))
+    else
+      failed=$((failed + 1))
+      failed_tests+=("${name}")
+    fi
+  done < "${FLEET_ITEST_RESULTS}"
+fi
+
+# Any test file that did not emit a row at all is an unexplained crash
+# (e.g. syntax error before itest_begin ran). Surface it as a failure.
+declare -A seen_names
+for row in "${result_rows[@]}"; do
+  IFS='|' read -r n _ _ _ <<< "${row}"
+  seen_names["${n}"]=1
+done
+for test_file in "${tests[@]}"; do
+  n=$(basename "${test_file}" .sh)
+  if [ -z "${seen_names[${n}]:-}" ]; then
+    failed=$((failed + 1))
+    failed_tests+=("${n}")
+    result_rows+=("${n}|fail|0|(test did not emit a result — crashed before itest_begin?)")
+  fi
 done
 
 printf "\n%b==>%b Summary: %b%d passed%b, %b%d failed%b\n" \

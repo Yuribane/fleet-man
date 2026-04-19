@@ -34,16 +34,37 @@ see `common.sh` `tui_*` helpers.
 
 ## Contract
 
-Every test file is standalone:
+Every test file is standalone and owns its own result row. Adding a new
+test means dropping a file in `tests/` — nothing to edit elsewhere.
 
-1. Declare a short description in the header as `# Description: <text>` —
-   `run.sh` greps this out and includes it in the Actions step summary.
-2. `source common.sh` at the top.
-3. Call `setup_test` first — this wipes `~/.fleet` and re-creates a fresh
-   git fixture repo at `${FIXTURE_REPO_DIR}`.
-4. Drive the CLI with `"${FLEET_BIN}"` (set by `run.sh`) and assert with
-   the `assert_*` helpers.
-5. `exit 0` on success. `fail` helpers `exit 1`.
+A test file follows this shape:
+
+```bash
+#!/usr/bin/env bash
+# Description: <one-line description shown in the Actions summary>
+set -euo pipefail
+
+source "$(dirname "$0")/../common.sh"
+itest_cleanup() { tui_kill; }   # optional — only if the test needs cleanup
+itest_begin
+
+setup_test
+# ...drive fleet / TUI, run assert_* / tui_assert_*...
+pass "short summary"
+```
+
+1. `# Description:` — grepped straight out of the file.
+2. `itest_cleanup` — optional hook, runs before the result row is emitted.
+3. `itest_begin` — records start time and installs an EXIT trap that
+   writes `name|status|duration|description` to the shared results file.
+4. `setup_test` — wipes `~/.fleet` and re-creates the fixture git repo.
+5. `pass` / `fail` — print and emit the row; test exits. If the script
+   crashes before either fires, the EXIT trap emits a `fail` row so the
+   runner never silently loses a test.
+
+`run.sh` does not judge results — it just runs each file, then
+aggregates the rows into a terminal summary and the `$GITHUB_STEP_SUMMARY`
+markdown table.
 
 `run.sh` calls `teardown_test` after every test to nuke containers and
 state so the next test starts clean.

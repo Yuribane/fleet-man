@@ -3,6 +3,7 @@
 set -euo pipefail
 
 source "$(dirname "$0")/../common.sh"
+itest_begin
 
 setup_test
 fleet_up alpha

@@ -3,8 +3,8 @@
 set -euo pipefail
 
 source "$(dirname "$0")/../common.sh"
-
-trap 'tui_kill' EXIT
+itest_cleanup() { tui_kill; }
+itest_begin
 
 setup_test
 fleet_up alpha
