@@ -14,7 +14,20 @@ var mu sync.Mutex
 
 // State holds all fleet data.
 type State struct {
-	Fleets map[string]*fleet.Fleet `json:"fleets"`
+	Fleets       map[string]*fleet.Fleet `json:"fleets"`
+	GroupLayouts map[string]GroupLayout  `json:"groupLayouts,omitempty"`
+}
+
+// GroupLayout records the outer tmux pane layout for a session group so
+// it can be restored after a fleet restart. The Layout field is a tmux
+// window_layout string (geometry + pane sizes); Sessions preserves the
+// pane-to-session mapping by screen position.
+type GroupLayout struct {
+	GroupID      string   `json:"groupID"`
+	InstanceName string   `json:"instanceName"`
+	Sessions     []string `json:"sessions"`
+	Layout       string   `json:"layout"`
+	PaneCount    int      `json:"paneCount"`
 }
 
 // FleetDir returns the base directory for fleet state.
@@ -53,6 +66,9 @@ func Load() (*State, error) {
 
 	if s.Fleets == nil {
 		s.Fleets = make(map[string]*fleet.Fleet)
+	}
+	if s.GroupLayouts == nil {
+		s.GroupLayouts = make(map[string]GroupLayout)
 	}
 
 	return s, nil

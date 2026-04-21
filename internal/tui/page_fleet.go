@@ -652,7 +652,7 @@ func (fp *fleetPage) handleEnter(m *model) tea.Cmd {
 				fp.activeGroupID = ""
 			}
 			if fp.splitPaneID != "" && fp.splitInstance == inst.Name && groupID != "" && groupID == fp.activeGroupID {
-				fp.saveCurrentGroupLayout()
+				fp.saveCurrentGroupLayout(m.st)
 				killAllSplitPanes()
 				unbindHostSplitKeys()
 				fp.splitPaneID = ""
@@ -663,7 +663,7 @@ func (fp *fleetPage) handleEnter(m *model) tea.Cmd {
 				return nil
 			}
 			if fp.splitPaneID != "" && fp.activeGroupID != "" {
-				fp.saveCurrentGroupLayout()
+				fp.saveCurrentGroupLayout(m.st)
 				killAllSplitPanes()
 			}
 			fp.activeGroupID = groupID
@@ -706,7 +706,7 @@ func (fp *fleetPage) handleEnter(m *model) tea.Cmd {
 				fp.activeGroupID = ""
 			}
 			if fp.splitPaneID != "" && fp.splitInstance == inst.Name {
-				fp.saveCurrentGroupLayout()
+				fp.saveCurrentGroupLayout(m.st)
 				killAllSplitPanes()
 				unbindHostSplitKeys()
 				fp.splitPaneID = ""
@@ -1446,7 +1446,7 @@ func (fp *fleetPage) commitGroupCycle(m *model) tea.Cmd {
 	targetGroupID := fp.pendingGroupID
 	fp.pendingGroupID = ""
 
-	fp.saveCurrentGroupLayout()
+	fp.saveCurrentGroupLayout(m.st)
 	killAllSplitPanes()
 
 	fp.activeGroupID = targetGroupID

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
+	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -272,8 +273,10 @@ func paneSessionOrder() []string {
 
 // saveCurrentGroupLayout saves the active group's outer tmux layout so
 // it can be restored later. Pane titles (set by fleet shell) are read
-// in pane index order to preserve the session-to-position mapping.
-func (fp *fleetPage) saveCurrentGroupLayout() {
+// in pane index order to preserve the session-to-position mapping. When
+// st is non-nil the layout is also mirrored into state.json so it
+// survives a fleet restart.
+func (fp *fleetPage) saveCurrentGroupLayout(st *state.State) {
 	if fp.activeGroupID == "" || fp.splitInstance == "" {
 		return
 	}
@@ -286,13 +289,29 @@ func (fp *fleetPage) saveCurrentGroupLayout() {
 		sessionNames = []string{fp.splitSession}
 	}
 
-	fp.savedGroups[fp.activeGroupID] = savedGroup{
+	sg := savedGroup{
 		GroupID:      fp.activeGroupID,
 		InstanceName: fp.splitInstance,
 		Sessions:     sessionNames,
 		Layout:       tmuxLayoutString(),
 		PaneCount:    len(sessionNames),
 	}
+	fp.savedGroups[fp.activeGroupID] = sg
+
+	if st == nil {
+		return
+	}
+	if st.GroupLayouts == nil {
+		st.GroupLayouts = make(map[string]state.GroupLayout)
+	}
+	st.GroupLayouts[fp.activeGroupID] = state.GroupLayout{
+		GroupID:      sg.GroupID,
+		InstanceName: sg.InstanceName,
+		Sessions:     sg.Sessions,
+		Layout:       sg.Layout,
+		PaneCount:    sg.PaneCount,
+	}
+	_ = state.Save(st)
 }
 
 // restoreGroupCmd recreates outer tmux panes for a saved session group.
