@@ -110,7 +110,18 @@ func (fp *fleetPage) Update(m *model, msg tea.Msg) tea.Cmd {
 	switch msg.(type) {
 	case sessionDiscoveryMsg:
 		fp.buildRows(m)
-		// Detect when panes were killed externally
+		// While a split is open, re-snapshot the active group's tmux
+		// layout into savedGroups on every tick. This keeps the map
+		// honest against mutations that bypass fleet's handlers —
+		// %/" adds new panes via a tmux binding, mouse drag resizes,
+		// Ctrl+Q/O closes without notifying fleet. The save is
+		// diff-gated so idle ticks don't hit disk.
+		if fp.splitPaneID != "" && fp.activeGroupID != "" && splitOpen() {
+			fp.saveCurrentGroupLayout(m.st)
+		}
+		// Detect when panes were killed externally. savedGroups already
+		// holds the pre-kill snapshot from the tick before, so clearing
+		// transient fields here loses nothing.
 		if fp.splitPaneID != "" && !splitOpen() {
 			unbindHostSplitKeys()
 			fp.splitPaneID = ""

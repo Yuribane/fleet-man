@@ -296,6 +296,13 @@ func (fp *fleetPage) saveCurrentGroupLayout(st *state.State) {
 		Layout:       tmuxLayoutString(),
 		PaneCount:    len(sessionNames),
 	}
+
+	// No-op when nothing changed. The discovery tick fires this every
+	// second; without this gate an idle split would rewrite state.json
+	// on every tick with identical bytes.
+	if existing, ok := fp.savedGroups[fp.activeGroupID]; ok && sameSavedGroup(existing, sg) {
+		return
+	}
 	fp.savedGroups[fp.activeGroupID] = sg
 
 	if st == nil {
