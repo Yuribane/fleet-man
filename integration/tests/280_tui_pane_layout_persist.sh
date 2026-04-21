@@ -35,15 +35,29 @@ tui_wait_for "+ new session" 15
 info "Open alpha shell in a split pane (first group session)"
 tui_send Enter
 tui_wait_for_pane 2 20
-sleep 3
 
-# Discover the group ID via the outer pane title that `fleet shell` sets
-# with select-pane -T. Title format: "<sanitized-instance>~<groupID>".
-pane_title=$(tmux display-message -t "${TUI_SESSION}:.1" -p "#{pane_title}" 2>/dev/null || true)
-info "pane 1 title: ${pane_title}"
-group_id="${pane_title#*~}"
-if [ -z "${group_id}" ] || [ "${group_id}" = "${pane_title}" ]; then
-  fail "could not parse group id from pane title: ${pane_title}"
+# Discover the group ID from the TUI pane itself. The first pane is
+# created by the TUI via devcontainer exec (not via `fleet shell`), so
+# #{pane_title} isn't set — it defaults to the runner hostname. Instead,
+# wait for the session-discovery loop to surface the group in the
+# expanded instance and read its ID off the screen. Group IDs are
+# randomHex(3) = exactly 6 hex chars, rendered as their own token; no
+# other on-screen text produces a standalone 6-hex-char word.
+info "Wait for the group session row to render in the TUI"
+deadline=$(( $(date +%s) + 20 ))
+group_id=""
+while [ "$(date +%s)" -lt "${deadline}" ]; do
+  screen=$(tui_capture_pane 0)
+  candidate=$(printf '%s' "${screen}" | grep -oE '\<[a-f0-9]{6}\>' | head -1 || true)
+  if [ -n "${candidate}" ]; then
+    group_id="${candidate}"
+    break
+  fi
+  sleep 0.5
+done
+if [ -z "${group_id}" ]; then
+  printf -- '--- pane 0 ---\n%s\n--- end ---\n' "$(tui_capture_pane 0)" >&2
+  fail "could not discover group id from TUI"
 fi
 info "group id: ${group_id}"
 
