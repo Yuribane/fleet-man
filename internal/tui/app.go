@@ -464,6 +464,7 @@ func (m model) Init() tea.Cmd {
 		m.spinner.Tick,
 		m.fetchAllStatsCmd(false),
 		m.sessionDiscoveryLoop(),
+		layoutTickCmd(),
 		checkUpdateCmd(),
 		forceRepaintCmd(),
 		m.currentPage.Init(&m),
@@ -604,6 +605,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// 4. Mixed messages — handle shared part, then forward to page
 	var extraCmds []tea.Cmd
 	switch msg := msg.(type) {
+	case layoutTickMsg:
+		// Fast outer-tmux layout poll. Snapshots the active group's
+		// layout into savedGroups every 250ms so Ctrl+Q / Ctrl+O — which
+		// kill panes via an outer tmux binding that bypasses fleet —
+		// can't race ahead of the save. The diff gate makes idle ticks
+		// free. Always reschedule so the tick keeps firing.
+		fp := m.fleetPage
+		if fp != nil && fp.splitPaneID != "" && fp.activeGroupID != "" && splitOpen() {
+			fp.saveCurrentGroupLayout(m.st)
+		}
+		extraCmds = append(extraCmds, layoutTickCmd())
+
 	case sessionDiscoveryMsg:
 		if msg.discovered != nil {
 			for key, sessions := range msg.discovered {

@@ -191,6 +191,21 @@ func unbindHostCloseKeys() {
 	_ = exec.Command("tmux", "unbind", "-n", "C-o").Run()
 }
 
+// layoutTickMsg fires the fast layout poll. Unlike sessionDiscoveryMsg
+// (which pays a ~2-3s round-trip to devcontainer exec), this tick only
+// queries the outer tmux server — cheap local IPC — so it can run at
+// 250ms to catch adds/kills before the user presses Ctrl+Q.
+type layoutTickMsg struct{}
+
+// layoutTickCmd returns a command that fires layoutTickMsg after 250ms.
+// The handler self-reschedules so the tick runs as long as the program
+// is alive; idle ticks are no-ops once the diff gate short-circuits.
+func layoutTickCmd() tea.Cmd {
+	return tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg {
+		return layoutTickMsg{}
+	})
+}
+
 // tmuxLayoutString returns the current tmux window layout string.
 func tmuxLayoutString() string {
 	out, err := exec.Command("tmux", "display-message", "-p", "#{window_layout}").Output()
@@ -284,9 +299,13 @@ func (fp *fleetPage) saveCurrentGroupLayout(st *state.State) {
 	// Read session names from outer tmux pane titles, in pane order.
 	sessionNames := paneSessionOrder()
 
-	// Fallback: if pane titles aren't available, use the one we know.
-	if len(sessionNames) == 0 && fp.splitSession != "" {
-		sessionNames = []string{fp.splitSession}
+	// No shell panes visible in the outer tmux means either the group
+	// hasn't opened yet or its panes have already been killed (Ctrl+Q,
+	// external kill, teardown mid-quit). Either way there's nothing
+	// truthful to save — bail before we clobber a previously good
+	// snapshot with a zero- or fallback-sized record.
+	if len(sessionNames) == 0 {
+		return
 	}
 
 	sg := savedGroup{
@@ -297,9 +316,9 @@ func (fp *fleetPage) saveCurrentGroupLayout(st *state.State) {
 		PaneCount:    len(sessionNames),
 	}
 
-	// No-op when nothing changed. The discovery tick fires this every
-	// second; without this gate an idle split would rewrite state.json
-	// on every tick with identical bytes.
+	// No-op when nothing changed. The 250ms layout tick fires this
+	// constantly; without this gate an idle split would rewrite
+	// state.json every tick with identical bytes.
 	if existing, ok := fp.savedGroups[fp.activeGroupID]; ok && sameSavedGroup(existing, sg) {
 		return
 	}
