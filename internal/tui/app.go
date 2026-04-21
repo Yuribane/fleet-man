@@ -130,6 +130,12 @@ func newModel() model {
 
 	m.reload()
 
+	// Rehydrate saved pane layouts from disk so group restores after
+	// a fleet restart use the exact geometry the user left behind,
+	// then drop any layouts whose instance no longer exists.
+	m.hydrateSavedGroups()
+	m.pruneOrphanedSavedGroups()
+
 	// Resume tracking any instances still in "creating" state from a previous session
 	if m.st != nil {
 		for fleetName, f := range m.st.Fleets {
@@ -180,6 +186,91 @@ func (m *model) reload() {
 		}
 		delete(m.expandedInstances, key)
 		delete(m.sessions, key)
+	}
+}
+
+// hydrateSavedGroups copies persisted pane layouts from state.json into
+// the fleet page's in-memory map. Called once at startup so subsequent
+// group restores use the layout geometry the user left behind rather
+// than falling back to the default placeholder split.
+func (m *model) hydrateSavedGroups() {
+	if m.st == nil || m.fleetPage == nil {
+		return
+	}
+	for gid, gl := range m.st.GroupLayouts {
+		m.fleetPage.savedGroups[gid] = savedGroup{
+			GroupID:      gl.GroupID,
+			InstanceName: gl.InstanceName,
+			Sessions:     gl.Sessions,
+			Layout:       gl.Layout,
+			PaneCount:    gl.PaneCount,
+		}
+	}
+}
+
+// pruneSavedGroupsForInstance drops saved layout entries for the given
+// instance whose group IDs no longer appear in the latest session
+// discovery. Called after each successful discovery so the next restart
+// doesn't resurrect layouts for groups the user has already deleted.
+func (m *model) pruneSavedGroupsForInstance(instKey string) {
+	if m.st == nil || m.fleetPage == nil {
+		return
+	}
+	parts := strings.SplitN(instKey, "/", 2)
+	if len(parts) != 2 {
+		return
+	}
+	instanceName := parts[1]
+	sanitized := SanitizeSessionName(instanceName)
+	disc, ok := m.sessions[instKey]
+	if !ok || disc == nil || disc.err != nil {
+		return
+	}
+	live := make(map[string]bool)
+	for _, s := range disc.sessions {
+		if gid, ok := parseGroupID(sanitized, s.Name); ok {
+			live[gid] = true
+		}
+	}
+	changed := false
+	for gid, sg := range m.fleetPage.savedGroups {
+		if sg.InstanceName != instanceName {
+			continue
+		}
+		if !live[gid] {
+			delete(m.fleetPage.savedGroups, gid)
+			delete(m.st.GroupLayouts, gid)
+			changed = true
+		}
+	}
+	if changed {
+		_ = state.Save(m.st)
+	}
+}
+
+// pruneOrphanedSavedGroups drops saved layout entries whose instance no
+// longer exists in state (e.g. the instance was deleted while fleet
+// wasn't running). Called once at startup.
+func (m *model) pruneOrphanedSavedGroups() {
+	if m.st == nil || m.fleetPage == nil {
+		return
+	}
+	live := make(map[string]bool)
+	for _, f := range m.st.Fleets {
+		for _, inst := range f.Instances {
+			live[inst.Name] = true
+		}
+	}
+	changed := false
+	for gid, sg := range m.fleetPage.savedGroups {
+		if !live[sg.InstanceName] {
+			delete(m.fleetPage.savedGroups, gid)
+			delete(m.st.GroupLayouts, gid)
+			changed = true
+		}
+	}
+	if changed {
+		_ = state.Save(m.st)
 	}
 }
 
@@ -530,6 +621,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					delete(m.lastActive, key)
 				}
 			}
+			for key := range msg.discovered {
+				m.pruneSavedGroupsForInstance(key)
+			}
 		}
 		extraCmds = append(extraCmds, m.sessionDiscoveryLoop())
 
@@ -578,6 +672,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.sessions[msg.instanceKey] = &sessionDiscovery{err: msg.err, fetchedAt: time.Now()}
 		} else {
 			m.sessions[msg.instanceKey] = &sessionDiscovery{sessions: msg.sessions, fetchedAt: time.Now()}
+			m.pruneSavedGroupsForInstance(msg.instanceKey)
 		}
 
 	case sessionCreatedMsg:
@@ -728,9 +823,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // and port forwards.
 func (m model) View() string {
 	if m.quitting {
-		// Clean up split panes via the fleet page
+		// Clean up split panes via the fleet page. Snapshot the current
+		// tmux layout BEFORE killing panes so pane-size changes made
+		// since the last group switch are persisted and replayed on the
+		// next fleet startup.
 		fp := m.fleetPage
 		if fp.splitPaneID != "" {
+			fp.saveCurrentGroupLayout(m.st)
 			killAllSplitPanes()
 		}
 		m.portForwards.Shutdown()
