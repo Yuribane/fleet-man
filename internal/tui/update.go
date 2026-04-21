@@ -71,18 +71,14 @@ func checkUpdateCmd() tea.Cmd {
 
 // performUpdateCmd runs the install script via tea.ExecProcess and, on
 // success, signals Run() (via updateInstalledMsg) to quit the TUI and
-// exec-replace this process with the new fleet binary. If inHostTmux
-// is true the --tmux flag is preserved on the replacement argv.
-func performUpdateCmd(inHostTmux bool) tea.Cmd {
+// exec-replace this process with the new fleet binary.
+func performUpdateCmd() tea.Cmd {
 	self, err := os.Executable()
 	if err != nil {
 		self = "fleet"
 	}
 
 	args := []string{self}
-	if inHostTmux {
-		args = append(args, "--tmux")
-	}
 
 	return tea.ExecProcess(
 		updateShellCmd(),

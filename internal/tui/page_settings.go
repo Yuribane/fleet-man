@@ -413,7 +413,7 @@ func (sp *settingsPage) updateSettingsNav(m *model, msg tea.Msg) tea.Cmd {
 				return nil
 			}
 			if item == settingsItemUpdate {
-				return performUpdateCmd(m.inHostTmux)
+				return performUpdateCmd()
 			}
 			if item == settingsItemDoctor {
 				cmd, err := doctor.Command()
