@@ -38,6 +38,25 @@ type savedGroup struct {
 	PaneCount    int      // number of shell panes (excluding TUI)
 }
 
+// sameSavedGroup reports whether two savedGroup values are byte-identical.
+// Used by saveCurrentGroupLayout to skip redundant writes on poll ticks
+// when the user hasn't changed anything.
+func sameSavedGroup(a, b savedGroup) bool {
+	if a.GroupID != b.GroupID ||
+		a.InstanceName != b.InstanceName ||
+		a.Layout != b.Layout ||
+		a.PaneCount != b.PaneCount ||
+		len(a.Sessions) != len(b.Sessions) {
+		return false
+	}
+	for i := range a.Sessions {
+		if a.Sessions[i] != b.Sessions[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // groupSessionName builds a session name for the root session of a new group.
 func groupSessionName(sanitizedInstance, groupID string) string {
 	return sanitizedInstance + groupSep + groupID
