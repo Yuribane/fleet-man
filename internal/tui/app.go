@@ -827,10 +827,18 @@ func (m model) View() string {
 		// tmux layout BEFORE killing panes so pane-size changes made
 		// since the last group switch are persisted and replayed on the
 		// next fleet startup.
+		//
+		// Bubbletea can call View() more than once while tearing down
+		// after tea.Quit. Clear splitPaneID after the first pass so a
+		// subsequent call doesn't re-enter this block — without that,
+		// the second saveCurrentGroupLayout reads the post-kill tmux
+		// layout (1 pane, TUI only) and overwrites the correct save
+		// with a truncated single-pane record.
 		fp := m.fleetPage
 		if fp.splitPaneID != "" {
 			fp.saveCurrentGroupLayout(m.st)
 			killAllSplitPanes()
+			fp.splitPaneID = ""
 		}
 		m.portForwards.Shutdown()
 		if m.inHostTmux {
