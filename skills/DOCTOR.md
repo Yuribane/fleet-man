@@ -207,9 +207,9 @@ cat "${CODER_CONFIG_DIR:-$HOME/.config/coderv2}/url" 2>/dev/null || echo "URL fi
 
 ---
 
-## 7. tmux (optional but recommended)
+## 7. tmux (required)
 
-tmux enables split-pane mode in the TUI where the fleet list and instance shell appear side by side.
+tmux is required — fleet always runs its TUI inside a tmux session. Without tmux, `fleet` will refuse to start.
 
 ```bash
 command -v tmux && tmux -V
@@ -219,13 +219,12 @@ command -v tmux && tmux -V
   ```bash
   sudo apt-get update && sudo apt-get install -y tmux
   ```
-- **Note:** To use split-pane mode, launch fleet with `fleet --tmux`.
 
 ---
 
-## 8. Terminal Emulators (optional)
+## 8. Terminal Emulators (legacy fallback)
 
-When not running inside tmux, fleet-man tries to open instance shells in a new terminal window. It probes for these emulators in order:
+Fleet always runs inside tmux now, so instance shells open as tmux split panes. The terminal-emulator probe below is only relevant if tmux support has been disabled or removed in a fork.
 
 1. ptyxis
 2. gnome-terminal
@@ -242,8 +241,6 @@ for t in ptyxis gnome-terminal konsole xfce4-terminal alacritty kitty xterm; do
   fi
 done
 ```
-
-- **Fix:** Install at least one terminal emulator, or use tmux mode (`fleet --tmux`) instead.
 
 ---
 

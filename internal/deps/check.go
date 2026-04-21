@@ -17,6 +17,13 @@ type Dependency struct {
 func Check() []Dependency {
 	deps := []Dependency{
 		{
+			Name:        "tmux",
+			Binary:      "tmux",
+			Required:    true,
+			InstallURL:  "https://github.com/tmux/tmux/wiki/Installing",
+			Description: "Terminal multiplexer — fleet runs its TUI inside a tmux session.",
+		},
+		{
 			Name:       "devcontainer CLI",
 			Binary:     "devcontainer",
 			Required:   true,

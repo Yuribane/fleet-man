@@ -16,7 +16,6 @@ import (
 
 // NewRootCmd creates the root fleet command.
 func NewRootCmd() *cobra.Command {
-	var useTmux bool
 	var runDoctor bool
 
 	root := &cobra.Command{
@@ -27,14 +26,10 @@ func NewRootCmd() *cobra.Command {
 			if runDoctor {
 				return doctor.Run()
 			}
-			if useTmux {
-				return relaunchInTmux()
-			}
-			return tui.Run()
+			return relaunchInTmux()
 		},
 	}
 
-	root.Flags().BoolVar(&useTmux, "tmux", false, "launch fleet inside a tmux session (enables split pane mode)")
 	root.Flags().BoolVar(&runDoctor, "doctor", false, "launch a coding agent to diagnose and fix your setup")
 
 	root.AddCommand(
@@ -71,7 +66,7 @@ func relaunchInTmux() error {
 
 	tmuxBin, err := exec.LookPath("tmux")
 	if err != nil {
-		return fmt.Errorf("tmux not found: %w", err)
+		return fmt.Errorf("tmux is required but was not found on PATH. Install it via your package manager (apt/dnf/brew install tmux) and re-run fleet")
 	}
 
 	// exec into: tmux new-session -s fleet -- <self>
