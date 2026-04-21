@@ -185,8 +185,10 @@ const (
 )
 
 // openEditInstanceDialog opens the add-instance dialog in edit mode for
-// the currently selected instance. Name and deploy target are disabled;
-// only the color is editable.
+// the currently selected instance. The user-facing Name (stored as
+// DisplayName) and color are editable; the underlying identifier, branch,
+// and deploy target are immutable — they describe how the workspace was
+// originally provisioned.
 func (fp *fleetPage) openEditInstanceDialog(m *model) tea.Cmd {
 	f, inst := fp.selectedInstance(m)
 	if inst == nil || f == nil {
@@ -206,12 +208,11 @@ func (fp *fleetPage) openEditInstanceDialog(m *model) tea.Cmd {
 	if fp.dialogColor == "" {
 		fp.dialogColor = instanceColorWhite
 	}
-	fp.dialogRow = addInstanceRowColor
-	fp.textInput.SetValue(inst.Name)
-	fp.textInput.Blur()
+	fp.dialogRow = addInstanceRowName
+	fp.textInput.SetValue(inst.GetDisplayName())
 	fp.branchInput.SetValue(inst.Branch)
-	fp.branchInput.Blur()
-	return nil
+	fp.syncAddInstanceFocus()
+	return fp.textInput.Cursor.BlinkCmd()
 }
 
 // updateAddInstance handles the add-instance dialog.
@@ -259,6 +260,7 @@ func (fp *fleetPage) updateAddInstance(m *model, msg tea.Msg) tea.Cmd {
 			wsDir := filepath.Join(state.WorkspacesDir(), fleetName, name, fleetName)
 			inst := &fleet.Instance{
 				Name:         name,
+				DisplayName:  name,
 				Config:       ".devcontainer/devcontainer.json",
 				WorkspaceDir: wsDir,
 				CreatedAt:    time.Now(),
@@ -362,9 +364,10 @@ func (fp *fleetPage) updateAddInstance(m *model, msg tea.Msg) tea.Cmd {
 
 // syncAddInstanceFocus focuses the text input of the currently selected
 // row so the cursor visually reflects the current focus. In edit mode
-// the name and branch are immutable so focus is never granted to them.
+// the branch input is immutable so it never receives focus; the name
+// input edits DisplayName and stays focusable.
 func (fp *fleetPage) syncAddInstanceFocus() {
-	nameFocus := fp.dialogRow == addInstanceRowName && !fp.dialogEditing
+	nameFocus := fp.dialogRow == addInstanceRowName
 	branchFocus := fp.dialogRow == addInstanceRowBranch && !fp.dialogEditing
 
 	if nameFocus {
@@ -381,14 +384,14 @@ func (fp *fleetPage) syncAddInstanceFocus() {
 }
 
 // addInstanceRowEnabled reports whether a given row is selectable in the
-// current dialog mode. Name, branch, and deploy are locked while editing
-// because they describe how the workspace was originally provisioned and
-// cannot be retroactively changed without recreating the instance.
+// current dialog mode. Branch and deploy are locked while editing because
+// they describe how the workspace was originally provisioned and cannot
+// be retroactively changed without recreating the instance.
 func (fp *fleetPage) addInstanceRowEnabled(row int) bool {
 	if !fp.dialogEditing {
 		return true
 	}
-	return row == addInstanceRowColor
+	return row == addInstanceRowName || row == addInstanceRowColor
 }
 
 // nextAddInstanceRow advances the focused row forward, skipping any rows
@@ -415,8 +418,9 @@ func (fp *fleetPage) prevAddInstanceRow(current int) int {
 	return current
 }
 
-// saveInstanceEdits commits color edits to the selected instance and
-// closes the dialog.
+// saveInstanceEdits commits display-name and color edits to the selected
+// instance and closes the dialog. The underlying Name is immutable; the
+// name input writes to DisplayName instead.
 func (fp *fleetPage) saveInstanceEdits(m *model) tea.Cmd {
 	f, ok := m.st.Fleets[fp.dialogFleet]
 	if !ok {
@@ -433,10 +437,17 @@ func (fp *fleetPage) saveInstanceEdits(m *model) tea.Cmd {
 		return nil
 	}
 
+	displayName := strings.TrimSpace(fp.textInput.Value())
+	if displayName == "" {
+		m.message = "Name cannot be empty"
+		return nil
+	}
+
 	color := fp.dialogColor
 	if color == instanceColorWhite {
 		color = ""
 	}
+	inst.DisplayName = displayName
 	inst.Color = color
 	_ = state.Save(m.st)
 
