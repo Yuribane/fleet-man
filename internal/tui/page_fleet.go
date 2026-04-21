@@ -497,7 +497,7 @@ func (fp *fleetPage) updateNormal(m *model, msg tea.Msg) tea.Cmd {
 			if err != nil {
 				m.message = fmt.Sprintf("Could not open terminal: %v", err)
 			} else {
-				m.message = fmt.Sprintf("Opened terminal for %s", inst.Name)
+				m.message = fmt.Sprintf("Opened terminal for %s", inst.GetDisplayName())
 			}
 
 		case "c":
@@ -525,7 +525,7 @@ func (fp *fleetPage) updateNormal(m *model, msg tea.Msg) tea.Cmd {
 				if err := codeCmd.Run(); err != nil {
 					m.message = fmt.Sprintf("VS Code error: %v", err)
 				} else {
-					m.message = fmt.Sprintf("Opened VS Code for %s", inst.Name)
+					m.message = fmt.Sprintf("Opened VS Code for %s", inst.GetDisplayName())
 				}
 			}
 
@@ -541,7 +541,7 @@ func (fp *fleetPage) updateNormal(m *model, msg tea.Msg) tea.Cmd {
 			}
 			b := m.instanceBackend(inst)
 			instanceKey := fp.currentFleetName() + "/" + inst.Name
-			m.message = fmt.Sprintf("Starting browser proxy for %s...", inst.Name)
+			m.message = fmt.Sprintf("Starting browser proxy for %s...", inst.GetDisplayName())
 			return openBrowserProxyCmd(m.portForwards, b, inst, instanceKey)
 
 		case "t":
@@ -682,7 +682,7 @@ func (fp *fleetPage) handleEnter(m *model) tea.Cmd {
 			inst.WorkspaceDir,
 			ShellCommandForSession(m.cfg, sessionName, m.width, m.height, false),
 		)
-		banner := renderGradient(nameToBanner(inst.Name))
+		banner := renderGradient(nameToBanner(inst.GetDisplayName()))
 		banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
 		return tea.ExecProcess(
 			execWithBannerCmd(banner, cmd),
@@ -726,7 +726,7 @@ func (fp *fleetPage) handleEnter(m *model) tea.Cmd {
 		m.lastActive[instKey] = lastSession{sessionName: sessionName}
 
 		cmd := m.instanceBackend(inst).ExecCommand(inst.WorkspaceDir, ShellCommandForSession(m.cfg, sessionName, m.width, m.height, false))
-		banner := renderGradient(nameToBanner(inst.Name))
+		banner := renderGradient(nameToBanner(inst.GetDisplayName()))
 		banner += "\n  " + dimStyle.Render("ctrl+q/ctrl+o to detach (session persists)")
 		return tea.ExecProcess(
 			execWithBannerCmd(banner, cmd),
@@ -934,7 +934,7 @@ func (fp *fleetPage) viewFleetList(m *model) string {
 				}
 			}
 
-			paddedName := fmt.Sprintf("%s%-22s", arrow, inst.Name)
+			paddedName := fmt.Sprintf("%s%-22s", arrow, inst.GetDisplayName())
 			switch {
 			case isSelected && instanceColorHasCustom(inst.Color):
 				paddedName = instanceColorStyle(inst.Color).Bold(true).Render(paddedName)
@@ -1091,8 +1091,8 @@ func (fp *fleetPage) viewFleetList(m *model) string {
 		var title, hint, nameField, branchField, deployField string
 		if fp.dialogEditing {
 			title = "Edit instance"
-			hint = "[←→/space] Cycle color  [shift+tab] Color  [enter] Save  [esc] Cancel"
-			nameField = dimStyle.Render(fp.dialogInst)
+			hint = "[↑↓] Select  [←→/space] Cycle color  [shift+tab] Color  [enter] Save  [esc] Cancel"
+			nameField = fp.textInput.View()
 			branchDisplay := fp.branchInput.Value()
 			if branchDisplay == "" {
 				branchDisplay = "default"
@@ -1111,7 +1111,7 @@ func (fp *fleetPage) viewFleetList(m *model) string {
 		}
 
 		rowMarker := func(r int) string {
-			if fp.dialogEditing && r != addInstanceRowColor {
+			if !fp.addInstanceRowEnabled(r) {
 				return "  "
 			}
 			if fp.dialogRow == r {

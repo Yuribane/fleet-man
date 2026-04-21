@@ -391,3 +391,87 @@ func stubToggleInstance(fn func(fleetName, instanceName string) (*instanceops.Re
 		toggleInstanceStatus = prev
 	}
 }
+
+func TestEditInstanceRenamesViaDisplayName(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	inst := &fleet.Instance{Name: "agent-1", DisplayName: "agent-1", Status: fleet.StatusRunning}
+	fp := newFleetPage()
+	fp.rows = []row{{kind: rowInstance, fleetName: "alpha", instance: inst}}
+	m := &model{
+		st: &state.State{
+			Fleets: map[string]*fleet.Fleet{
+				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
+			},
+		},
+		expandedInstances: make(map[string]bool),
+		stats:             map[string]*backend.ContainerStats{},
+		fleetPage:         fp,
+	}
+
+	// Press 'e' on the instance row to open the edit dialog.
+	fp.updateNormal(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+
+	if fp.mode != viewAddInstance || !fp.dialogEditing {
+		t.Fatalf("mode = %v, editing = %v; want viewAddInstance in edit mode", fp.mode, fp.dialogEditing)
+	}
+	if fp.dialogRow != addInstanceRowName {
+		t.Fatalf("dialogRow = %d, want addInstanceRowName (%d)", fp.dialogRow, addInstanceRowName)
+	}
+	if got := fp.textInput.Value(); got != "agent-1" {
+		t.Fatalf("prefilled input = %q, want %q", got, "agent-1")
+	}
+
+	// Type a new name and submit.
+	fp.textInput.SetValue("auth-fix")
+	fp.updateAddInstance(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if fp.mode != viewNormal {
+		t.Fatalf("mode after enter = %v, want viewNormal", fp.mode)
+	}
+	if inst.Name != "agent-1" {
+		t.Fatalf("Name = %q, want %q (should be immutable)", inst.Name, "agent-1")
+	}
+	if inst.DisplayName != "auth-fix" {
+		t.Fatalf("DisplayName = %q, want %q", inst.DisplayName, "auth-fix")
+	}
+
+	prevResolveBranch := resolveWorkspaceBranch
+	resolveWorkspaceBranch = func(string) string { return "" }
+	defer func() { resolveWorkspaceBranch = prevResolveBranch }()
+
+	view := fp.viewFleetList(m)
+	if !strings.Contains(view, "auth-fix") {
+		t.Fatalf("rendered list missing new display name:\n%s", view)
+	}
+}
+
+func TestEditInstanceRejectsEmptyName(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	inst := &fleet.Instance{Name: "agent-1", DisplayName: "agent-1", Status: fleet.StatusRunning, Color: "red"}
+	fp := newFleetPage()
+	fp.rows = []row{{kind: rowInstance, fleetName: "alpha", instance: inst}}
+	m := &model{
+		st: &state.State{
+			Fleets: map[string]*fleet.Fleet{
+				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
+			},
+		},
+		fleetPage: fp,
+	}
+
+	fp.updateNormal(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	fp.textInput.SetValue("   ")
+	fp.updateAddInstance(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if inst.DisplayName != "agent-1" {
+		t.Fatalf("DisplayName = %q, want unchanged %q", inst.DisplayName, "agent-1")
+	}
+	if m.message != "Name cannot be empty" {
+		t.Fatalf("message = %q, want rejection message", m.message)
+	}
+	if fp.mode != viewAddInstance {
+		t.Fatalf("dialog closed prematurely; mode = %v", fp.mode)
+	}
+}

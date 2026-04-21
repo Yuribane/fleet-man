@@ -65,6 +65,7 @@ func newUpCmd() *cobra.Command {
 			wsDir := filepath.Join(state.WorkspacesDir(), target.Fleet, target.Instance, target.Fleet)
 			inst := &fleet.Instance{
 				Name:         target.Instance,
+				DisplayName:  target.Instance,
 				Config:       ".devcontainer/devcontainer.json",
 				WorkspaceDir: wsDir,
 				CreatedAt:    time.Now(),
