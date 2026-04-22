@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Description: TUI installs a C-S-h binding that refocuses the fleet TUI pane
+# Description: TUI installs a prefix + H binding that refocuses the fleet TUI pane
 set -euo pipefail
 
 source "$(dirname "$0")/../common.sh"
@@ -14,21 +14,18 @@ tui_wait_for "alpha" 15
 tui_wait_for "○ idle" 60
 
 # ===========================================
-# 1. Binding is installed at the root key table.
+# 1. Binding is installed in the prefix key table.
 # ===========================================
-info "asserting Ctrl+Shift+H is bound at the root table"
-# tmux normalises the modifier order, so "C-S-h" is listed as "S-C-h".
-# Match either spelling defensively in case newer tmux versions change
-# the canonical form.
-keys=$(tmux list-keys -T root 2>/dev/null || true)
-csh_line=$(printf '%s\n' "${keys}" | grep -E '(^| )(S-C-h|C-S-h)( |$)' | head -1 || true)
-if [ -z "${csh_line}" ]; then
-  printf -- '--- list-keys root ---\n%s\n--- end ---\n' "${keys}" >&2
-  fail "Ctrl+Shift+H binding missing from root table"
+info "asserting prefix + H is bound in the prefix table"
+keys=$(tmux list-keys -T prefix 2>/dev/null || true)
+h_line=$(printf '%s\n' "${keys}" | grep -E '(^| )H( |$)' | head -1 || true)
+if [ -z "${h_line}" ]; then
+  printf -- '--- list-keys prefix ---\n%s\n--- end ---\n' "${keys}" >&2
+  fail "prefix + H binding missing from prefix table"
 fi
-info "binding: ${csh_line}"
-assert_contains "${csh_line}" "select-pane" "Ctrl+Shift+H should run select-pane"
-assert_contains "${csh_line}" ":.0" "Ctrl+Shift+H should target pane 0 of the current window"
+info "binding: ${h_line}"
+assert_contains "${h_line}" "select-pane" "prefix + H should run select-pane"
+assert_contains "${h_line}" ":.0" "prefix + H should target pane 0 of the current window"
 
 # ===========================================
 # 2. Open a shell split so the active pane moves away from the TUI.
@@ -65,4 +62,4 @@ assert_equals "0" "${active_idx}" "select-pane -t :.0 must focus the TUI pane"
 # ===========================================
 assert_equals "2" "$(tui_pane_count)" "refocus must not close the split pane"
 
-pass "C-S-h binding installed and refocuses the TUI pane"
+pass "prefix + H binding installed and refocuses the TUI pane"
