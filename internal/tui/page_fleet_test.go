@@ -475,3 +475,160 @@ func TestEditInstanceRejectsEmptyName(t *testing.T) {
 		t.Fatalf("dialog closed prematurely; mode = %v", fp.mode)
 	}
 }
+
+// TestMoveCursorToInstanceSkipsBetweenInstances verifies that shift-jump
+// navigation lands on the next instance row, skipping sessions, headers,
+// and settings rows in between.
+func TestMoveCursorToInstanceSkipsBetweenInstances(t *testing.T) {
+	inst1 := &fleet.Instance{Name: "agent-1"}
+	inst2 := &fleet.Instance{Name: "agent-2"}
+	fp := newFleetPage()
+	fp.rows = []row{
+		{kind: rowFleetHeader, fleetName: "alpha"},      // 0
+		{kind: rowInstance, fleetName: "alpha", instance: inst1}, // 1
+		{kind: rowSession, fleetName: "alpha", instance: inst1, sessionName: "s1"}, // 2
+		{kind: rowSession, fleetName: "alpha", instance: inst1, sessionName: "s2"}, // 3
+		{kind: rowNewSession, fleetName: "alpha", instance: inst1}, // 4
+		{kind: rowInstance, fleetName: "alpha", instance: inst2}, // 5
+		{kind: rowSettings}, // 6
+	}
+
+	// Forward: from instance 1 should jump to instance 2.
+	fp.cursor = 1
+	fp.moveCursorToInstance(1)
+	if fp.cursor != 5 {
+		t.Fatalf("forward from instance: cursor = %d, want 5", fp.cursor)
+	}
+
+	// Forward: from a session row under instance 1 should also jump to instance 2.
+	fp.cursor = 3
+	fp.moveCursorToInstance(1)
+	if fp.cursor != 5 {
+		t.Fatalf("forward from session: cursor = %d, want 5", fp.cursor)
+	}
+
+	// Backward: from instance 2 should jump to instance 1.
+	fp.cursor = 5
+	fp.moveCursorToInstance(-1)
+	if fp.cursor != 1 {
+		t.Fatalf("backward from instance: cursor = %d, want 1", fp.cursor)
+	}
+
+	// Backward: from a session row under instance 1 should jump back to instance 1.
+	fp.cursor = 3
+	fp.moveCursorToInstance(-1)
+	if fp.cursor != 1 {
+		t.Fatalf("backward from session: cursor = %d, want 1", fp.cursor)
+	}
+}
+
+// TestMoveCursorToInstanceWraps verifies wrap-around in both directions when
+// the cursor would otherwise run past the ends of the row list.
+func TestMoveCursorToInstanceWraps(t *testing.T) {
+	inst1 := &fleet.Instance{Name: "agent-1"}
+	inst2 := &fleet.Instance{Name: "agent-2"}
+	fp := newFleetPage()
+	fp.rows = []row{
+		{kind: rowFleetHeader, fleetName: "alpha"},      // 0
+		{kind: rowInstance, fleetName: "alpha", instance: inst1}, // 1
+		{kind: rowInstance, fleetName: "alpha", instance: inst2}, // 2
+		{kind: rowSettings}, // 3
+	}
+
+	// Forward from last instance wraps past settings/header to first instance.
+	fp.cursor = 2
+	fp.moveCursorToInstance(1)
+	if fp.cursor != 1 {
+		t.Fatalf("forward wrap: cursor = %d, want 1", fp.cursor)
+	}
+
+	// Backward from first instance wraps past header/settings to last instance.
+	fp.cursor = 1
+	fp.moveCursorToInstance(-1)
+	if fp.cursor != 2 {
+		t.Fatalf("backward wrap: cursor = %d, want 2", fp.cursor)
+	}
+
+	// Forward from settings row (after the last instance) wraps to first instance.
+	fp.cursor = 3
+	fp.moveCursorToInstance(1)
+	if fp.cursor != 1 {
+		t.Fatalf("forward wrap from settings: cursor = %d, want 1", fp.cursor)
+	}
+
+	// Backward from header row (before the first instance) wraps to last instance.
+	fp.cursor = 0
+	fp.moveCursorToInstance(-1)
+	if fp.cursor != 2 {
+		t.Fatalf("backward wrap from header: cursor = %d, want 2", fp.cursor)
+	}
+}
+
+// TestMoveCursorToInstanceNoInstances verifies the cursor is left untouched
+// when there are no instance rows to jump to (e.g. all fleets collapsed).
+func TestMoveCursorToInstanceNoInstances(t *testing.T) {
+	fp := newFleetPage()
+	fp.rows = []row{
+		{kind: rowFleetHeader, fleetName: "alpha"},
+		{kind: rowFleetHeader, fleetName: "beta"},
+		{kind: rowSettings},
+	}
+
+	fp.cursor = 1
+	fp.moveCursorToInstance(1)
+	if fp.cursor != 1 {
+		t.Fatalf("no instances forward: cursor = %d, want 1", fp.cursor)
+	}
+	fp.moveCursorToInstance(-1)
+	if fp.cursor != 1 {
+		t.Fatalf("no instances backward: cursor = %d, want 1", fp.cursor)
+	}
+}
+
+// TestUpdateNormalShiftJumpKeys verifies that capital J/K and shift+arrow
+// keys dispatch to moveCursorToInstance via updateNormal.
+func TestUpdateNormalShiftJumpKeys(t *testing.T) {
+	inst1 := &fleet.Instance{Name: "agent-1"}
+	inst2 := &fleet.Instance{Name: "agent-2"}
+	fp := newFleetPage()
+	fp.rows = []row{
+		{kind: rowFleetHeader, fleetName: "alpha"},
+		{kind: rowInstance, fleetName: "alpha", instance: inst1},
+		{kind: rowSession, fleetName: "alpha", instance: inst1, sessionName: "s1"},
+		{kind: rowInstance, fleetName: "alpha", instance: inst2},
+		{kind: rowSettings},
+	}
+	m := &model{
+		st: &state.State{
+			Fleets: map[string]*fleet.Fleet{
+				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst1, inst2}},
+			},
+		},
+		fleetPage: fp,
+	}
+
+	// Capital J should jump forward to the next instance.
+	fp.cursor = 1
+	fp.updateNormal(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'J'}})
+	if fp.cursor != 3 {
+		t.Fatalf("J: cursor = %d, want 3", fp.cursor)
+	}
+
+	// Capital K should jump backward to the previous instance.
+	fp.updateNormal(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'K'}})
+	if fp.cursor != 1 {
+		t.Fatalf("K: cursor = %d, want 1", fp.cursor)
+	}
+
+	// shift+down should behave the same as J.
+	fp.updateNormal(m, tea.KeyMsg{Type: tea.KeyShiftDown})
+	if fp.cursor != 3 {
+		t.Fatalf("shift+down: cursor = %d, want 3", fp.cursor)
+	}
+
+	// shift+up should behave the same as K.
+	fp.updateNormal(m, tea.KeyMsg{Type: tea.KeyShiftUp})
+	if fp.cursor != 1 {
+		t.Fatalf("shift+up: cursor = %d, want 1", fp.cursor)
+	}
+}

@@ -191,6 +191,19 @@ func unbindHostCloseKeys() {
 	_ = exec.Command("tmux", "unbind", "-n", "C-o").Run()
 }
 
+// bindRefocusTUIKey binds prefix + Shift+H to refocus the TUI pane
+// (index 0 of the current window) from any split. Uses the prefix key
+// table rather than a root binding so it composes cleanly with other
+// tmux bindings and works across every terminal.
+func bindRefocusTUIKey() {
+	_ = exec.Command("tmux", "bind-key", "H", "select-pane", "-t", ":.0").Run()
+}
+
+// unbindRefocusTUIKey removes the prefix + Shift+H binding.
+func unbindRefocusTUIKey() {
+	_ = exec.Command("tmux", "unbind", "H").Run()
+}
+
 // layoutTickMsg fires the fast layout poll. Unlike sessionDiscoveryMsg
 // (which pays a ~2-3s round-trip to devcontainer exec), this tick only
 // queries the outer tmux server — cheap local IPC — so it can run at

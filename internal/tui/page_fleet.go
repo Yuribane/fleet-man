@@ -262,6 +262,26 @@ func (fp *fleetPage) moveCursor(delta int) {
 	fp.cursor = (fp.cursor + delta + len(fp.rows)) % len(fp.rows)
 }
 
+// moveCursorToInstance moves the cursor to the next (delta > 0) or previous
+// (delta < 0) instance row, wrapping around. If the row list contains no
+// instance rows, the cursor is left unchanged.
+func (fp *fleetPage) moveCursorToInstance(delta int) {
+	n := len(fp.rows)
+	if n == 0 || delta == 0 {
+		return
+	}
+	step := 1
+	if delta < 0 {
+		step = -1
+	}
+	for range n {
+		fp.cursor = (fp.cursor + step + n) % n
+		if fp.rows[fp.cursor].kind == rowInstance {
+			return
+		}
+	}
+}
+
 // currentFleetName returns the fleet name for the row at the cursor.
 func (fp *fleetPage) currentFleetName() string {
 	r := fp.currentRow()
@@ -313,6 +333,12 @@ func (fp *fleetPage) updateNormal(m *model, msg tea.Msg) tea.Cmd {
 
 		case "down", "j":
 			fp.moveCursor(1)
+
+		case "shift+up", "K":
+			fp.moveCursorToInstance(-1)
+
+		case "shift+down", "J":
+			fp.moveCursorToInstance(1)
 
 		case " ", "tab":
 			if r := fp.currentRow(); r != nil {

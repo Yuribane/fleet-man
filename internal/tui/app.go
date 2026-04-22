@@ -113,6 +113,7 @@ func newModel() model {
 	if m.inHostTmux {
 		bindHostSessionCycleKeys()
 		bindHostCloseKeys()
+		bindRefocusTUIKey()
 		// Neutralise default split bindings so the user doesn't
 		// accidentally open a host shell before selecting an instance.
 		// These will be rebound to connect to the active instance
@@ -858,6 +859,7 @@ func (m model) View() string {
 			unbindHostSessionCycleKeys()
 			unbindHostSplitKeys()
 			unbindHostCloseKeys()
+			unbindRefocusTUIKey()
 		}
 		return ""
 	}
