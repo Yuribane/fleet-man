@@ -191,6 +191,21 @@ func unbindHostCloseKeys() {
 	_ = exec.Command("tmux", "unbind", "-n", "C-o").Run()
 }
 
+// bindRefocusTUIKey binds Ctrl+Shift+H on the outer tmux root table to
+// refocus the TUI pane (index 0 of the current window) from any split.
+// Many terminals collapse Ctrl+Shift+H to Ctrl+H (backspace) at the byte
+// level, so this only fires in terminals that send CSI u / modifyOtherKeys
+// (Kitty, WezTerm, Alacritty with modern config, recent iTerm2, ...).
+func bindRefocusTUIKey() {
+	_ = exec.Command("tmux", "bind-key", "-n", "C-S-h", "select-pane", "-t", ":.0").Run()
+}
+
+// unbindRefocusTUIKey removes the Ctrl+Shift+H binding from the outer
+// tmux root table.
+func unbindRefocusTUIKey() {
+	_ = exec.Command("tmux", "unbind", "-n", "C-S-h").Run()
+}
+
 // layoutTickMsg fires the fast layout poll. Unlike sessionDiscoveryMsg
 // (which pays a ~2-3s round-trip to devcontainer exec), this tick only
 // queries the outer tmux server — cheap local IPC — so it can run at
