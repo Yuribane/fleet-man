@@ -23,12 +23,9 @@ func newUpCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 
-			bt := fleet.BackendDevcontainer
-			switch backendFlag {
-			case "coder":
-				bt = fleet.BackendCoder
-			case "codespaces":
-				bt = fleet.BackendCodespaces
+			bt, err := fleet.ParseBackendType(backendFlag)
+			if err != nil {
+				return err
 			}
 
 			target, err := fleet.Resolve(name, repoFlag)

@@ -1,6 +1,7 @@
 package devcontainer
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backend"
@@ -40,6 +41,42 @@ func TestParseToolProbeOutput(t *testing.T) {
 			}
 			if tool != tt.wantTool {
 				t.Fatalf("ParseToolProbeOutput(%q) tool = %q, want %q", tt.output, tool, tt.wantTool)
+			}
+		})
+	}
+}
+
+func TestDevcontainerEnvBuildKitMode(t *testing.T) {
+	tests := []struct {
+		name    string
+		mode    string
+		wantEnv string
+		wantErr bool
+	}{
+		{name: "unset delegates to default"},
+		{name: "auto delegates to default", mode: "auto"},
+		{name: "never disables buildkit", mode: "never", wantEnv: "DOCKER_BUILDKIT=0"},
+		{name: "invalid errors", mode: "sometimes", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("FLEET_DEVCONTAINER_BUILDKIT", tt.mode)
+			env, err := devcontainerEnv([]string{"PATH=/bin"})
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("devcontainerEnv() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("devcontainerEnv() error = %v", err)
+			}
+			if tt.wantEnv != "" && !slices.Contains(env, tt.wantEnv) {
+				t.Fatalf("devcontainerEnv() missing %q in %#v", tt.wantEnv, env)
+			}
+			if tt.wantEnv == "" && slices.Contains(env, "DOCKER_BUILDKIT=0") {
+				t.Fatalf("devcontainerEnv() unexpectedly disabled BuildKit: %#v", env)
 			}
 		})
 	}
