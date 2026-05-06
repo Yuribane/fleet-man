@@ -76,6 +76,55 @@ fleet up my-project/agent-3
 
 ## Requirements
 
-- Linux
+- Linux, including Ubuntu on WSL2
 - Docker
 - [devcontainer CLI](https://github.com/devcontainers/cli) (`npm install -g @devcontainers/cli`)
+
+## Windows WSL Setup
+
+Fleet is a Linux CLI, but it can run on Windows through WSL2. The confirmed
+setup is:
+
+- Ubuntu on WSL2
+- Docker Desktop with WSL integration enabled for the Ubuntu distro
+- Node installed with `nvm`
+- `@devcontainers/cli` installed under the nvm-managed Node
+- Fleet installed somewhere on the WSL `PATH`, such as `~/.local/bin/fleet`
+
+Inside WSL:
+
+```bash
+nvm install 22
+nvm alias default 22
+nvm use default
+npm install -g @devcontainers/cli
+```
+
+On Docker Desktop plus WSL, if devcontainer startup fails while building the
+UID-adjustment or feature image, disable BuildKit for Fleet-managed
+devcontainers:
+
+```bash
+export FLEET_DEVCONTAINER_BUILDKIT=never
+```
+
+To persist that setting:
+
+```bash
+echo 'export FLEET_DEVCONTAINER_BUILDKIT=never' >> ~/.bashrc
+```
+
+See [Windows WSL notes](docs/windows-wsl-notes.md) for a full health check and
+disposable smoke-test workflow.
+
+## Devcontainer BuildKit
+
+Fleet uses the devcontainer CLI's default BuildKit behavior unless explicitly
+configured. If Docker Desktop on WSL fails while building the devcontainer
+UID-adjustment image, disable BuildKit for Fleet-managed devcontainers:
+
+```bash
+export FLEET_DEVCONTAINER_BUILDKIT=never
+```
+
+Accepted values are `auto` and `never`.

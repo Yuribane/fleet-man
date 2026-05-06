@@ -137,10 +137,11 @@ func relaunchInTmux() error {
 			`[ -n "$CLIP" ] && { tmux set-buffer -b __fleet_primary -- "$CLIP"; tmux paste-buffer -p -d -b __fleet_primary -t "$TMUX_PANE"; }`,
 	)
 	// terminal-features tells tmux the terminal supports OSC 52
-	// clipboard (tmux 3.2+). Appended last so older versions just
-	// lose this feature without breaking the session.
+	// clipboard and RGB/truecolor (tmux 3.2+). Appended last so
+	// older versions just lose these features without breaking the
+	// session.
 	setupArgs = append(setupArgs,
-		";", "set", "-as", "terminal-features", ",*:clipboard",
+		";", "set", "-as", "terminal-features", ",*:clipboard:RGB",
 	)
 	//nolint:errcheck // terminal-features may fail on tmux <3.2
 	exec.Command(setupArgs[0], setupArgs[1:]...).Run()

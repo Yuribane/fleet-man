@@ -74,7 +74,8 @@ func TestListIncludesBranchColumnAndValues(t *testing.T) {
 	if strings.Contains(agentTwoLine, "feature/status-line") {
 		t.Fatalf("agent-2 line unexpectedly contains branch value:\n%s", agentTwoLine)
 	}
-	if !strings.HasSuffix(strings.TrimRight(agentTwoLine, " "), "1970-01-01 00:00") {
+	expectedCreated := time.Unix(0, 0).Local().Format("2006-01-02 15:04")
+	if !strings.HasSuffix(strings.TrimRight(agentTwoLine, " "), expectedCreated) {
 		t.Fatalf("agent-2 line should end at CREATED column when branch is empty:\n%s", agentTwoLine)
 	}
 }

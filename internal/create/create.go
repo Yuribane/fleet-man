@@ -10,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backend"
-	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	coderbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/coder"
 	codespacesbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/codespaces"
+	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/dotfiles"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
@@ -28,6 +28,11 @@ import (
 // --branch <branch>` so the instance is provisioned against that ref
 // rather than the repository's default branch.
 func Run(fleetName, instanceName, remoteURL, branch string, verbose bool, bt fleet.BackendType) error {
+	if err := fleet.ValidateBackendType(bt); err != nil {
+		setFailed(fleetName, instanceName, err)
+		return err
+	}
+
 	wsDir := filepath.Join(state.WorkspacesDir(), fleetName, instanceName, fleetName)
 
 	var dc backend.Backend

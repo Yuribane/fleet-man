@@ -69,6 +69,11 @@ func (b *DevcontainerBackend) Up(workspaceDir string) (*backend.UpResult, error)
 	args := []string{"up", "--workspace-folder", workspaceDir}
 	args = append(args, sshUpArgs()...)
 	cmd := exec.Command("devcontainer", args...)
+	env, err := devcontainerEnv(os.Environ())
+	if err != nil {
+		return nil, err
+	}
+	cmd.Env = env
 
 	// Capture stdout for JSON parsing, tee to os.Stdout so it appears
 	// in log files when run from the TUI background process.
@@ -98,6 +103,18 @@ func (b *DevcontainerBackend) Up(workspaceDir string) (*backend.UpResult, error)
 	}
 
 	return &result, nil
+}
+
+func devcontainerEnv(base []string) ([]string, error) {
+	mode := strings.TrimSpace(os.Getenv("FLEET_DEVCONTAINER_BUILDKIT"))
+	switch mode {
+	case "", "auto":
+		return base, nil
+	case "never":
+		return append(base, "DOCKER_BUILDKIT=0"), nil
+	default:
+		return nil, fmt.Errorf("invalid FLEET_DEVCONTAINER_BUILDKIT value %q (valid: auto, never)", mode)
+	}
 }
 
 // Exec runs `devcontainer exec` in the given workspace folder.
