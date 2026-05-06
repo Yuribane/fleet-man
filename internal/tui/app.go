@@ -490,6 +490,56 @@ func (m model) Init() tea.Cmd {
 // handled here and returned early. Mixed messages handle their shared
 // part then fall through. Everything else is forwarded to the active page.
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// 0. Mouse — left-button press moves the cursor to the clicked row
+	// (on the fleet list and settings pages) and is then translated to
+	// a key event so existing keyboard handlers do the rest: clicks on
+	// instance rows fire Space (expand/collapse sessions), every other
+	// click fires Enter. Other mouse events (motion, wheel, release,
+	// other buttons) are dropped: page handlers only know about KeyMsgs.
+	if mm, ok := msg.(tea.MouseMsg); ok {
+		if mm.Action == tea.MouseActionPress && mm.Button == tea.MouseButtonLeft {
+			synthesizedKey := tea.KeyMsg{Type: tea.KeyEnter}
+			hit := false
+			switch page := m.currentPage.(type) {
+			case *fleetPage:
+				if page.mode == viewNormal && page.listRowY >= 0 {
+					if idx := mm.Y - page.listRowY; idx >= 0 && idx < len(page.rows) {
+						page.cursor = idx
+						hit = true
+						if page.rows[idx].kind == rowInstance {
+							synthesizedKey = tea.KeyMsg{Type: tea.KeySpace, Runes: []rune{' '}}
+						}
+					}
+				}
+			case *settingsPage:
+				if !page.editing && !page.showKeybindings {
+					items := page.visibleItems(&m)
+					for i, id := range items {
+						y, ok := page.itemRowYs[id]
+						if !ok {
+							continue
+						}
+						h := page.itemHeights[id]
+						if h <= 0 {
+							h = 1
+						}
+						if mm.Y >= y && mm.Y < y+h {
+							page.cursor = i
+							hit = true
+							break
+						}
+					}
+				}
+			}
+			if !hit {
+				return m, nil
+			}
+			msg = synthesizedKey
+		} else {
+			return m, nil
+		}
+	}
+
 	// 1. Window size (shared)
 	if ws, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width = ws.Width
@@ -942,7 +992,7 @@ func Run() error {
 		}
 	}
 
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	finalModel, err := p.Run()
 
 	if clipCancel != nil {

@@ -77,6 +77,11 @@ type fleetPage struct {
 	savedGroups    map[string]savedGroup
 	pendingGroupID string
 	debounceSeq    int
+
+	// listRowY is the terminal Y (0-indexed) where rows[0] is rendered,
+	// recorded during View() so mouse clicks can be mapped back to a
+	// row index. -1 means "not yet rendered" or "no clickable rows".
+	listRowY int
 }
 
 // newFleetPage creates a new fleet page with default state.
@@ -94,6 +99,7 @@ func newFleetPage() *fleetPage {
 		savedGroups: make(map[string]savedGroup),
 		textInput:   ti,
 		branchInput: bi,
+		listRowY:    -1,
 	}
 }
 
@@ -1056,6 +1062,16 @@ func (fp *fleetPage) viewFleetList(m *model) string {
 	if m.width > 0 {
 		box = box.Width(m.width - 2)
 	}
+	// Record where rows[0] will land on screen so mouse clicks can map
+	// Y → row index. The cursor is at line `newlines` after consuming
+	// `b` so far; +1 skips the box top border, +emptyMsgLines skips the
+	// "No instances" line that precedes the (settings-only) rows when
+	// no fleets exist.
+	emptyMsgLines := 0
+	if m.st == nil || len(m.st.Fleets) == 0 {
+		emptyMsgLines = 1
+	}
+	fp.listRowY = strings.Count(b.String(), "\n") + 1 + emptyMsgLines
 	b.WriteString(box.Render(boxContent))
 	b.WriteString("\n")
 

@@ -56,6 +56,13 @@ type settingsPage struct {
 	editing         bool
 	input           textinput.Model
 	showKeybindings bool
+
+	// itemRowYs maps item ID -> terminal Y where the item's first line
+	// is rendered. itemHeights maps item ID -> number of lines the item
+	// occupies. Both are populated during View() so mouse clicks can be
+	// mapped back to the item under the cursor.
+	itemRowYs   map[int]int
+	itemHeights map[int]int
 }
 
 // newSettingsPage creates a new settings page with default state.
@@ -63,7 +70,9 @@ func newSettingsPage() *settingsPage {
 	si := textinput.New()
 	si.CharLimit = 256
 	return &settingsPage{
-		input: si,
+		input:       si,
+		itemRowYs:   make(map[int]int),
+		itemHeights: make(map[int]int),
 	}
 }
 
@@ -585,6 +594,18 @@ func (sp *settingsPage) viewSettings(m *model) string {
 	var listContent strings.Builder
 	currentItem := sp.settingsCursorItem(m)
 
+	// Record where each settings row lands on screen so mouse clicks
+	// can resolve back to a cursor index. The box adds a top border
+	// before its content, hence +1.
+	clear(sp.itemRowYs)
+	clear(sp.itemHeights)
+	firstContentY := strings.Count(b.String(), "\n") + 1
+	recordRow := func(item int, content string) {
+		sp.itemRowYs[item] = firstContentY + strings.Count(listContent.String(), "\n")
+		sp.itemHeights[item] = 1 + strings.Count(content, "\n")
+		listContent.WriteString(content)
+	}
+
 	for _, s := range settingsSections {
 		if !sp.sectionVisible(m, s) {
 			continue
@@ -601,19 +622,19 @@ func (sp *settingsPage) viewSettings(m *model) string {
 			if cfg.GeneralSettings.TmuxVimKeysEnabled() {
 				vimKeysValue = "[ on ]"
 			}
-			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemTmuxVimKeys, "Tmux vim keys", vimKeysValue))
+			recordRow(settingsItemTmuxVimKeys, sp.renderSettingsRow(m, currentItem == settingsItemTmuxVimKeys, "Tmux vim keys", vimKeysValue))
 			listContent.WriteString("\n")
 
 			helpTextValue := "[ off ]"
 			if cfg.GeneralSettings.ShowHelpTextEnabled() {
 				helpTextValue = "[ on ]"
 			}
-			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemShowHelpText, "Show help text", helpTextValue))
+			recordRow(settingsItemShowHelpText, sp.renderSettingsRow(m, currentItem == settingsItemShowHelpText, "Show help text", helpTextValue))
 
 			if m.updateAvailable != "" {
 				listContent.WriteString("\n")
 				updateValue := updateStyle.Render(m.updateAvailable+" available ⚡") + "  " + dimStyle.Render("press enter to update")
-				listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemUpdate, "Update", updateValue))
+				recordRow(settingsItemUpdate, sp.renderSettingsRow(m, currentItem == settingsItemUpdate, "Update", updateValue))
 			}
 
 		case "Dotfiles":
@@ -621,21 +642,21 @@ func (sp *settingsPage) viewSettings(m *model) string {
 			if repoValue == "" && !(sp.editing && currentItem == settingsItemDotfilesRepo) {
 				repoValue = dimStyle.Render("(not set)")
 			}
-			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemDotfilesRepo, "Repository URL", repoValue))
+			recordRow(settingsItemDotfilesRepo, sp.renderSettingsRow(m, currentItem == settingsItemDotfilesRepo, "Repository URL", repoValue))
 			listContent.WriteString("\n")
 
 			scriptValue := cfg.DotfilesSettings.InstallScript
 			if scriptValue == "" && !(sp.editing && currentItem == settingsItemDotfilesScript) {
 				scriptValue = dimStyle.Render("(not set)")
 			}
-			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemDotfilesScript, "Install script", scriptValue))
+			recordRow(settingsItemDotfilesScript, sp.renderSettingsRow(m, currentItem == settingsItemDotfilesScript, "Install script", scriptValue))
 			listContent.WriteString("\n")
 
 			autoInstallValue := "[ off ]"
 			if cfg.DotfilesSettings.AutoInstall {
 				autoInstallValue = "[ on ]"
 			}
-			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemDotfilesAutoInstall, "Auto install", autoInstallValue))
+			recordRow(settingsItemDotfilesAutoInstall, sp.renderSettingsRow(m, currentItem == settingsItemDotfilesAutoInstall, "Auto install", autoInstallValue))
 			listContent.WriteString("\n")
 
 			agentName, _, agentErr := agent.FindAgent()
@@ -645,7 +666,7 @@ func (sp *settingsPage) viewSettings(m *model) string {
 			} else {
 				setupValue = statusRunningStyle.Render(agentName) + "  " + dimStyle.Render("press enter to get help setting up dotfiles")
 			}
-			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemDotfilesSetup, "Help me set this up", setupValue))
+			recordRow(settingsItemDotfilesSetup, sp.renderSettingsRow(m, currentItem == settingsItemDotfilesSetup, "Help me set this up", setupValue))
 
 		case "Coder":
 			templateValue := cfg.CoderSettings.Template
@@ -655,7 +676,7 @@ func (sp *settingsPage) viewSettings(m *model) string {
 			if m.coderFetchingParams {
 				templateValue += "  " + m.spinner.View() + " fetching..."
 			}
-			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemCoderTemplate, "Template", templateValue))
+			recordRow(settingsItemCoderTemplate, sp.renderSettingsRow(m, currentItem == settingsItemCoderTemplate, "Template", templateValue))
 			listContent.WriteString("\n")
 
 			presetValue := cfg.CoderSettings.Preset
@@ -664,7 +685,7 @@ func (sp *settingsPage) viewSettings(m *model) string {
 			} else {
 				presetValue = fmt.Sprintf("[ %s ]", presetValue)
 			}
-			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemCoderPreset, "Preset", presetValue))
+			recordRow(settingsItemCoderPreset, sp.renderSettingsRow(m, currentItem == settingsItemCoderPreset, "Preset", presetValue))
 
 			for i, p := range cfg.CoderSettings.Parameters {
 				listContent.WriteString("\n")
@@ -681,7 +702,7 @@ func (sp *settingsPage) viewSettings(m *model) string {
 				if p.DisplayName != "" {
 					label = p.DisplayName
 				}
-				listContent.WriteString(sp.renderSettingsRow(m, currentItem == paramItem, label, value))
+				recordRow(paramItem, sp.renderSettingsRow(m, currentItem == paramItem, label, value))
 			}
 
 		case "Codespaces":
@@ -698,7 +719,7 @@ func (sp *settingsPage) viewSettings(m *model) string {
 					machineValue += "\n" + strings.Repeat(" ", 21) + dimStyle.Render(label)
 				}
 			}
-			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemCodespacesMachine, "Machine", machineValue))
+			recordRow(settingsItemCodespacesMachine, sp.renderSettingsRow(m, currentItem == settingsItemCodespacesMachine, "Machine", machineValue))
 
 		case "Tool Status":
 			for i, t := range m.toolStatus {
@@ -713,7 +734,7 @@ func (sp *settingsPage) viewSettings(m *model) string {
 				}
 				value := badge + "  " + dimStyle.Render(t.Description)
 				itemID := settingsItemToolStatusBase + i
-				listContent.WriteString(sp.renderSettingsRow(m, currentItem == itemID, t.Name, value))
+				recordRow(itemID, sp.renderSettingsRow(m, currentItem == itemID, t.Name, value))
 			}
 
 		case "Help":
@@ -724,9 +745,9 @@ func (sp *settingsPage) viewSettings(m *model) string {
 			} else {
 				value = statusRunningStyle.Render(agentName) + "  " + dimStyle.Render("press enter to diagnose your setup")
 			}
-			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemDoctor, "Run Doctor", value))
+			recordRow(settingsItemDoctor, sp.renderSettingsRow(m, currentItem == settingsItemDoctor, "Run Doctor", value))
 			listContent.WriteString("\n")
-			listContent.WriteString(sp.renderSettingsRow(m, currentItem == settingsItemKeybindings, "Keybindings", dimStyle.Render("press enter to view all keybindings")))
+			recordRow(settingsItemKeybindings, sp.renderSettingsRow(m, currentItem == settingsItemKeybindings, "Keybindings", dimStyle.Render("press enter to view all keybindings")))
 		}
 
 		listContent.WriteString("\n\n")
