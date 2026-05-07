@@ -50,8 +50,17 @@ func (b *DevcontainerBackend) containerUser(containerID string) string {
 	}
 	b.userCacheMu.Unlock()
 
+	// Pick the owner of an active tmux server socket directory.
+	// tmux creates /tmp/tmux-$UID/ for each user that runs a server,
+	// so this is the canonical signal for "which user holds fleet's
+	// sessions". The [1-9]* glob skips /tmp/tmux-0/ — a stale dir
+	// some images leave behind from a root-side init poke at tmux —
+	// because fleet's sessions never live under root. Fall back to
+	// the first /home/<user>/ owner when no tmux socket exists yet
+	// (brand-new container, first poll before any session).
 	cmd := exec.Command("docker", "exec", containerID, "sh", "-c",
-		`for d in /home/*/; do [ -d "$d" ] && stat -c %U "$d" 2>/dev/null && exit; done`)
+		`for d in /tmp/tmux-[1-9]*/; do [ -d "$d" ] && stat -c %U "$d" 2>/dev/null && exit; done; `+
+			`for d in /home/*/; do [ -d "$d" ] && stat -c %U "$d" 2>/dev/null && exit; done`)
 	out, err := cmd.Output()
 	u := ""
 	if err == nil {
