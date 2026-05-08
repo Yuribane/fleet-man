@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/doctor"
+	"github.com/BenjaminBenetti/fleet-man/internal/platform"
 	"github.com/BenjaminBenetti/fleet-man/internal/state"
 	"github.com/BenjaminBenetti/fleet-man/internal/tui"
 	"github.com/spf13/cobra"
@@ -111,11 +112,12 @@ func relaunchInTmux() error {
 	// Middle-click paste: `mouse on` makes terminals forward MMB
 	// to tmux as an escape sequence instead of doing local X11
 	// PRIMARY paste. The outer (host) tmux has access to
-	// xclip/wl-paste, so we intercept MouseDown2Pane here, read
-	// the host PRIMARY selection, and feed it into the clicked
+	// clipboard tools, so we intercept MouseDown2Pane here, read
+	// the host selection or clipboard, and feed it into the clicked
 	// pane as bracketed paste. The text flows transparently
 	// through any inner container tmux and into the app. Missing
-	// clipboard tool or empty clipboard is a silent no-op. xsel
+	// clipboard tool or empty clipboard is a silent no-op. On WSL,
+	// Windows PowerShell reads the host clipboard. Elsewhere, xsel
 	// is tried before xclip because xclip has a stdout-close bug
 	// that can stall run-shell; xclip is wrapped in timeout as a
 	// belt-and-braces guard.
@@ -132,9 +134,7 @@ func relaunchInTmux() error {
 	setupArgs = append(setupArgs,
 		";", "bind-key", "-n", "MouseDown2Pane",
 		"run-shell",
-		`tmux select-pane -t "$TMUX_PANE"; `+
-			`CLIP=$(wl-paste -p 2>/dev/null || xsel -op 2>/dev/null || timeout 0.5 xclip -o -selection primary 2>/dev/null || pbpaste 2>/dev/null); `+
-			`[ -n "$CLIP" ] && { tmux set-buffer -b __fleet_primary -- "$CLIP"; tmux paste-buffer -p -d -b __fleet_primary -t "$TMUX_PANE"; }`,
+		mousePasteCommand(),
 	)
 	// terminal-features tells tmux the terminal supports OSC 52
 	// clipboard and RGB/truecolor (tmux 3.2+). Appended last so
@@ -151,4 +151,21 @@ func relaunchInTmux() error {
 	return syscall.Exec(tmuxBin, []string{
 		"tmux", "attach", "-t", session,
 	}, os.Environ())
+}
+
+func mousePasteCommand() string {
+	return `tmux select-pane -t "$TMUX_PANE"; ` +
+		`CLIP=$(` + pasteClipboardCommand() + `); ` +
+		`[ -n "$CLIP" ] && { tmux set-buffer -b __fleet_primary -- "$CLIP"; tmux paste-buffer -p -d -b __fleet_primary -t "$TMUX_PANE"; }`
+}
+
+func pasteClipboardCommand() string {
+	return pasteClipboardCommandFor(platform.IsWSL())
+}
+
+func pasteClipboardCommandFor(isWSL bool) string {
+	if isWSL {
+		return `powershell.exe -NoProfile -Command Get-Clipboard 2>/dev/null`
+	}
+	return `wl-paste -p 2>/dev/null || xsel -op 2>/dev/null || timeout 0.5 xclip -o -selection primary 2>/dev/null || pbpaste 2>/dev/null`
 }

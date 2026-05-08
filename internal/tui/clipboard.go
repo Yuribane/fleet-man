@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/BenjaminBenetti/fleet-man/internal/platform"
 )
 
 // ===========================================
@@ -31,10 +33,17 @@ type clipboardSync struct {
 // the primary selection (middle-click). On macOS, only pbcopy is
 // returned because there is no primary selection concept.
 func clipboardCmds() []string {
-	if runtime.GOOS == "darwin" {
+	return clipboardCmdsFor(runtime.GOOS, os.Getenv("WAYLAND_DISPLAY") != "", platform.IsWSL())
+}
+
+func clipboardCmdsFor(goos string, hasWayland, isWSL bool) []string {
+	if goos == "darwin" {
 		return []string{"pbcopy"}
 	}
-	if os.Getenv("WAYLAND_DISPLAY") != "" {
+	if goos == "linux" && isWSL {
+		return []string{`powershell.exe -NoProfile -Command "Set-Clipboard -Value ([Console]::In.ReadToEnd())"`}
+	}
+	if hasWayland {
 		return []string{"wl-copy", "wl-copy --primary"}
 	}
 	return []string{"xclip -sel clip -i", "xclip -sel primary -i"}

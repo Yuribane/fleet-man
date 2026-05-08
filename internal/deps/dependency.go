@@ -1,6 +1,10 @@
 package deps
 
-import "os/exec"
+import (
+	"os/exec"
+
+	"github.com/BenjaminBenetti/fleet-man/internal/platform"
+)
 
 // Dependency describes a binary dependency and how to install it.
 type Dependency struct {
@@ -35,20 +39,31 @@ func Check() []Dependency {
 			Required:   false,
 			InstallURL: "https://coder.com/docs/install",
 		},
-		{
-			Name:        "wl-clipboard",
-			Binary:      "wl-copy",
+	}
+	if platform.IsWSL() {
+		deps = append(deps, Dependency{
+			Name:        "Windows clipboard",
+			Binary:      "powershell.exe",
 			Required:    false,
-			InstallURL:  wlClipboardInstallURL(),
-			Description: "Copy/paste support on Wayland (only one of wl-clipboard or xclip needed).",
-		},
-		{
-			Name:        "xclip",
-			Binary:      "xclip",
-			Required:    false,
-			InstallURL:  "https://github.com/astrand/xclip",
-			Description: "Copy/paste support on X11 (only one of wl-copy or xclip needed).",
-		},
+			Description: "Copy/paste support through the Windows clipboard when running inside WSL.",
+		})
+	} else {
+		deps = append(deps,
+			Dependency{
+				Name:        "wl-clipboard",
+				Binary:      "wl-copy",
+				Required:    false,
+				InstallURL:  wlClipboardInstallURL(),
+				Description: "Copy/paste support on Wayland (only one of wl-clipboard or xclip needed).",
+			},
+			Dependency{
+				Name:        "xclip",
+				Binary:      "xclip",
+				Required:    false,
+				InstallURL:  "https://github.com/astrand/xclip",
+				Description: "Copy/paste support on X11 (only one of wl-copy or xclip needed).",
+			},
+		)
 	}
 
 	for i := range deps {
