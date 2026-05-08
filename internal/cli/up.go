@@ -23,7 +23,7 @@ func newUpCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 
-			bt, err := fleet.ParseBackendType(backendFlag)
+			backendType, err := fleet.ParseBackendType(backendFlag)
 			if err != nil {
 				return err
 			}
@@ -60,25 +60,25 @@ func newUpCmd() *cobra.Command {
 
 			// Pre-create instance in state with "creating" status
 			wsDir := filepath.Join(state.WorkspacesDir(), target.Fleet, target.Instance, target.Fleet)
-			inst := &fleet.Instance{
+			instance := &fleet.Instance{
 				Name:         target.Instance,
 				DisplayName:  target.Instance,
 				Config:       ".devcontainer/devcontainer.json",
 				WorkspaceDir: wsDir,
 				CreatedAt:    time.Now(),
 				Status:       fleet.StatusCreating,
-				Backend:      bt,
+				Backend:      backendType,
 				Branch:       branchFlag,
 			}
-			if err := f.AddInstance(inst); err != nil {
+			if err := f.AddInstance(instance); err != nil {
 				return err
 			}
 			if err := state.Save(st); err != nil {
 				return err
 			}
 
-			fmt.Printf("Creating %s/%s (backend: %s)...\n", target.Fleet, target.Instance, bt)
-			if err := create.Run(target.Fleet, target.Instance, remoteURL, branchFlag, true, bt); err != nil {
+			fmt.Printf("Creating %s/%s (backend: %s)...\n", target.Fleet, target.Instance, backendType)
+			if err := create.Run(target.Fleet, target.Instance, remoteURL, branchFlag, true, backendType); err != nil {
 				return err
 			}
 
@@ -88,8 +88,8 @@ func newUpCmd() *cobra.Command {
 				return err
 			}
 			if f, ok := st.Fleets[target.Fleet]; ok {
-				if inst, err := f.GetInstance(target.Instance); err == nil {
-					fmt.Printf("Instance %s/%s is running (container: %s)\n", target.Fleet, target.Instance, inst.ContainerID[:min(12, len(inst.ContainerID))])
+				if instance, err := f.GetInstance(target.Instance); err == nil {
+					fmt.Printf("Instance %s/%s is running (container: %s)\n", target.Fleet, target.Instance, instance.ContainerID[:min(12, len(instance.ContainerID))])
 				}
 			}
 			return nil

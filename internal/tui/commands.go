@@ -68,7 +68,7 @@ func forceRepaintCmd() tea.Cmd {
 	})
 }
 
-func fetchStatsCmd(dc backend.Backend, ids []string, delay bool) tea.Cmd {
+func fetchStatsCmd(instanceBackend backend.Backend, ids []string, delay bool) tea.Cmd {
 	return func() tea.Msg {
 		if delay {
 			time.Sleep(3 * time.Second)
@@ -76,9 +76,9 @@ func fetchStatsCmd(dc backend.Backend, ids []string, delay bool) tea.Cmd {
 		if len(ids) == 0 {
 			return statsMsg{}
 		}
-		stats, _ := dc.Stats(ids)
-		screens := backend.CaptureAllSessionsForAll(dc, ids)
-		probes := backend.AgentToolProbes(dc, ids)
+		stats, _ := instanceBackend.Stats(ids)
+		screens := backend.CaptureAllSessionsForAll(instanceBackend, ids)
+		probes := backend.AgentToolProbes(instanceBackend, ids)
 		return statsMsg{stats: stats, screens: screens, probes: probes, containerIDs: ids}
 	}
 }
@@ -114,10 +114,10 @@ func toggleInstanceCmd(fleetName, instanceName string) tea.Cmd {
 }
 
 // deleteInstanceCmd runs instance deletion in the background.
-func deleteInstanceCmd(dc backend.Backend, fleetName, instanceName, containerID, wsDir string, pf *portforward.Manager) tea.Cmd {
+func deleteInstanceCmd(instanceBackend backend.Backend, fleetName, instanceName, containerID, wsDir string, pf *portforward.Manager) tea.Cmd {
 	return func() tea.Msg {
 		pf.RemoveAll(fleetName + "/" + instanceName)
-		_ = dc.Down(containerID)
+		_ = instanceBackend.Down(containerID)
 		if wsDir != "" {
 			_ = os.RemoveAll(wsDir)
 		}
@@ -137,24 +137,24 @@ func deleteInstanceCmd(dc backend.Backend, fleetName, instanceName, containerID,
 func deleteFleetCmd(backends map[fleet.BackendType]backend.Backend, fleetName string, instances []*fleet.Instance, pf *portforward.Manager) tea.Cmd {
 	// Snapshot what we need — don't capture model
 	type target struct {
-		dc          backend.Backend
-		name        string
-		containerID string
-		wsDir       string
+		instanceBackend backend.Backend
+		name            string
+		containerID     string
+		wsDir           string
 	}
 	var targets []target
-	for _, inst := range instances {
-		bt := inst.Backend
-		if bt == "" {
-			bt = fleet.BackendDevcontainer
+	for _, instance := range instances {
+		backendType := instance.Backend
+		if backendType == "" {
+			backendType = fleet.BackendDevcontainer
 		}
-		targets = append(targets, target{backends[bt], inst.Name, inst.ContainerID, inst.WorkspaceDir})
+		targets = append(targets, target{backends[backendType], instance.Name, instance.ContainerID, instance.WorkspaceDir})
 	}
 	return func() tea.Msg {
 		for _, t := range targets {
 			pf.RemoveAll(fleetName + "/" + t.name)
-			if t.dc != nil {
-				_ = t.dc.Down(t.containerID)
+			if t.instanceBackend != nil {
+				_ = t.instanceBackend.Down(t.containerID)
 			}
 			if t.wsDir != "" {
 				_ = os.RemoveAll(t.wsDir)
@@ -248,17 +248,17 @@ func repoFromRemote(remoteURL string) string {
 // then appends container runtime logs for running instances.
 // Output is always followed by a "press Enter" prompt so the user
 // has time to read before the TUI redraws.
-func logsCommand(b backend.Backend, fleetName string, inst *fleet.Instance) *exec.Cmd {
-	logPath := filepath.Join(state.FleetDir(), "logs", fleetName+"-"+inst.Name+".log")
+func logsCommand(instanceBackend backend.Backend, fleetName string, instance *fleet.Instance) *exec.Cmd {
+	logPath := filepath.Join(state.FleetDir(), "logs", fleetName+"-"+instance.Name+".log")
 	creationLog := fmt.Sprintf("cat %q 2>/dev/null", logPath)
 
 	var inner string
-	switch inst.Status {
+	switch instance.Status {
 	case fleet.StatusFailed, fleet.StatusCreating:
 		inner = fmt.Sprintf("%s || echo 'No creation log found.'", creationLog)
 	default:
 		// Show creation log, then container runtime logs.
-		logsCmd := b.LogsCommand(inst.ContainerID, false)
+		logsCmd := instanceBackend.LogsCommand(instance.ContainerID, false)
 		inner = fmt.Sprintf(
 			"%s; echo; echo '=== Container runtime logs ==='; echo; %s",
 			creationLog, logsCmd.String(),
@@ -274,14 +274,14 @@ func logsCommand(b backend.Backend, fleetName string, inst *fleet.Instance) *exe
 // detached child process to provision an instance asynchronously.
 // branch selects the git ref to check out; an empty string uses the
 // repository's default branch.
-func createInstanceCmd(fleetName, instanceName, remoteURL, branch string, bt fleet.BackendType) tea.Cmd {
+func createInstanceCmd(fleetName, instanceName, remoteURL, branch string, backendType fleet.BackendType) tea.Cmd {
 	return func() tea.Msg {
 		self, err := os.Executable()
 		if err != nil {
 			return instanceCreateErrMsg{fleetName, instanceName, fmt.Errorf("os.Executable: %w", err)}
 		}
 
-		args := []string{"_create-instance", fleetName, instanceName, remoteURL, "--backend", string(bt)}
+		args := []string{"_create-instance", fleetName, instanceName, remoteURL, "--backend", string(backendType)}
 		if branch != "" {
 			args = append(args, "--branch", branch)
 		}

@@ -71,16 +71,16 @@ func newPortForwardAddCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("fleet %q not found", target.Fleet)
 			}
-			inst, err := f.GetInstance(target.Instance)
+			instance, err := f.GetInstance(target.Instance)
 			if err != nil {
 				return err
 			}
-			if inst.Status != fleet.StatusRunning {
-				return fmt.Errorf("instance %s/%s is not running (status: %s)", target.Fleet, target.Instance, inst.Status)
+			if instance.Status != fleet.StatusRunning {
+				return fmt.Errorf("instance %s/%s is not running (status: %s)", target.Fleet, target.Instance, instance.Status)
 			}
 
-			b := backendutil.New(inst.Backend, false)
-			mgr := portforward.NewManager()
+			instanceBackend := backendutil.New(instance.Backend, false)
+			manager := portforward.NewManager()
 			key := target.Fleet + "/" + target.Instance
 
 			for _, mapping := range args[1:] {
@@ -88,21 +88,21 @@ func newPortForwardAddCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := mgr.Add(key, local, remote, b.PortForwardCommand, inst.ContainerID, b.ResolveHostname); err != nil {
-					mgr.Shutdown()
+				if err := manager.Add(key, local, remote, instanceBackend.PortForwardCommand, instance.ContainerID, instanceBackend.ResolveHostname); err != nil {
+					manager.Shutdown()
 					return err
 				}
-				fmt.Printf("Forwarding localhost:%d -> %s:%d\n", local, inst.Name, remote)
+				fmt.Printf("Forwarding localhost:%d -> %s:%d\n", local, instance.Name, remote)
 			}
 
 			fmt.Println("Press Ctrl+C to stop all forwards.")
 
-			sig := make(chan os.Signal, 1)
-			signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-			<-sig
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+			<-sigChan
 
 			fmt.Println("\nStopping port forwards...")
-			mgr.Shutdown()
+			manager.Shutdown()
 			return nil
 		},
 	}

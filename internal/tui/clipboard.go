@@ -46,12 +46,12 @@ func newClipboardSync() *clipboardSync {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return nil
 	}
-	cmds := clipboardCmds()
-	bin := strings.SplitN(cmds[0], " ", 2)[0]
-	if _, err := exec.LookPath(bin); err != nil {
+	commands := clipboardCmds()
+	firstBinary := strings.SplitN(commands[0], " ", 2)[0]
+	if _, err := exec.LookPath(firstBinary); err != nil {
 		return nil
 	}
-	return &clipboardSync{clipCmds: cmds}
+	return &clipboardSync{clipCmds: commands}
 }
 
 // Start begins polling the tmux paste buffer and synchronising
@@ -86,9 +86,9 @@ func (cs *clipboardSync) poll(ctx context.Context) {
 	cs.lastBuffer = buf
 
 	quoted := shQuote(buf)
-	for _, cc := range cs.clipCmds {
+	for _, clipCmd := range cs.clipCmds {
 		cmd := exec.CommandContext(ctx, "sh", "-c",
-			fmt.Sprintf("printf '%%s' %s | %s", quoted, cc))
+			fmt.Sprintf("printf '%%s' %s | %s", quoted, clipCmd))
 		_ = cmd.Run()
 	}
 }

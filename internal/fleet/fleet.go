@@ -9,27 +9,27 @@ type Fleet struct {
 }
 
 func (f *Fleet) GetInstance(name string) (*Instance, error) {
-	for _, inst := range f.Instances {
-		if inst.Name == name {
-			return inst, nil
+	for _, instance := range f.Instances {
+		if instance.Name == name {
+			return instance, nil
 		}
 	}
 	return nil, fmt.Errorf("instance %q not found in fleet %q", name, f.Name)
 }
 
-func (f *Fleet) AddInstance(inst *Instance) error {
+func (f *Fleet) AddInstance(instance *Instance) error {
 	for _, existing := range f.Instances {
-		if existing.Name == inst.Name {
-			return fmt.Errorf("instance %q already exists in fleet %q", inst.Name, f.Name)
+		if existing.Name == instance.Name {
+			return fmt.Errorf("instance %q already exists in fleet %q", instance.Name, f.Name)
 		}
 	}
-	f.Instances = append(f.Instances, inst)
+	f.Instances = append(f.Instances, instance)
 	return nil
 }
 
 func (f *Fleet) RemoveInstance(name string) error {
-	for i, inst := range f.Instances {
-		if inst.Name == name {
+	for i, instance := range f.Instances {
+		if instance.Name == name {
 			f.Instances = append(f.Instances[:i], f.Instances[i+1:]...)
 			return nil
 		}

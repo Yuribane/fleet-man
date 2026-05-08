@@ -6,7 +6,7 @@ import "sync"
 // every container. Returns a map keyed by containerID. Entries with
 // OK=false indicate the container's exec failed and the previous
 // activity state should be preserved by the caller.
-func CaptureAllSessionsForAll(b Backend, containerIDs []string) map[string]AllSessions {
+func CaptureAllSessionsForAll(instanceBackend Backend, containerIDs []string) map[string]AllSessions {
 	result := make(map[string]AllSessions, len(containerIDs))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -15,7 +15,7 @@ func CaptureAllSessionsForAll(b Backend, containerIDs []string) map[string]AllSe
 		wg.Add(1)
 		go func(cid string) {
 			defer wg.Done()
-			all := b.CaptureAllSessions(cid)
+			all := instanceBackend.CaptureAllSessions(cid)
 			mu.Lock()
 			result[cid] = all
 			mu.Unlock()
@@ -30,7 +30,7 @@ func CaptureAllSessionsForAll(b Backend, containerIDs []string) map[string]AllSe
 // Containers whose probe succeeded are in the result (even if no agent
 // was found — stored as empty string). Containers whose probe failed
 // are omitted so the caller can preserve their previous state.
-func AgentToolProbes(b Backend, containerIDs []string) map[string]string {
+func AgentToolProbes(instanceBackend Backend, containerIDs []string) map[string]string {
 	result := make(map[string]string, len(containerIDs))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -39,7 +39,7 @@ func AgentToolProbes(b Backend, containerIDs []string) map[string]string {
 		wg.Add(1)
 		go func(cid string) {
 			defer wg.Done()
-			tool, ok := b.AgentToolProbe(cid)
+			tool, ok := instanceBackend.AgentToolProbe(cid)
 			mu.Lock()
 			if ok {
 				result[cid] = tool

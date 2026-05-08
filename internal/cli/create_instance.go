@@ -21,13 +21,13 @@ func newCreateInstanceCmd() *cobra.Command {
 		Hidden: true,
 		Args:   cobra.RangeArgs(3, 4), // fleetName instanceName remoteURL [backendType]
 		RunE: func(cmd *cobra.Command, args []string) error {
-			bt := fleet.BackendDevcontainer
+			backendType := fleet.BackendDevcontainer
 			if backendFlag != "" {
 				parsed, err := fleet.ParseBackendType(backendFlag)
 				if err != nil {
 					return err
 				}
-				bt = parsed
+				backendType = parsed
 			} else if len(args) >= 4 {
 				// Preserve the legacy 4th positional form for compatibility
 				// with older callers that predate the --backend flag.
@@ -35,9 +35,9 @@ func newCreateInstanceCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				bt = parsed
+				backendType = parsed
 			}
-			return create.Run(args[0], args[1], args[2], branchFlag, false, bt)
+			return create.Run(args[0], args[1], args[2], branchFlag, false, backendType)
 		},
 	}
 

@@ -32,13 +32,13 @@ func newLogsCmd() *cobra.Command {
 				return fmt.Errorf("fleet %q not found", target.Fleet)
 			}
 
-			inst, err := f.GetInstance(target.Instance)
+			instance, err := f.GetInstance(target.Instance)
 			if err != nil {
 				return err
 			}
 
-			dc := backendutil.New(inst.Backend, false)
-			return dc.Logs(inst.ContainerID, follow)
+			instanceBackend := backendutil.New(instance.Backend, false)
+			return instanceBackend.Logs(instance.ContainerID, follow)
 		},
 	}
 

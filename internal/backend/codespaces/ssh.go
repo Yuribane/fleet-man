@@ -68,8 +68,8 @@ func parseSSHConfigHost(config, csName string) string {
 // nativeSSHArgs builds arguments for a native `ssh` command using the
 // generated OpenSSH config. allocPTY adds the -t flag for interactive
 // commands that need a pseudo-terminal (e.g. tmux).
-func nativeSSHArgs(cfg *sshConfig, command []string, allocPTY bool) []string {
-	args := []string{"-F", cfg.configPath}
+func nativeSSHArgs(config *sshConfig, command []string, allocPTY bool) []string {
+	args := []string{"-F", config.configPath}
 	if allocPTY {
 		args = append(args, "-t")
 	}
@@ -77,7 +77,7 @@ func nativeSSHArgs(cfg *sshConfig, command []string, allocPTY bool) []string {
 	if os.Getenv("SSH_AUTH_SOCK") != "" {
 		args = append(args, "-A")
 	}
-	args = append(args, cfg.host)
+	args = append(args, config.host)
 	if len(command) == 0 {
 		return args
 	}
@@ -98,7 +98,7 @@ func nativeSSHArgs(cfg *sshConfig, command []string, allocPTY bool) []string {
 
 // generateSSHConfig runs `gh codespace ssh --config` for a codespace,
 // writes the output to the instance directory, and caches the result.
-func (b *CodespacesBackend) generateSSHConfig(csName, workspaceDir string) (*sshConfig, error) {
+func (codespacesBackend *CodespacesBackend) generateSSHConfig(csName, workspaceDir string) (*sshConfig, error) {
 	out, err := exec.Command("gh", "codespace", "ssh", "--config", "-c", csName).Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh codespace ssh --config: %w", err)
@@ -117,14 +117,14 @@ func (b *CodespacesBackend) generateSSHConfig(csName, workspaceDir string) (*ssh
 		return nil, fmt.Errorf("writing SSH config: %w", err)
 	}
 
-	cfg := &sshConfig{configPath: configPath, host: host}
-	b.sshConfigs[csName] = *cfg
-	return cfg, nil
+	config := &sshConfig{configPath: configPath, host: host}
+	codespacesBackend.sshConfigs[csName] = *config
+	return config, nil
 }
 
 // loadSSHConfig reads an existing SSH config file from disk and caches it.
 // Returns nil if the file does not exist or cannot be parsed.
-func (b *CodespacesBackend) loadSSHConfig(csName, workspaceDir string) *sshConfig {
+func (codespacesBackend *CodespacesBackend) loadSSHConfig(csName, workspaceDir string) *sshConfig {
 	configPath := configPathForWorkspace(workspaceDir)
 	data, err := os.ReadFile(configPath)
 	if err != nil {
@@ -136,9 +136,9 @@ func (b *CodespacesBackend) loadSSHConfig(csName, workspaceDir string) *sshConfi
 		return nil
 	}
 
-	cfg := &sshConfig{configPath: configPath, host: host}
-	b.sshConfigs[csName] = *cfg
-	return cfg
+	config := &sshConfig{configPath: configPath, host: host}
+	codespacesBackend.sshConfigs[csName] = *config
+	return config
 }
 
 // ===========================================
@@ -150,9 +150,9 @@ func (b *CodespacesBackend) loadSSHConfig(csName, workspaceDir string) *sshConfi
 // available, which provides proper PTY allocation for interactive
 // commands like tmux. Falls back to `gh codespace ssh` when no config
 // is cached.
-func (b *CodespacesBackend) sshCommand(csName string, command []string, allocPTY bool) *exec.Cmd {
-	if cfg, ok := b.sshConfigs[csName]; ok {
-		args := nativeSSHArgs(&cfg, command, allocPTY)
+func (codespacesBackend *CodespacesBackend) sshCommand(csName string, command []string, allocPTY bool) *exec.Cmd {
+	if config, ok := codespacesBackend.sshConfigs[csName]; ok {
+		args := nativeSSHArgs(&config, command, allocPTY)
 		return exec.Command("ssh", args...)
 	}
 	// Fallback: gh codespace ssh (no PTY for remote commands).

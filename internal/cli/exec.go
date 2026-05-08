@@ -30,13 +30,13 @@ func newExecCmd() *cobra.Command {
 				return fmt.Errorf("fleet %q not found", target.Fleet)
 			}
 
-			inst, err := f.GetInstance(target.Instance)
+			instance, err := f.GetInstance(target.Instance)
 			if err != nil {
 				return err
 			}
 
-			dc := backendutil.NewForInstance(inst, false)
-			return dc.Exec(inst.WorkspaceDir, args[1:])
+			instanceBackend := backendutil.NewForInstance(instance, false)
+			return instanceBackend.Exec(instance.WorkspaceDir, args[1:])
 		},
 	}
 }

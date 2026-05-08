@@ -44,18 +44,18 @@ func newListCmd() *cobra.Command {
 				if fleetFilter != "" && name != fleetFilter {
 					continue
 				}
-				for _, inst := range f.Instances {
-					containerShort := inst.ContainerID
+				for _, instance := range f.Instances {
+					containerShort := instance.ContainerID
 					if len(containerShort) > 12 {
 						containerShort = containerShort[:12]
 					}
 					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
 						name,
-						inst.Name,
-						inst.Status,
+						instance.Name,
+						instance.Status,
 						containerShort,
-						inst.CreatedAt.Format("2006-01-02 15:04"),
-						listBranchName(inst.WorkspaceDir),
+						instance.CreatedAt.Format("2006-01-02 15:04"),
+						listBranchName(instance.WorkspaceDir),
 					)
 				}
 			}

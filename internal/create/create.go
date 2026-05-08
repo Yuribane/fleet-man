@@ -27,25 +27,25 @@ import (
 // When branch is non-empty, the devcontainer clone uses `git clone
 // --branch <branch>` so the instance is provisioned against that ref
 // rather than the repository's default branch.
-func Run(fleetName, instanceName, remoteURL, branch string, verbose bool, bt fleet.BackendType) error {
-	if err := fleet.ValidateBackendType(bt); err != nil {
+func Run(fleetName, instanceName, remoteURL, branch string, verbose bool, backendType fleet.BackendType) error {
+	if err := fleet.ValidateBackendType(backendType); err != nil {
 		setFailed(fleetName, instanceName, err)
 		return err
 	}
 
 	wsDir := filepath.Join(state.WorkspacesDir(), fleetName, instanceName, fleetName)
 
-	var dc backend.Backend
-	switch bt {
+	var instanceBackend backend.Backend
+	switch backendType {
 	case fleet.BackendCoder:
-		dc = buildCoderBackend(fleetName, instanceName, remoteURL, branch, verbose)
+		instanceBackend = buildCoderBackend(fleetName, instanceName, remoteURL, branch, verbose)
 	case fleet.BackendCodespaces:
-		dc = buildCodespacesBackend(remoteURL, branch, verbose)
+		instanceBackend = buildCodespacesBackend(remoteURL, branch, verbose)
 	default:
-		dc = backendutil.New(bt, verbose)
+		instanceBackend = backendutil.New(backendType, verbose)
 	}
 
-	if bt != fleet.BackendCoder && bt != fleet.BackendCodespaces {
+	if backendType != fleet.BackendCoder && backendType != fleet.BackendCodespaces {
 		// Devcontainer: clone repo first, then provision
 		if err := os.MkdirAll(filepath.Dir(wsDir), 0755); err != nil {
 			setFailed(fleetName, instanceName, err)
@@ -70,7 +70,7 @@ func Run(fleetName, instanceName, remoteURL, branch string, verbose bool, bt fle
 		}
 	}
 
-	result, err := dc.Up(wsDir)
+	result, err := instanceBackend.Up(wsDir)
 	if err != nil {
 		setFailed(fleetName, instanceName, err)
 		return err
@@ -79,10 +79,10 @@ func Run(fleetName, instanceName, remoteURL, branch string, verbose bool, bt fle
 	// Auto-install dotfiles. A failure here is non-fatal — the instance
 	// is still usable, so we mark it running and surface the error as a
 	// warning rather than blocking the whole creation.
-	cfg, _ := state.LoadConfig()
-	if cfg != nil && cfg.DotfilesSettings.AutoInstall {
-		if script := dotfiles.SetupScript(cfg); script != "" {
-			cmd := dc.ExecCommand(wsDir, []string{"sh", "-c", script})
+	config, _ := state.LoadConfig()
+	if config != nil && config.DotfilesSettings.AutoInstall {
+		if script := dotfiles.SetupScript(config); script != "" {
+			cmd := instanceBackend.ExecCommand(wsDir, []string{"sh", "-c", script})
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				detail := strings.TrimSpace(string(out))
@@ -100,10 +100,10 @@ func Run(fleetName, instanceName, remoteURL, branch string, verbose bool, bt fle
 		return err
 	}
 	if f, ok := st.Fleets[fleetName]; ok {
-		if inst, err := f.GetInstance(instanceName); err == nil {
-			inst.ContainerID = result.ContainerID
-			inst.Status = fleet.StatusRunning
-			inst.Error = ""
+		if instance, err := f.GetInstance(instanceName); err == nil {
+			instance.ContainerID = result.ContainerID
+			instance.Status = fleet.StatusRunning
+			instance.Error = ""
 		}
 	}
 	return state.Save(st)
@@ -119,12 +119,12 @@ func buildCoderBackend(fleetName, instanceName, remoteURL, branch string, verbos
 		opts = append(opts, coderbackend.WithVerbose(true))
 	}
 
-	cfg, err := state.LoadConfig()
-	if err != nil || cfg == nil {
+	config, err := state.LoadConfig()
+	if err != nil || config == nil {
 		return coderbackend.New(opts...)
 	}
 
-	cs := cfg.CoderSettings
+	cs := config.CoderSettings
 	if cs.Template != "" {
 		opts = append(opts, coderbackend.WithTemplate(cs.Template))
 	}
@@ -137,15 +137,15 @@ func buildCoderBackend(fleetName, instanceName, remoteURL, branch string, verbos
 		wsName := fleetName + "-" + instanceName
 		resolved := make(map[string]string, len(cs.Parameters))
 		for _, p := range cs.Parameters {
-			val := p.Value
-			if val == "" {
-				val = p.DefaultValue
+			value := p.Value
+			if value == "" {
+				value = p.DefaultValue
 			}
-			val = strings.ReplaceAll(val, "${GIT_URL}", remoteURL)
-			val = strings.ReplaceAll(val, "${GIT_BRANCH}", branch)
-			val = strings.ReplaceAll(val, "${INSTANCE_NAME}", wsName)
-			if val != "" {
-				resolved[p.Name] = val
+			value = strings.ReplaceAll(value, "${GIT_URL}", remoteURL)
+			value = strings.ReplaceAll(value, "${GIT_BRANCH}", branch)
+			value = strings.ReplaceAll(value, "${INSTANCE_NAME}", wsName)
+			if value != "" {
+				resolved[p.Name] = value
 			}
 		}
 		opts = append(opts, coderbackend.WithParameters(resolved))
@@ -174,12 +174,12 @@ func buildCodespacesBackend(remoteURL, branch string, verbose bool) backend.Back
 		opts = append(opts, codespacesbackend.WithBranch(branch))
 	}
 
-	cfg, err := state.LoadConfig()
-	if err != nil || cfg == nil {
+	config, err := state.LoadConfig()
+	if err != nil || config == nil {
 		return codespacesbackend.New(opts...)
 	}
 
-	cs := cfg.CodespacesSettings
+	cs := config.CodespacesSettings
 	if cs.Machine != "" {
 		opts = append(opts, codespacesbackend.WithMachine(cs.Machine))
 	}
@@ -222,9 +222,9 @@ func setFailed(fleetName, instanceName string, origErr error) {
 		return
 	}
 	if f, ok := st.Fleets[fleetName]; ok {
-		if inst, err := f.GetInstance(instanceName); err == nil {
-			inst.Status = fleet.StatusFailed
-			inst.Error = origErr.Error()
+		if instance, err := f.GetInstance(instanceName); err == nil {
+			instance.Status = fleet.StatusFailed
+			instance.Error = origErr.Error()
 		}
 	}
 	_ = state.Save(st)

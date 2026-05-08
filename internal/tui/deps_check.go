@@ -25,7 +25,7 @@ func newDepsCheckPage(result []deps.Dependency) *depsCheckPage {
 }
 
 // Init is called when the deps check page becomes active.
-func (dp *depsCheckPage) Init(m *model) tea.Cmd {
+func (depsCheckPage *depsCheckPage) Init(m *model) tea.Cmd {
 	return nil
 }
 
@@ -34,12 +34,12 @@ func (dp *depsCheckPage) Init(m *model) tea.Cmd {
 // ===========================================
 
 // Update handles input on the first-startup dependency check screen.
-func (dp *depsCheckPage) Update(m *model, msg tea.Msg) tea.Cmd {
+func (depsCheckPage *depsCheckPage) Update(m *model, msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "enter", "esc", " ":
-			dp.result = nil
+			depsCheckPage.result = nil
 			return m.ChangeRoute(routeFleetList)
 		case "q", "ctrl+c", "ctrl+q":
 			m.quitting = true
@@ -54,7 +54,7 @@ func (dp *depsCheckPage) Update(m *model, msg tea.Msg) tea.Cmd {
 // ===========================================
 
 // View renders the first-startup dependency check screen.
-func (dp *depsCheckPage) View(m *model) string {
+func (depsCheckPage *depsCheckPage) View(m *model) string {
 	var b strings.Builder
 
 	logo := "" +
@@ -72,7 +72,7 @@ func (dp *depsCheckPage) View(m *model) string {
 	lines = append(lines, dialogTitle.Render("Dependency Check"))
 	lines = append(lines, "")
 
-	for _, d := range dp.result {
+	for _, d := range depsCheckPage.result {
 		var status, note string
 		if d.Found {
 			status = statusRunningStyle.Render("found")

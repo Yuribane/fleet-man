@@ -28,18 +28,18 @@ func SanitizeSessionName(name string) string {
 // dotfilesSetupScript returns the raw shell snippet for dotfiles installation
 // regardless of the auto-install setting. Returns empty if dotfiles are not
 // configured (repo URL or install script missing).
-func dotfilesSetupScript(cfg *state.Config) string {
-	return dotfiles.SetupScript(cfg)
+func dotfilesSetupScript(config *state.Config) string {
+	return dotfiles.SetupScript(config)
 }
 
 // dotfilesSetup returns a shell snippet that clones and installs dotfiles,
 // or an empty string if dotfiles are not configured or auto-install is enabled
 // (in which case dotfiles are installed in the background on instance creation).
-func dotfilesSetup(cfg *state.Config) string {
-	if cfg != nil && cfg.DotfilesSettings.AutoInstall {
+func dotfilesSetup(config *state.Config) string {
+	if config != nil && config.DotfilesSettings.AutoInstall {
 		return ""
 	}
-	return dotfilesSetupScript(cfg)
+	return dotfilesSetupScript(config)
 }
 
 // tmuxEnsureInstalled is a shell snippet that installs tmux if it is not
@@ -63,16 +63,16 @@ var tmuxEnsureInstalled = `command -v tmux >/dev/null 2>&1 || { echo '==> Instal
 // is used to correct the remote PTY size before tmux starts. This is
 // needed for backends like coder ssh that may report incorrect sizes
 // (e.g. 128x128).
-func shellCommand(cfg *state.Config, instanceName string, cols, rows int, nested bool) []string {
-	return ShellCommandForSession(cfg, SanitizeSessionName(instanceName), cols, rows, nested)
+func shellCommand(config *state.Config, instanceName string, cols, rows int, nested bool) []string {
+	return ShellCommandForSession(config, SanitizeSessionName(instanceName), cols, rows, nested)
 }
 
 // ShellCommandForSession returns the command to run inside a devcontainer
 // with a persistent tmux session using the given session name. This allows
 // connecting to a specific named session rather than the default one derived
 // from the instance name.
-func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, nested bool) []string {
-	setup := dotfilesSetup(cfg)
+func ShellCommandForSession(config *state.Config, session string, cols, rows int, nested bool) []string {
+	setup := dotfilesSetup(config)
 	// coder ssh may report incorrect terminal dimensions (e.g. 128x128).
 	// We fix the PTY size with stty before tmux starts and pass -x/-y for
 	// new session creation. "window-size latest" tells tmux to always
@@ -163,8 +163,8 @@ func ShellCommandForSession(cfg *state.Config, session string, cols, rows int, n
 // freshShellCommand returns the command to run inside a devcontainer
 // without tmux. Used by the "open in new terminal" action where a fresh,
 // non-persistent session is desired.
-func freshShellCommand(cfg *state.Config) []string {
-	setup := dotfilesSetup(cfg)
+func freshShellCommand(config *state.Config) []string {
+	setup := dotfilesSetup(config)
 	if setup == "" {
 		return []string{"bash"}
 	}

@@ -83,22 +83,22 @@ func sessionDiscoveryCmd(
 	}
 	var targets []target
 	for _, f := range fleets {
-		for _, inst := range f.Instances {
-			if inst.Status != fleet.StatusRunning || inst.ContainerID == "" {
+		for _, instance := range f.Instances {
+			if instance.Status != fleet.StatusRunning || instance.ContainerID == "" {
 				continue
 			}
-			bt := inst.Backend
-			if bt == "" {
-				bt = fleet.BackendDevcontainer
+			backendType := instance.Backend
+			if backendType == "" {
+				backendType = fleet.BackendDevcontainer
 			}
-			instKey := f.Name + "/" + inst.Name
+			instKey := f.Name + "/" + instance.Name
 			if !expanded[instKey] {
 				continue
 			}
 			targets = append(targets, target{
 				instanceKey:  instKey,
-				workspaceDir: inst.WorkspaceDir,
-				backendType:  bt,
+				workspaceDir: instance.WorkspaceDir,
+				backendType:  backendType,
 			})
 		}
 	}
@@ -115,14 +115,14 @@ func sessionDiscoveryCmd(
 		var wg sync.WaitGroup
 
 		for _, t := range targets {
-			b := backends[t.backendType]
-			if b == nil {
+			instanceBackend := backends[t.backendType]
+			if instanceBackend == nil {
 				continue
 			}
 			wg.Add(1)
-			go func(b backend.Backend, wsDir, instKey string) {
+			go func(instanceBackend backend.Backend, wsDir, instKey string) {
 				defer wg.Done()
-				cmd := b.ExecCommand(wsDir, []string{
+				cmd := instanceBackend.ExecCommand(wsDir, []string{
 					"sh", "-c",
 					`tmux list-sessions -F "#{session_name}:#{session_windows}:#{session_attached}" 2>/dev/null`,
 				})
@@ -140,7 +140,7 @@ func sessionDiscoveryCmd(
 				mu.Lock()
 				discovered[instKey] = sessions
 				mu.Unlock()
-			}(b, t.workspaceDir, t.instanceKey)
+			}(instanceBackend, t.workspaceDir, t.instanceKey)
 		}
 
 		wg.Wait()
@@ -153,11 +153,11 @@ func sessionDiscoveryCmd(
 // session from a row that was never expanded, so the attach-vs-new
 // decision can see existing tmux sessions instead of always spawning a
 // new group.
-func ensureSessionsLoaded(m *model, b backend.Backend, workspaceDir, instanceKey string) {
+func ensureSessionsLoaded(m *model, instanceBackend backend.Backend, workspaceDir, instanceKey string) {
 	if _, ok := m.sessions[instanceKey]; ok {
 		return
 	}
-	cmd := b.ExecCommand(workspaceDir, []string{
+	cmd := instanceBackend.ExecCommand(workspaceDir, []string{
 		"sh", "-c",
 		`tmux list-sessions -F "#{session_name}:#{session_windows}:#{session_attached}" 2>/dev/null`,
 	})
@@ -174,9 +174,9 @@ func ensureSessionsLoaded(m *model, b backend.Backend, workspaceDir, instanceKey
 
 // listSessionsCmd returns a tea.Cmd that execs `tmux list-sessions`
 // inside the container and parses the output into tmuxSession structs.
-func listSessionsCmd(b backend.Backend, workspaceDir, instanceKey string) tea.Cmd {
+func listSessionsCmd(instanceBackend backend.Backend, workspaceDir, instanceKey string) tea.Cmd {
 	return func() tea.Msg {
-		cmd := b.ExecCommand(workspaceDir, []string{
+		cmd := instanceBackend.ExecCommand(workspaceDir, []string{
 			"sh", "-c",
 			`tmux list-sessions -F "#{session_name}:#{session_windows}:#{session_attached}" 2>/dev/null`,
 		})
@@ -191,9 +191,9 @@ func listSessionsCmd(b backend.Backend, workspaceDir, instanceKey string) tea.Cm
 
 // createSessionCmd ensures tmux is installed (matching the interactive
 // shell path) and then creates a detached session inside the container.
-func createSessionCmd(b backend.Backend, workspaceDir, instanceKey, sessionName string) tea.Cmd {
+func createSessionCmd(instanceBackend backend.Backend, workspaceDir, instanceKey, sessionName string) tea.Cmd {
 	return func() tea.Msg {
-		cmd := b.ExecCommand(workspaceDir, []string{
+		cmd := instanceBackend.ExecCommand(workspaceDir, []string{
 			"sh", "-c",
 			tmuxEnsureInstalled + fmt.Sprintf(`tmux new-session -d -s %s 2>/dev/null`, shQuote(sessionName)),
 		})
@@ -206,9 +206,9 @@ func createSessionCmd(b backend.Backend, workspaceDir, instanceKey, sessionName 
 
 // renameSessionCmd execs `tmux rename-session -t <old> <new>` inside
 // the container.
-func renameSessionCmd(b backend.Backend, workspaceDir, instanceKey, oldName, newName string) tea.Cmd {
+func renameSessionCmd(instanceBackend backend.Backend, workspaceDir, instanceKey, oldName, newName string) tea.Cmd {
 	return func() tea.Msg {
-		cmd := b.ExecCommand(workspaceDir, []string{
+		cmd := instanceBackend.ExecCommand(workspaceDir, []string{
 			"sh", "-c",
 			fmt.Sprintf(`tmux rename-session -t %s %s 2>/dev/null`, shQuote(oldName), shQuote(newName)),
 		})
@@ -222,13 +222,13 @@ func renameSessionCmd(b backend.Backend, workspaceDir, instanceKey, oldName, new
 // renameGroupCmd renames all sessions in a group. It lists sessions
 // matching the old group prefix, then renames each one by swapping the
 // old group ID for the new one.
-func renameGroupCmd(b backend.Backend, workspaceDir, instanceKey, sanitizedInstance, oldGroupID, newGroupID string) tea.Cmd {
+func renameGroupCmd(instanceBackend backend.Backend, workspaceDir, instanceKey, sanitizedInstance, oldGroupID, newGroupID string) tea.Cmd {
 	oldPrefix := sanitizedInstance + groupSep + oldGroupID
 	newPrefix := sanitizedInstance + groupSep + newGroupID
 
 	return func() tea.Msg {
 		// List all sessions in the container.
-		listCmd := b.ExecCommand(workspaceDir, []string{
+		listCmd := instanceBackend.ExecCommand(workspaceDir, []string{
 			"sh", "-c",
 			`tmux list-sessions -F "#{session_name}" 2>/dev/null`,
 		})
@@ -246,7 +246,7 @@ func renameGroupCmd(b backend.Backend, workspaceDir, instanceKey, sanitizedInsta
 			}
 			// Swap prefix: instance~oldGID~suffix → instance~newGID~suffix
 			renamed := newPrefix + name[len(oldPrefix):]
-			cmd := b.ExecCommand(workspaceDir, []string{
+			cmd := instanceBackend.ExecCommand(workspaceDir, []string{
 				"sh", "-c",
 				fmt.Sprintf(`tmux rename-session -t %s %s 2>/dev/null`, shQuote(name), shQuote(renamed)),
 			})
@@ -262,9 +262,9 @@ func renameGroupCmd(b backend.Backend, workspaceDir, instanceKey, sanitizedInsta
 }
 
 // deleteSessionCmd kills a single tmux session inside the container.
-func deleteSessionCmd(b backend.Backend, workspaceDir, instanceKey, sessionName string) tea.Cmd {
+func deleteSessionCmd(instanceBackend backend.Backend, workspaceDir, instanceKey, sessionName string) tea.Cmd {
 	return func() tea.Msg {
-		cmd := b.ExecCommand(workspaceDir, []string{
+		cmd := instanceBackend.ExecCommand(workspaceDir, []string{
 			"sh", "-c",
 			fmt.Sprintf(`tmux kill-session -t %s 2>/dev/null`, shQuote(sessionName)),
 		})
@@ -277,12 +277,12 @@ func deleteSessionCmd(b backend.Backend, workspaceDir, instanceKey, sessionName 
 
 // deleteGroupSessionsCmd kills all tmux sessions belonging to a group.
 // It lists sessions matching the group prefix and kills each one.
-func deleteGroupSessionsCmd(b backend.Backend, workspaceDir, instanceKey, sanitizedInstance, groupID string) tea.Cmd {
+func deleteGroupSessionsCmd(instanceBackend backend.Backend, workspaceDir, instanceKey, sanitizedInstance, groupID string) tea.Cmd {
 	prefix := sanitizedInstance + groupSep + groupID
 
 	return func() tea.Msg {
 		// List all sessions in the container.
-		listCmd := b.ExecCommand(workspaceDir, []string{
+		listCmd := instanceBackend.ExecCommand(workspaceDir, []string{
 			"sh", "-c",
 			`tmux list-sessions -F "#{session_name}" 2>/dev/null`,
 		})
@@ -298,7 +298,7 @@ func deleteGroupSessionsCmd(b backend.Backend, workspaceDir, instanceKey, saniti
 			if name == "" || !strings.HasPrefix(name, prefix) {
 				continue
 			}
-			cmd := b.ExecCommand(workspaceDir, []string{
+			cmd := instanceBackend.ExecCommand(workspaceDir, []string{
 				"sh", "-c",
 				fmt.Sprintf(`tmux kill-session -t %s 2>/dev/null`, shQuote(name)),
 			})
