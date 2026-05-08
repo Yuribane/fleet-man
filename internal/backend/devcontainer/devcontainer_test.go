@@ -81,3 +81,41 @@ func TestDevcontainerEnvBuildKitMode(t *testing.T) {
 		})
 	}
 }
+
+func TestDevcontainerUpArgsUpdateRemoteUserUID(t *testing.T) {
+	tests := []struct {
+		name    string
+		mode    string
+		want    []string
+		wantErr bool
+	}{
+		{name: "unset delegates to default"},
+		{name: "default delegates to default", mode: "default"},
+		{name: "never disables uid rewrite", mode: "never", want: []string{"up", "--update-remote-user-uid-default", "never"}},
+		{name: "on is passed through", mode: "on", want: []string{"up", "--update-remote-user-uid-default", "on"}},
+		{name: "off is passed through", mode: "off", want: []string{"up", "--update-remote-user-uid-default", "off"}},
+		{name: "invalid errors", mode: "sometimes", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("FLEET_DEVCONTAINER_UPDATE_REMOTE_USER_UID", tt.mode)
+			got, err := devcontainerUpArgs([]string{"up"})
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("devcontainerUpArgs() error = nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("devcontainerUpArgs() error = %v", err)
+			}
+			if tt.want == nil {
+				tt.want = []string{"up"}
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("devcontainerUpArgs() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}

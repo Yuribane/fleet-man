@@ -2,6 +2,35 @@ package tui
 
 import "testing"
 
+func TestGroupRestoreTokens(t *testing.T) {
+	fp := newFleetPage()
+
+	first := fp.beginGroupRestore("abc123")
+	if first == 0 {
+		t.Fatal("beginGroupRestore returned zero token")
+	}
+	if !fp.restoreInProgress() {
+		t.Fatal("restore should be marked in progress")
+	}
+
+	second := fp.beginGroupRestore("def456")
+	if second == first {
+		t.Fatal("restore token did not advance")
+	}
+	if fp.finishGroupRestore(first) {
+		t.Fatal("stale restore token should be rejected")
+	}
+	if !fp.restoreInProgress() {
+		t.Fatal("stale restore token cleared active restore")
+	}
+	if !fp.finishGroupRestore(second) {
+		t.Fatal("current restore token should be accepted")
+	}
+	if fp.restoreInProgress() {
+		t.Fatal("current restore token did not clear active restore")
+	}
+}
+
 // TestSameSavedGroupEqual confirms byte-identical savedGroups compare equal.
 // The diff gate in saveCurrentGroupLayout depends on this being true so
 // that idle discovery ticks don't rewrite state.json.
@@ -105,5 +134,113 @@ func TestSameSavedGroupNilVsEmpty(t *testing.T) {
 	b := savedGroup{GroupID: "g", InstanceName: "i", Sessions: []string{}, Layout: "L"}
 	if !sameSavedGroup(a, b) {
 		t.Fatal("nil and empty Sessions slices should compare equal")
+	}
+}
+
+func TestSavedGroupSessionNamesUsesSavedOrder(t *testing.T) {
+	sg := savedGroup{
+		GroupID:      "abc123",
+		InstanceName: "alpha",
+		Sessions:     []string{"alpha~abc123", "alpha~abc123~ff00"},
+		PaneCount:    2,
+	}
+
+	got := savedGroupSessionNames(sg, "alpha")
+	want := []string{"alpha~abc123", "alpha~abc123~ff00"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("session[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestSavedGroupSessionNamesSynthesizesMissingPanes(t *testing.T) {
+	sg := savedGroup{
+		GroupID:      "abc123",
+		InstanceName: "alpha",
+		PaneCount:    2,
+	}
+
+	got := savedGroupSessionNames(sg, "alpha")
+	want := []string{"alpha~abc123", "alpha~abc123~restored01"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("session[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestNormalizeSavedGroupSessionsReplacesHostPaneTitles(t *testing.T) {
+	got := normalizeSavedGroupSessions(
+		[]string{"runner-host", "alpha~abc123~ff00"},
+		"alpha",
+		"abc123",
+	)
+	want := []string{"alpha~abc123", "alpha~abc123~ff00"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("session[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestRestoreSessionNamesTopsUpIncompleteLiveDiscovery(t *testing.T) {
+	sg := savedGroup{
+		GroupID:      "abc123",
+		InstanceName: "alpha",
+		Sessions:     []string{"alpha~abc123", "alpha~abc123~ff00"},
+		PaneCount:    2,
+	}
+
+	got := restoreSessionNames(
+		"alpha~abc123\n",
+		"alpha~abc123",
+		sg.Sessions,
+		&sg,
+		"alpha",
+	)
+	want := []string{"alpha~abc123", "alpha~abc123~ff00"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("session[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestRestoreSessionNamesUsesSavedLayoutOverLiveDiscovery(t *testing.T) {
+	sg := savedGroup{
+		GroupID:      "abc123",
+		InstanceName: "alpha",
+		Sessions:     []string{"alpha~abc123", "alpha~abc123~ff00"},
+		PaneCount:    2,
+	}
+
+	got := restoreSessionNames(
+		"alpha~abc123\nalpha~abc123~stale\n",
+		"alpha~abc123",
+		nil,
+		&sg,
+		"alpha",
+	)
+	want := []string{"alpha~abc123", "alpha~abc123~ff00"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("session[%d] = %q, want %q", i, got[i], want[i])
+		}
 	}
 }

@@ -16,12 +16,13 @@ import (
 
 // splitPaneMsg is sent after a tmux split-window command completes.
 type splitPaneMsg struct {
-	paneID   string // tmux pane ID (e.g. "%3")
-	fleet    string // fleet name for the instance
-	instance string // instance name occupying the pane
-	session  string // tmux session name in the pane
-	groupID  string // session group ID (for group management)
-	err      error
+	paneID     string // tmux pane ID (e.g. "%3")
+	fleet      string // fleet name for the instance
+	instance   string // instance name occupying the pane
+	session    string // tmux session name in the pane
+	groupID    string // session group ID (for group management)
+	restoreSeq int    // async restore token; zero means not a group restore
+	err        error
 }
 
 // tmuxWindowSize queries the host tmux for the current window dimensions.
@@ -332,9 +333,16 @@ func (fleetPage *fleetPage) saveCurrentGroupLayout(st *state.State) {
 	if fleetPage.activeGroupID == "" || fleetPage.splitInstance == "" {
 		return
 	}
+	if fleetPage.restoreInProgress() {
+		return
+	}
 
-	// Read session names from outer tmux pane titles, in pane order.
-	sessionNames := paneSessionOrder()
+	// Read session names from outer tmux pane titles, in pane order. Some
+	// panes briefly report the host title before fleet shell sets a title;
+	// normalize those placeholders into deterministic group session names
+	// before persisting the layout.
+	sanitized := SanitizeSessionName(fleetPage.splitInstance)
+	sessionNames := normalizeSavedGroupSessions(paneSessionOrder(), sanitized, fleetPage.activeGroupID)
 
 	// No shell panes visible in the outer tmux means either the group
 	// hasn't opened yet or its panes have already been killed (Ctrl+Q,
@@ -382,6 +390,7 @@ func (fleetPage *fleetPage) saveCurrentGroupLayout(st *state.State) {
 // queries the inner tmux directly for sessions matching the group prefix.
 // Each discovered session gets its own pane via `fleet shell --session`.
 func (fleetPage *fleetPage) restoreGroupCmd(m *model, fleetName string, instance *fleet.Instance, groupID string) tea.Cmd {
+	restoreSeq := fleetPage.beginGroupRestore(groupID)
 	instanceBackend := m.instanceBackend(instance)
 	instanceName := instance.Name
 	qualifiedName := fleetName + "/" + instanceName
@@ -405,7 +414,7 @@ func (fleetPage *fleetPage) restoreGroupCmd(m *model, fleetName string, instance
 	return func() tea.Msg {
 		self, err := os.Executable()
 		if err != nil {
-			return splitPaneMsg{err: fmt.Errorf("os.Executable: %w", err)}
+			return splitPaneMsg{restoreSeq: restoreSeq, err: fmt.Errorf("os.Executable: %w", err)}
 		}
 
 		// Query the inner tmux for all sessions in this group.
@@ -415,35 +424,15 @@ func (fleetPage *fleetPage) restoreGroupCmd(m *model, fleetName string, instance
 		})
 		out, _ := listCmd.Output()
 
-		// Build a set of live sessions for validation.
-		live := make(map[string]bool)
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			name := strings.TrimSpace(line)
-			if name != "" && strings.HasPrefix(name, prefix) {
-				live[name] = true
-			}
+		var savedSnapshot *savedGroup
+		if sg, ok := fleetPage.savedGroups[groupID]; ok {
+			savedSnapshot = &sg
 		}
-
-		// Use saved order if available, filtering to sessions that
-		// still exist. Then append any newly discovered sessions
-		// that weren't in the saved order.
-		var sessions []string
-		seen := make(map[string]bool)
-		for _, s := range savedOrder {
-			if live[s] {
-				sessions = append(sessions, s)
-				seen[s] = true
-			}
-		}
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			name := strings.TrimSpace(line)
-			if name != "" && strings.HasPrefix(name, prefix) && !seen[name] {
-				sessions = append(sessions, name)
-			}
-		}
-
+		sessions := restoreSessionNames(string(out), prefix, savedOrder, savedSnapshot, sanitized)
 		if len(sessions) == 0 {
-			return splitPaneMsg{err: fmt.Errorf("no sessions found for group %s", groupID)}
+			if _, ok := fleetPage.savedGroups[groupID]; !ok {
+				return splitPaneMsg{restoreSeq: restoreSeq, err: fmt.Errorf("no sessions found for group %s", groupID)}
+			}
 		}
 
 		// Kill any existing split panes. Must select the TUI pane first —
@@ -528,17 +517,61 @@ func (fleetPage *fleetPage) restoreGroupCmd(m *model, fleetName string, instance
 			firstSession = sessions[0]
 		}
 		msg := splitPaneMsg{
-			paneID:   firstPaneID,
-			fleet:    fleetName,
-			instance: instanceName,
-			session:  firstSession,
-			groupID:  groupID,
+			paneID:     firstPaneID,
+			fleet:      fleetName,
+			instance:   instanceName,
+			session:    firstSession,
+			groupID:    groupID,
+			restoreSeq: restoreSeq,
 		}
 		if splitErr != nil {
 			msg.err = fmt.Errorf("failed to do tmux split pane: %w", splitErr)
 		}
 		return msg
 	}
+}
+
+func restoreSessionNames(discovered, prefix string, savedOrder []string, savedSnapshot *savedGroup, sanitized string) []string {
+	// A saved layout is the source of truth for restore: it records the
+	// pane count and session-to-pane order the user left behind. Each
+	// restored `fleet shell --session` uses tmux new-session -A, so the
+	// named session is attached if it survived or recreated if it did
+	// not. Avoid mixing live discovery into this path because Linux and
+	// WSL can report different stale/live inner tmux sets during restart.
+	if savedSnapshot != nil {
+		return savedGroupSessionNames(*savedSnapshot, sanitized)
+	}
+
+	// Build a set of live sessions for validation.
+	live := make(map[string]bool)
+	var liveOrder []string
+	for _, line := range strings.Split(strings.TrimSpace(discovered), "\n") {
+		name := strings.TrimSpace(line)
+		if name != "" && strings.HasPrefix(name, prefix) {
+			live[name] = true
+			liveOrder = append(liveOrder, name)
+		}
+	}
+
+	// Use saved order if available, filtering to sessions that still
+	// exist. Then append any newly discovered sessions that weren't in
+	// the saved order.
+	var sessions []string
+	seen := make(map[string]bool)
+	for _, s := range savedOrder {
+		if live[s] {
+			sessions = append(sessions, s)
+			seen[s] = true
+		}
+	}
+	for _, name := range liveOrder {
+		if !seen[name] {
+			sessions = append(sessions, name)
+			seen[name] = true
+		}
+	}
+
+	return sessions
 }
 
 // bindHostSessionCycleKeys binds Ctrl+PageUp/Down on the outer tmux to

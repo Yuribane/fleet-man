@@ -128,14 +128,6 @@ jobs:
           # budget by 3 so legitimately-passing tests aren't killed by the
           # default polling deadlines. Linux job is unaffected.
           export FLEET_TUI_WAIT_SCALE=3
-          # 280_tui_pane_layout_persist exposes a real fleet-on-WSL
-          # behavior gap, not a CI flake — tracked in #41. When fleet
-          # quits under dockerd-in-WSL, the inner tmux sessions inside
-          # the devcontainer do not survive the signal cascade the way
-          # they do on bare Linux; restoreGroupCmd then sees zero live
-          # sessions and the saved layout gets pruned from state. Skip
-          # here until #41 is fixed so the CI gate stays useful.
-          export FLEET_ITEST_SKIP=280_tui_pane_layout_persist
           ./integration/run.sh
 
       - name: Dump dockerd log on failure

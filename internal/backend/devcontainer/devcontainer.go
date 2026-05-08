@@ -76,6 +76,11 @@ func (devcontainerBackend *DevcontainerBackend) containerUser(containerID string
 // Up runs `devcontainer up` for the given workspace folder.
 func (devcontainerBackend *DevcontainerBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 	args := []string{"up", "--workspace-folder", workspaceDir}
+	var err error
+	args, err = devcontainerUpArgs(args)
+	if err != nil {
+		return nil, err
+	}
 	args = append(args, sshUpArgs()...)
 	cmd := exec.Command("devcontainer", args...)
 	env, err := devcontainerEnv(os.Environ())
@@ -112,6 +117,18 @@ func (devcontainerBackend *DevcontainerBackend) Up(workspaceDir string) (*backen
 	}
 
 	return &result, nil
+}
+
+func devcontainerUpArgs(base []string) ([]string, error) {
+	mode := strings.TrimSpace(os.Getenv("FLEET_DEVCONTAINER_UPDATE_REMOTE_USER_UID"))
+	switch mode {
+	case "", "default":
+		return base, nil
+	case "never", "on", "off":
+		return append(base, "--update-remote-user-uid-default", mode), nil
+	default:
+		return nil, fmt.Errorf("invalid FLEET_DEVCONTAINER_UPDATE_REMOTE_USER_UID value %q (valid: default, never, on, off)", mode)
+	}
 }
 
 func devcontainerEnv(base []string) ([]string, error) {

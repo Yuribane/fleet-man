@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
@@ -51,10 +52,12 @@ type fleetPage struct {
 	splitInstance string
 	splitSession  string
 
-	activeGroupID  string
-	savedGroups    map[string]savedGroup
-	pendingGroupID string
-	debounceSeq    int
+	activeGroupID    string
+	savedGroups      map[string]savedGroup
+	pendingGroupID   string
+	debounceSeq      int
+	restoringGroupID string
+	restoreSeq       int
 
 	// listRowY is the terminal Y (0-indexed) where rows[0] is rendered,
 	// recorded during View() so mouse clicks can be mapped back to a
@@ -79,6 +82,27 @@ func newFleetPage() *fleetPage {
 		branchInput: bi,
 		listRowY:    -1,
 	}
+}
+
+func (fleetPage *fleetPage) restoreInProgress() bool {
+	return fleetPage.restoringGroupID != ""
+}
+
+func (fleetPage *fleetPage) beginGroupRestore(groupID string) int {
+	fleetPage.restoreSeq++
+	fleetPage.restoringGroupID = groupID
+	return fleetPage.restoreSeq
+}
+
+func (fleetPage *fleetPage) finishGroupRestore(seq int) bool {
+	if seq == 0 {
+		return true
+	}
+	if seq != fleetPage.restoreSeq {
+		return false
+	}
+	fleetPage.restoringGroupID = ""
+	return true
 }
 
 // Init is called when the fleet page becomes active.
@@ -113,6 +137,7 @@ func (fleetPage *fleetPage) Update(m *model, msg tea.Msg) tea.Cmd {
 			fleetPage.splitInstance = ""
 			fleetPage.splitSession = ""
 			fleetPage.activeGroupID = ""
+			fleetPage.restoringGroupID = ""
 		}
 		return nil
 
@@ -197,10 +222,12 @@ func (fleetPage *fleetPage) buildRows(m *model) {
 				fleetPage.rows = append(fleetPage.rows, row{kind: rowInstance, fleetName: name, instance: instance})
 				instKey := name + "/" + instance.Name
 				if m.expandedInstances[instKey] {
+					liveGroups := make(map[string]bool)
 					if disc, ok := m.sessions[instKey]; ok && disc.err == nil {
 						sanitized := SanitizeSessionName(instance.Name)
 						groups := groupSessions(sanitized, disc.sessions)
 						for _, g := range groups {
+							liveGroups[g.GroupID] = true
 							rootName := g.Sessions[0].Name
 							fleetPage.rows = append(fleetPage.rows, row{
 								kind:        rowSession,
@@ -212,6 +239,7 @@ func (fleetPage *fleetPage) buildRows(m *model) {
 							})
 						}
 					}
+					fleetPage.appendSavedGroupRows(name, instance, liveGroups)
 					fleetPage.rows = append(fleetPage.rows, row{
 						kind:      rowNewSession,
 						fleetName: name,
@@ -228,6 +256,37 @@ func (fleetPage *fleetPage) buildRows(m *model) {
 	if fleetPage.cursor >= len(fleetPage.rows) {
 		fleetPage.cursor = max(0, len(fleetPage.rows)-1)
 	}
+}
+
+func (fleetPage *fleetPage) appendSavedGroupRows(fleetName string, instance *fleet.Instance, liveGroups map[string]bool) {
+	sanitized := SanitizeSessionName(instance.Name)
+	for _, sg := range fleetPage.savedGroupsForInstance(instance.Name) {
+		if liveGroups[sg.GroupID] {
+			continue
+		}
+		sessions := savedGroupSessionNames(sg, sanitized)
+		fleetPage.rows = append(fleetPage.rows, row{
+			kind:        rowSession,
+			fleetName:   fleetName,
+			instance:    instance,
+			sessionName: sessions[0],
+			groupID:     sg.GroupID,
+			groupSize:   savedGroupPaneCount(sg),
+		})
+	}
+}
+
+func (fleetPage *fleetPage) savedGroupsForInstance(instanceName string) []savedGroup {
+	groups := make([]savedGroup, 0, len(fleetPage.savedGroups))
+	for _, sg := range fleetPage.savedGroups {
+		if sg.InstanceName == instanceName {
+			groups = append(groups, sg)
+		}
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].GroupID < groups[j].GroupID
+	})
+	return groups
 }
 
 // currentRow returns a pointer to the row at the cursor position.
@@ -664,6 +723,10 @@ func (fleetPage *fleetPage) handleEnter(m *model) tea.Cmd {
 		sessInstKey := r.fleetName + "/" + instance.Name
 		m.lastActive[sessInstKey] = lastSession{sessionName: sessionName, groupID: groupID}
 		if m.inHostTmux {
+			if fleetPage.restoreInProgress() {
+				m.message = "Pane group restore already in progress"
+				return nil
+			}
 			if fleetPage.splitPaneID != "" && !splitOpen() {
 				unbindHostSplitKeys()
 				fleetPage.splitPaneID = ""
@@ -671,6 +734,7 @@ func (fleetPage *fleetPage) handleEnter(m *model) tea.Cmd {
 				fleetPage.splitInstance = ""
 				fleetPage.splitSession = ""
 				fleetPage.activeGroupID = ""
+				fleetPage.restoringGroupID = ""
 			}
 			if fleetPage.splitPaneID != "" && fleetPage.splitInstance == instance.Name && groupID != "" && groupID == fleetPage.activeGroupID {
 				fleetPage.saveCurrentGroupLayout(m.st)
@@ -681,6 +745,7 @@ func (fleetPage *fleetPage) handleEnter(m *model) tea.Cmd {
 				fleetPage.splitInstance = ""
 				fleetPage.splitSession = ""
 				fleetPage.activeGroupID = ""
+				fleetPage.restoringGroupID = ""
 				return nil
 			}
 			if fleetPage.splitPaneID != "" && fleetPage.activeGroupID != "" {
@@ -718,6 +783,10 @@ func (fleetPage *fleetPage) handleEnter(m *model) tea.Cmd {
 		instFleetName := r.fleetName
 		instKey := instFleetName + "/" + instance.Name
 		if m.inHostTmux {
+			if fleetPage.restoreInProgress() {
+				m.message = "Pane group restore already in progress"
+				return nil
+			}
 			if fleetPage.splitPaneID != "" && !splitOpen() {
 				unbindHostSplitKeys()
 				fleetPage.splitPaneID = ""
@@ -725,6 +794,7 @@ func (fleetPage *fleetPage) handleEnter(m *model) tea.Cmd {
 				fleetPage.splitInstance = ""
 				fleetPage.splitSession = ""
 				fleetPage.activeGroupID = ""
+				fleetPage.restoringGroupID = ""
 			}
 			if fleetPage.splitPaneID != "" && fleetPage.splitInstance == instance.Name {
 				fleetPage.saveCurrentGroupLayout(m.st)
@@ -735,6 +805,7 @@ func (fleetPage *fleetPage) handleEnter(m *model) tea.Cmd {
 				fleetPage.splitInstance = ""
 				fleetPage.splitSession = ""
 				fleetPage.activeGroupID = ""
+				fleetPage.restoringGroupID = ""
 				return nil
 			}
 			return fleetPage.openInstanceSession(m, instFleetName, instance)
@@ -1368,6 +1439,11 @@ func (fleetPage *fleetPage) viewFleetList(m *model) string {
 // openInstanceSession opens a split pane for the given instance, reusing
 // the last active session when available.
 func (fleetPage *fleetPage) openInstanceSession(m *model, fleetName string, instance *fleet.Instance) tea.Cmd {
+	if fleetPage.restoreInProgress() {
+		m.message = "Pane group restore already in progress"
+		return nil
+	}
+
 	instKey := fleetName + "/" + instance.Name
 	sanitized := SanitizeSessionName(instance.Name)
 
@@ -1437,6 +1513,11 @@ func (fleetPage *fleetPage) instanceGroups(m *model, instanceName string) []sess
 // cycleSessionGroup moves the visual selection to the next or previous
 // session group and starts a debounce timer.
 func (fleetPage *fleetPage) cycleSessionGroup(m *model, prev bool) tea.Cmd {
+	if fleetPage.restoreInProgress() {
+		m.message = "Pane group restore already in progress"
+		return nil
+	}
+
 	groups := fleetPage.instanceGroups(m, fleetPage.splitInstance)
 	if len(groups) < 2 {
 		return nil
@@ -1476,6 +1557,11 @@ func (fleetPage *fleetPage) cycleSessionGroup(m *model, prev bool) tea.Cmd {
 // commitGroupCycle performs the actual pane switch after the debounce
 // timer expires.
 func (fleetPage *fleetPage) commitGroupCycle(m *model) tea.Cmd {
+	if fleetPage.restoreInProgress() {
+		m.message = "Pane group restore already in progress"
+		return nil
+	}
+
 	if fleetPage.pendingGroupID == "" || fleetPage.pendingGroupID == fleetPage.activeGroupID {
 		fleetPage.pendingGroupID = ""
 		return nil
