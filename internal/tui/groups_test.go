@@ -107,3 +107,42 @@ func TestSameSavedGroupNilVsEmpty(t *testing.T) {
 		t.Fatal("nil and empty Sessions slices should compare equal")
 	}
 }
+
+func TestSavedGroupSessionNamesUsesSavedOrder(t *testing.T) {
+	sg := savedGroup{
+		GroupID:      "abc123",
+		InstanceName: "alpha",
+		Sessions:     []string{"alpha~abc123", "alpha~abc123~ff00"},
+		PaneCount:    2,
+	}
+
+	got := savedGroupSessionNames(sg, "alpha")
+	want := []string{"alpha~abc123", "alpha~abc123~ff00"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("session[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestSavedGroupSessionNamesSynthesizesMissingPanes(t *testing.T) {
+	sg := savedGroup{
+		GroupID:      "abc123",
+		InstanceName: "alpha",
+		PaneCount:    2,
+	}
+
+	got := savedGroupSessionNames(sg, "alpha")
+	want := []string{"alpha~abc123", "alpha~abc123~restored01"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("session[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}

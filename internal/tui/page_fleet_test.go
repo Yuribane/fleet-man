@@ -187,6 +187,78 @@ func TestViewFleetListShowsBranchItemForInstance(t *testing.T) {
 	}
 }
 
+func TestBuildRowsShowsSavedGroupWithoutLiveSessions(t *testing.T) {
+	inst := &fleet.Instance{Name: "alpha", Status: fleet.StatusRunning, ContainerID: "abc"}
+	fp := newFleetPage()
+	fp.savedGroups["abc123"] = savedGroup{
+		GroupID:      "abc123",
+		InstanceName: "alpha",
+		Sessions:     []string{"alpha~abc123", "alpha~abc123~ff00"},
+		PaneCount:    2,
+	}
+	m := &model{
+		st: &state.State{
+			Fleets: map[string]*fleet.Fleet{
+				"repo": {Name: "repo", Instances: []*fleet.Instance{inst}},
+			},
+		},
+		expandedInstances: map[string]bool{"repo/alpha": true},
+		sessions: map[string]*sessionDiscovery{
+			"repo/alpha": {sessions: nil},
+		},
+		fleetPage: fp,
+	}
+
+	fp.buildRows(m)
+
+	found := false
+	for _, r := range fp.rows {
+		if r.kind == rowSession && r.groupID == "abc123" {
+			found = true
+			if r.sessionName != "alpha~abc123" {
+				t.Fatalf("sessionName = %q, want alpha~abc123", r.sessionName)
+			}
+			if r.groupSize != 2 {
+				t.Fatalf("groupSize = %d, want 2", r.groupSize)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("saved group row not found in %#v", fp.rows)
+	}
+}
+
+func TestPruneSavedGroupsKeepsSavedGroupWhenDiscoveryIsEmpty(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	fp := newFleetPage()
+	fp.savedGroups["abc123"] = savedGroup{
+		GroupID:      "abc123",
+		InstanceName: "alpha",
+		Sessions:     []string{"alpha~abc123"},
+		PaneCount:    1,
+	}
+	m := &model{
+		st: &state.State{
+			Fleets:       map[string]*fleet.Fleet{},
+			GroupLayouts: map[string]state.GroupLayout{"abc123": {GroupID: "abc123", InstanceName: "alpha"}},
+		},
+		fleetPage: fp,
+		sessions: map[string]*sessionDiscovery{
+			"repo/alpha": {sessions: nil},
+		},
+	}
+
+	m.pruneSavedGroupsForInstance("repo/alpha")
+
+	if _, ok := m.fleetPage.savedGroups["abc123"]; !ok {
+		t.Fatal("saved group was pruned even though WSL discovery returned no live sessions")
+	}
+	if _, ok := m.st.GroupLayouts["abc123"]; !ok {
+		t.Fatal("state group layout was pruned even though WSL discovery returned no live sessions")
+	}
+}
+
 func TestViewFleetListOmitsBranchItemWhenBranchIsUnavailable(t *testing.T) {
 	inst := &fleet.Instance{
 		Name:         "agent-1",
@@ -484,12 +556,12 @@ func TestMoveCursorToInstanceSkipsBetweenInstances(t *testing.T) {
 	inst2 := &fleet.Instance{Name: "agent-2"}
 	fp := newFleetPage()
 	fp.rows = []row{
-		{kind: rowFleetHeader, fleetName: "alpha"},      // 0
-		{kind: rowInstance, fleetName: "alpha", instance: inst1}, // 1
+		{kind: rowFleetHeader, fleetName: "alpha"},                                 // 0
+		{kind: rowInstance, fleetName: "alpha", instance: inst1},                   // 1
 		{kind: rowSession, fleetName: "alpha", instance: inst1, sessionName: "s1"}, // 2
 		{kind: rowSession, fleetName: "alpha", instance: inst1, sessionName: "s2"}, // 3
-		{kind: rowNewSession, fleetName: "alpha", instance: inst1}, // 4
-		{kind: rowInstance, fleetName: "alpha", instance: inst2}, // 5
+		{kind: rowNewSession, fleetName: "alpha", instance: inst1},                 // 4
+		{kind: rowInstance, fleetName: "alpha", instance: inst2},                   // 5
 		{kind: rowSettings}, // 6
 	}
 
@@ -529,7 +601,7 @@ func TestMoveCursorToInstanceWraps(t *testing.T) {
 	inst2 := &fleet.Instance{Name: "agent-2"}
 	fp := newFleetPage()
 	fp.rows = []row{
-		{kind: rowFleetHeader, fleetName: "alpha"},      // 0
+		{kind: rowFleetHeader, fleetName: "alpha"},               // 0
 		{kind: rowInstance, fleetName: "alpha", instance: inst1}, // 1
 		{kind: rowInstance, fleetName: "alpha", instance: inst2}, // 2
 		{kind: rowSettings}, // 3

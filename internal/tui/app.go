@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backend"
-	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	codespacesbackend "github.com/BenjaminBenetti/fleet-man/internal/backend/codespaces"
+	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
 	"github.com/BenjaminBenetti/fleet-man/internal/deps"
 	"github.com/BenjaminBenetti/fleet-man/internal/fleet"
 	"github.com/BenjaminBenetti/fleet-man/internal/portforward"
@@ -36,7 +36,7 @@ type model struct {
 	fleetPage   *fleetPage // persistent — has running state accessed by background message handlers
 
 	spinner      spinner.Model
-	agentSpinner spinner.Model // pulse throbber rendered next to running agents' instance names
+	agentSpinner spinner.Model   // pulse throbber rendered next to running agents' instance names
 	creating     map[string]bool // "fleet/instance" keys currently being created
 
 	backends map[fleet.BackendType]backend.Backend // one per backend type, lazily created
@@ -241,6 +241,9 @@ func (m *model) pruneSavedGroupsForInstance(instKey string) {
 		if gid, ok := parseGroupID(sanitized, s.Name); ok {
 			live[gid] = true
 		}
+	}
+	if len(live) == 0 {
+		return
 	}
 	changed := false
 	for gid, savedLayout := range m.fleetPage.savedGroups {
@@ -798,6 +801,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		fp := m.fleetPage
+		if msg.groupID != "" {
+			delete(fp.savedGroups, msg.groupID)
+			if m.st != nil && m.st.GroupLayouts != nil {
+				delete(m.st.GroupLayouts, msg.groupID)
+				_ = state.Save(m.st)
+			}
+		}
 		if fp.splitSession == msg.sessionName || (msg.groupID != "" && fp.activeGroupID == msg.groupID) {
 			if fp.splitPaneID != "" {
 				killAllSplitPanes()

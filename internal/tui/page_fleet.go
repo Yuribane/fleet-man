@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/BenjaminBenetti/fleet-man/internal/backendutil"
@@ -197,10 +198,12 @@ func (fleetPage *fleetPage) buildRows(m *model) {
 				fleetPage.rows = append(fleetPage.rows, row{kind: rowInstance, fleetName: name, instance: instance})
 				instKey := name + "/" + instance.Name
 				if m.expandedInstances[instKey] {
+					liveGroups := make(map[string]bool)
 					if disc, ok := m.sessions[instKey]; ok && disc.err == nil {
 						sanitized := SanitizeSessionName(instance.Name)
 						groups := groupSessions(sanitized, disc.sessions)
 						for _, g := range groups {
+							liveGroups[g.GroupID] = true
 							rootName := g.Sessions[0].Name
 							fleetPage.rows = append(fleetPage.rows, row{
 								kind:        rowSession,
@@ -212,6 +215,7 @@ func (fleetPage *fleetPage) buildRows(m *model) {
 							})
 						}
 					}
+					fleetPage.appendSavedGroupRows(name, instance, liveGroups)
 					fleetPage.rows = append(fleetPage.rows, row{
 						kind:      rowNewSession,
 						fleetName: name,
@@ -228,6 +232,37 @@ func (fleetPage *fleetPage) buildRows(m *model) {
 	if fleetPage.cursor >= len(fleetPage.rows) {
 		fleetPage.cursor = max(0, len(fleetPage.rows)-1)
 	}
+}
+
+func (fleetPage *fleetPage) appendSavedGroupRows(fleetName string, instance *fleet.Instance, liveGroups map[string]bool) {
+	sanitized := SanitizeSessionName(instance.Name)
+	for _, sg := range fleetPage.savedGroupsForInstance(instance.Name) {
+		if liveGroups[sg.GroupID] {
+			continue
+		}
+		sessions := savedGroupSessionNames(sg, sanitized)
+		fleetPage.rows = append(fleetPage.rows, row{
+			kind:        rowSession,
+			fleetName:   fleetName,
+			instance:    instance,
+			sessionName: sessions[0],
+			groupID:     sg.GroupID,
+			groupSize:   savedGroupPaneCount(sg),
+		})
+	}
+}
+
+func (fleetPage *fleetPage) savedGroupsForInstance(instanceName string) []savedGroup {
+	groups := make([]savedGroup, 0, len(fleetPage.savedGroups))
+	for _, sg := range fleetPage.savedGroups {
+		if sg.InstanceName == instanceName {
+			groups = append(groups, sg)
+		}
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].GroupID < groups[j].GroupID
+	})
+	return groups
 }
 
 // currentRow returns a pointer to the row at the cursor position.

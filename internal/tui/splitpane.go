@@ -443,7 +443,11 @@ func (fleetPage *fleetPage) restoreGroupCmd(m *model, fleetName string, instance
 		}
 
 		if len(sessions) == 0 {
-			return splitPaneMsg{err: fmt.Errorf("no sessions found for group %s", groupID)}
+			sg, ok := fleetPage.savedGroups[groupID]
+			if !ok {
+				return splitPaneMsg{err: fmt.Errorf("no sessions found for group %s", groupID)}
+			}
+			sessions = savedGroupSessionNames(sg, sanitized)
 		}
 
 		// Kill any existing split panes. Must select the TUI pane first —

@@ -3,6 +3,7 @@ package tui
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -55,6 +56,43 @@ func sameSavedGroup(a, b savedGroup) bool {
 		}
 	}
 	return true
+}
+
+func savedGroupPaneCount(sg savedGroup) int {
+	if sg.PaneCount > 0 {
+		return sg.PaneCount
+	}
+	if len(sg.Sessions) > 0 {
+		return len(sg.Sessions)
+	}
+	return 1
+}
+
+func savedGroupSessionNames(sg savedGroup, sanitizedInstance string) []string {
+	count := savedGroupPaneCount(sg)
+	sessions := make([]string, 0, count)
+	seen := make(map[string]bool, count)
+	for _, name := range sg.Sessions {
+		if name == "" || seen[name] {
+			continue
+		}
+		sessions = append(sessions, name)
+		seen[name] = true
+	}
+	if len(sessions) == 0 {
+		root := groupSessionName(sanitizedInstance, sg.GroupID)
+		sessions = append(sessions, root)
+		seen[root] = true
+	}
+	for len(sessions) < count {
+		name := groupMemberName(sanitizedInstance, sg.GroupID, fmt.Sprintf("restored%02d", len(sessions)))
+		if seen[name] {
+			name = groupMemberName(sanitizedInstance, sg.GroupID, randomHex(2))
+		}
+		sessions = append(sessions, name)
+		seen[name] = true
+	}
+	return sessions
 }
 
 // groupSessionName builds a session name for the root session of a new group.

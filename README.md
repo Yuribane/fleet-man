@@ -102,16 +102,19 @@ npm install -g @devcontainers/cli
 
 On Docker Desktop plus WSL, if devcontainer startup fails while building the
 UID-adjustment or feature image, disable BuildKit for Fleet-managed
-devcontainers:
+devcontainers. If the failure is specifically in `updateUID.Dockerfile`,
+disable the devcontainer CLI's remote user UID rewrite as well:
 
 ```bash
 export FLEET_DEVCONTAINER_BUILDKIT=never
+export FLEET_DEVCONTAINER_UPDATE_REMOTE_USER_UID=never
 ```
 
 To persist that setting:
 
 ```bash
 echo 'export FLEET_DEVCONTAINER_BUILDKIT=never' >> ~/.bashrc
+echo 'export FLEET_DEVCONTAINER_UPDATE_REMOTE_USER_UID=never' >> ~/.bashrc
 ```
 
 See [Windows WSL notes](docs/windows-wsl-notes.md) for a full health check and
@@ -128,3 +131,16 @@ export FLEET_DEVCONTAINER_BUILDKIT=never
 ```
 
 Accepted values are `auto` and `never`.
+
+## Devcontainer UID Rewrite
+
+Fleet uses the devcontainer CLI's default remote-user UID/GID rewrite behavior
+unless explicitly configured. On Docker Desktop plus WSL, that rewrite can fail
+while building `updateUID.Dockerfile`. To disable it for Fleet-managed
+devcontainers:
+
+```bash
+export FLEET_DEVCONTAINER_UPDATE_REMOTE_USER_UID=never
+```
+
+Accepted values are `default`, `never`, `on`, and `off`.
