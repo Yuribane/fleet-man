@@ -16,12 +16,13 @@ import (
 
 // splitPaneMsg is sent after a tmux split-window command completes.
 type splitPaneMsg struct {
-	paneID   string // tmux pane ID (e.g. "%3")
-	fleet    string // fleet name for the instance
-	instance string // instance name occupying the pane
-	session  string // tmux session name in the pane
-	groupID  string // session group ID (for group management)
-	err      error
+	paneID     string // tmux pane ID (e.g. "%3")
+	fleet      string // fleet name for the instance
+	instance   string // instance name occupying the pane
+	session    string // tmux session name in the pane
+	groupID    string // session group ID (for group management)
+	restoreSeq int    // async restore token; zero means not a group restore
+	err        error
 }
 
 // tmuxWindowSize queries the host tmux for the current window dimensions.
@@ -332,6 +333,9 @@ func (fleetPage *fleetPage) saveCurrentGroupLayout(st *state.State) {
 	if fleetPage.activeGroupID == "" || fleetPage.splitInstance == "" {
 		return
 	}
+	if fleetPage.restoreInProgress() {
+		return
+	}
 
 	// Read session names from outer tmux pane titles, in pane order. Some
 	// panes briefly report the host title before fleet shell sets a title;
@@ -386,6 +390,7 @@ func (fleetPage *fleetPage) saveCurrentGroupLayout(st *state.State) {
 // queries the inner tmux directly for sessions matching the group prefix.
 // Each discovered session gets its own pane via `fleet shell --session`.
 func (fleetPage *fleetPage) restoreGroupCmd(m *model, fleetName string, instance *fleet.Instance, groupID string) tea.Cmd {
+	restoreSeq := fleetPage.beginGroupRestore(groupID)
 	instanceBackend := m.instanceBackend(instance)
 	instanceName := instance.Name
 	qualifiedName := fleetName + "/" + instanceName
@@ -409,7 +414,7 @@ func (fleetPage *fleetPage) restoreGroupCmd(m *model, fleetName string, instance
 	return func() tea.Msg {
 		self, err := os.Executable()
 		if err != nil {
-			return splitPaneMsg{err: fmt.Errorf("os.Executable: %w", err)}
+			return splitPaneMsg{restoreSeq: restoreSeq, err: fmt.Errorf("os.Executable: %w", err)}
 		}
 
 		// Query the inner tmux for all sessions in this group.
@@ -426,7 +431,7 @@ func (fleetPage *fleetPage) restoreGroupCmd(m *model, fleetName string, instance
 		sessions := restoreSessionNames(string(out), prefix, savedOrder, savedSnapshot, sanitized)
 		if len(sessions) == 0 {
 			if _, ok := fleetPage.savedGroups[groupID]; !ok {
-				return splitPaneMsg{err: fmt.Errorf("no sessions found for group %s", groupID)}
+				return splitPaneMsg{restoreSeq: restoreSeq, err: fmt.Errorf("no sessions found for group %s", groupID)}
 			}
 		}
 
@@ -512,11 +517,12 @@ func (fleetPage *fleetPage) restoreGroupCmd(m *model, fleetName string, instance
 			firstSession = sessions[0]
 		}
 		msg := splitPaneMsg{
-			paneID:   firstPaneID,
-			fleet:    fleetName,
-			instance: instanceName,
-			session:  firstSession,
-			groupID:  groupID,
+			paneID:     firstPaneID,
+			fleet:      fleetName,
+			instance:   instanceName,
+			session:    firstSession,
+			groupID:    groupID,
+			restoreSeq: restoreSeq,
 		}
 		if splitErr != nil {
 			msg.err = fmt.Errorf("failed to do tmux split pane: %w", splitErr)

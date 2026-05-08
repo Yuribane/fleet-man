@@ -2,6 +2,35 @@ package tui
 
 import "testing"
 
+func TestGroupRestoreTokens(t *testing.T) {
+	fp := newFleetPage()
+
+	first := fp.beginGroupRestore("abc123")
+	if first == 0 {
+		t.Fatal("beginGroupRestore returned zero token")
+	}
+	if !fp.restoreInProgress() {
+		t.Fatal("restore should be marked in progress")
+	}
+
+	second := fp.beginGroupRestore("def456")
+	if second == first {
+		t.Fatal("restore token did not advance")
+	}
+	if fp.finishGroupRestore(first) {
+		t.Fatal("stale restore token should be rejected")
+	}
+	if !fp.restoreInProgress() {
+		t.Fatal("stale restore token cleared active restore")
+	}
+	if !fp.finishGroupRestore(second) {
+		t.Fatal("current restore token should be accepted")
+	}
+	if fp.restoreInProgress() {
+		t.Fatal("current restore token did not clear active restore")
+	}
+}
+
 // TestSameSavedGroupEqual confirms byte-identical savedGroups compare equal.
 // The diff gate in saveCurrentGroupLayout depends on this being true so
 // that idle discovery ticks don't rewrite state.json.

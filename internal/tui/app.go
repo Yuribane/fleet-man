@@ -729,11 +729,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// partially succeed (some splits OK, some failed after retries),
 		// in which case both are set — show the error AND wire up the
 		// panes that did make it.
+		fp := m.fleetPage
+		if !fp.finishGroupRestore(msg.restoreSeq) {
+			break
+		}
 		if msg.err != nil {
 			m.message = fmt.Sprintf("failed to do tmux split pane: %v", msg.err)
 		}
 		if msg.paneID != "" {
-			fp := m.fleetPage
 			fp.splitPaneID = msg.paneID
 			fp.splitFleet = msg.fleet
 			fp.splitInstance = msg.instance
@@ -818,6 +821,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			fp.splitInstance = ""
 			fp.splitSession = ""
 			fp.activeGroupID = ""
+			fp.restoringGroupID = ""
 		}
 		if m.expandedInstances[msg.instanceKey] {
 			parts := strings.SplitN(msg.instanceKey, "/", 2)
@@ -924,6 +928,7 @@ func (m model) View() string {
 			fp.saveCurrentGroupLayout(m.st)
 			killAllSplitPanes()
 			fp.splitPaneID = ""
+			fp.restoringGroupID = ""
 		}
 		m.portForwards.Shutdown()
 		if m.inHostTmux {
