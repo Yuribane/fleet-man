@@ -89,8 +89,8 @@ func relaunchInTmux() error {
 		";", "set", "-g", "mouse", "on",
 	}
 
-	cfg, _ := state.LoadConfig()
-	if cfg == nil || cfg.GeneralSettings.TmuxVimKeysEnabled() {
+	config, _ := state.LoadConfig()
+	if config == nil || config.GeneralSettings.TmuxVimKeysEnabled() {
 		setupArgs = append(setupArgs,
 			";", "bind-key", "h", "if", "-F", "#{pane_at_left}", "", "select-pane -L",
 			";", "bind-key", "l", "if", "-F", "#{pane_at_right}", "", "select-pane -R",

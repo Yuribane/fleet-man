@@ -53,8 +53,8 @@ func TestSanitizeSessionName(t *testing.T) {
 // --- shellCommand (tmux-wrapped) tests ---
 
 func TestShellCommandProducesTmux(t *testing.T) {
-	cfg := state.DefaultConfig()
-	got := shellCommand(cfg, "agent-1", 0, 0, false)
+	config := state.DefaultConfig()
+	got := shellCommand(config, "agent-1", 0, 0, false)
 	if len(got) != 3 || got[0] != "sh" || got[1] != "-c" {
 		t.Fatalf("shellCommand() = %v, want [sh -c ...]", got)
 	}
@@ -74,8 +74,8 @@ func TestShellCommandProducesTmux(t *testing.T) {
 }
 
 func TestShellCommandClipboard(t *testing.T) {
-	cfg := state.DefaultConfig()
-	got := shellCommand(cfg, "agent-1", 0, 0, false)
+	config := state.DefaultConfig()
+	got := shellCommand(config, "agent-1", 0, 0, false)
 	script := got[2]
 	if !strings.Contains(script, "set -g set-clipboard on") {
 		t.Errorf("script missing set-clipboard on: %s", script)
@@ -86,8 +86,8 @@ func TestShellCommandClipboard(t *testing.T) {
 }
 
 func TestShellCommandClipboardNested(t *testing.T) {
-	cfg := state.DefaultConfig()
-	got := shellCommand(cfg, "agent-1", 80, 24, true)
+	config := state.DefaultConfig()
+	got := shellCommand(config, "agent-1", 80, 24, true)
 	script := got[2]
 	if !strings.Contains(script, "set -g set-clipboard on") {
 		t.Errorf("nested script missing set-clipboard on: %s", script)
@@ -98,8 +98,8 @@ func TestShellCommandClipboardNested(t *testing.T) {
 }
 
 func TestShellCommandClipboardFeaturesIsLast(t *testing.T) {
-	cfg := state.DefaultConfig()
-	got := shellCommand(cfg, "agent-1", 80, 24, false)
+	config := state.DefaultConfig()
+	got := shellCommand(config, "agent-1", 80, 24, false)
 	script := got[2]
 	featIdx := strings.LastIndex(script, "terminal-features")
 	mouseIdx := strings.Index(script, "set -g mouse on")
@@ -116,11 +116,11 @@ func TestShellCommandClipboardFeaturesIsLast(t *testing.T) {
 }
 
 func TestShellCommandWithDotfilesAndTmux(t *testing.T) {
-	cfg := state.DefaultConfig()
-	cfg.DotfilesSettings.RepoURL = "https://github.com/user/dots"
-	cfg.DotfilesSettings.InstallScript = "install.sh"
+	config := state.DefaultConfig()
+	config.DotfilesSettings.RepoURL = "https://github.com/user/dots"
+	config.DotfilesSettings.InstallScript = "install.sh"
 
-	got := shellCommand(cfg, "worker-2", 0, 0, false)
+	got := shellCommand(config, "worker-2", 0, 0, false)
 	script := got[2]
 
 	// Dotfiles setup should come before tmux
@@ -144,8 +144,8 @@ func TestShellCommandWithDotfilesAndTmux(t *testing.T) {
 }
 
 func TestShellCommandSanitizesSessionName(t *testing.T) {
-	cfg := state.DefaultConfig()
-	got := shellCommand(cfg, "my.instance:1", 0, 0, false)
+	config := state.DefaultConfig()
+	got := shellCommand(config, "my.instance:1", 0, 0, false)
 	script := got[2]
 	if !strings.Contains(script, "tmux -u new-session -A -s 'my-instance-1'") {
 		t.Errorf("script should sanitize session name: %s", script)
@@ -162,37 +162,37 @@ func TestFreshShellCommandNilConfig(t *testing.T) {
 }
 
 func TestFreshShellCommandEmptyDotfiles(t *testing.T) {
-	cfg := state.DefaultConfig()
-	got := freshShellCommand(cfg)
+	config := state.DefaultConfig()
+	got := freshShellCommand(config)
 	if len(got) != 1 || got[0] != "bash" {
 		t.Fatalf("freshShellCommand(empty) = %v, want [bash]", got)
 	}
 }
 
 func TestFreshShellCommandRepoOnlyNoScript(t *testing.T) {
-	cfg := state.DefaultConfig()
-	cfg.DotfilesSettings.RepoURL = "https://github.com/user/dots"
-	got := freshShellCommand(cfg)
+	config := state.DefaultConfig()
+	config.DotfilesSettings.RepoURL = "https://github.com/user/dots"
+	got := freshShellCommand(config)
 	if len(got) != 1 || got[0] != "bash" {
 		t.Fatalf("freshShellCommand(repo only) = %v, want [bash]", got)
 	}
 }
 
 func TestFreshShellCommandScriptOnlyNoRepo(t *testing.T) {
-	cfg := state.DefaultConfig()
-	cfg.DotfilesSettings.InstallScript = "install.sh"
-	got := freshShellCommand(cfg)
+	config := state.DefaultConfig()
+	config.DotfilesSettings.InstallScript = "install.sh"
+	got := freshShellCommand(config)
 	if len(got) != 1 || got[0] != "bash" {
 		t.Fatalf("freshShellCommand(script only) = %v, want [bash]", got)
 	}
 }
 
 func TestFreshShellCommandBothSet(t *testing.T) {
-	cfg := state.DefaultConfig()
-	cfg.DotfilesSettings.RepoURL = "https://github.com/user/dots"
-	cfg.DotfilesSettings.InstallScript = "install.sh"
+	config := state.DefaultConfig()
+	config.DotfilesSettings.RepoURL = "https://github.com/user/dots"
+	config.DotfilesSettings.InstallScript = "install.sh"
 
-	got := freshShellCommand(cfg)
+	got := freshShellCommand(config)
 	if len(got) != 3 {
 		t.Fatalf("freshShellCommand() returned %d args, want 3", len(got))
 	}
@@ -216,8 +216,8 @@ func TestFreshShellCommandBothSet(t *testing.T) {
 }
 
 func TestShellCommandNestedNoInnerPaneKeys(t *testing.T) {
-	cfg := state.DefaultConfig()
-	got := shellCommand(cfg, "agent-1", 80, 24, true)
+	config := state.DefaultConfig()
+	got := shellCommand(config, "agent-1", 80, 24, true)
 	script := got[2]
 	// Pane navigation is handled by the outer tmux, so the inner
 	// tmux should not bind j/k even when vim keys are enabled.
@@ -238,11 +238,11 @@ func TestShellCommandNestedNoInnerPaneKeys(t *testing.T) {
 }
 
 func TestShellCommandNestedVimKeysDisabled(t *testing.T) {
-	cfg := state.DefaultConfig()
+	config := state.DefaultConfig()
 	off := false
-	cfg.GeneralSettings.TmuxVimKeys = &off
+	config.GeneralSettings.TmuxVimKeys = &off
 
-	got := shellCommand(cfg, "agent-1", 80, 24, true)
+	got := shellCommand(config, "agent-1", 80, 24, true)
 	script := got[2]
 	if strings.Contains(script, "bind-key j select-pane") {
 		t.Errorf("nested script should not have j keybinding when vim keys disabled: %s", script)
@@ -260,12 +260,12 @@ func TestShellCommandNestedVimKeysDisabled(t *testing.T) {
 }
 
 func TestShellCommandAutoInstallSkipsDotfiles(t *testing.T) {
-	cfg := state.DefaultConfig()
-	cfg.DotfilesSettings.RepoURL = "https://github.com/user/dots"
-	cfg.DotfilesSettings.InstallScript = "install.sh"
-	cfg.DotfilesSettings.AutoInstall = true
+	config := state.DefaultConfig()
+	config.DotfilesSettings.RepoURL = "https://github.com/user/dots"
+	config.DotfilesSettings.InstallScript = "install.sh"
+	config.DotfilesSettings.AutoInstall = true
 
-	got := shellCommand(cfg, "agent-1", 80, 24, false)
+	got := shellCommand(config, "agent-1", 80, 24, false)
 	script := got[2]
 	if strings.Contains(script, "dotfiles") {
 		t.Errorf("script should not contain dotfiles setup when auto-install is on: %s", script)
@@ -276,24 +276,24 @@ func TestShellCommandAutoInstallSkipsDotfiles(t *testing.T) {
 }
 
 func TestFreshShellCommandAutoInstallSkipsDotfiles(t *testing.T) {
-	cfg := state.DefaultConfig()
-	cfg.DotfilesSettings.RepoURL = "https://github.com/user/dots"
-	cfg.DotfilesSettings.InstallScript = "install.sh"
-	cfg.DotfilesSettings.AutoInstall = true
+	config := state.DefaultConfig()
+	config.DotfilesSettings.RepoURL = "https://github.com/user/dots"
+	config.DotfilesSettings.InstallScript = "install.sh"
+	config.DotfilesSettings.AutoInstall = true
 
-	got := freshShellCommand(cfg)
+	got := freshShellCommand(config)
 	if len(got) != 1 || got[0] != "bash" {
 		t.Fatalf("freshShellCommand(auto-install) = %v, want [bash]", got)
 	}
 }
 
 func TestDotfilesSetupScriptIgnoresAutoInstall(t *testing.T) {
-	cfg := state.DefaultConfig()
-	cfg.DotfilesSettings.RepoURL = "https://github.com/user/dots"
-	cfg.DotfilesSettings.InstallScript = "install.sh"
-	cfg.DotfilesSettings.AutoInstall = true
+	config := state.DefaultConfig()
+	config.DotfilesSettings.RepoURL = "https://github.com/user/dots"
+	config.DotfilesSettings.InstallScript = "install.sh"
+	config.DotfilesSettings.AutoInstall = true
 
-	got := dotfilesSetupScript(cfg)
+	got := dotfilesSetupScript(config)
 	if got == "" {
 		t.Fatal("dotfilesSetupScript should return script regardless of auto-install")
 	}
@@ -303,11 +303,11 @@ func TestDotfilesSetupScriptIgnoresAutoInstall(t *testing.T) {
 }
 
 func TestFreshShellCommandQuotesSpecialCharacters(t *testing.T) {
-	cfg := state.DefaultConfig()
-	cfg.DotfilesSettings.RepoURL = "https://github.com/user/it's-dots"
-	cfg.DotfilesSettings.InstallScript = "my script.sh"
+	config := state.DefaultConfig()
+	config.DotfilesSettings.RepoURL = "https://github.com/user/it's-dots"
+	config.DotfilesSettings.InstallScript = "my script.sh"
 
-	got := freshShellCommand(cfg)
+	got := freshShellCommand(config)
 	if len(got) != 3 {
 		t.Fatalf("freshShellCommand() returned %d args, want 3", len(got))
 	}

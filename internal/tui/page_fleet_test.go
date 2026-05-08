@@ -239,7 +239,7 @@ func TestViewFleetListShowsAgentWorkingIndicator(t *testing.T) {
 				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
 			},
 		},
-		cfg: &state.Config{
+		config: &state.Config{
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
 		activity: testTracker(
@@ -280,7 +280,7 @@ func TestViewFleetListShowsAgentWaitingIndicator(t *testing.T) {
 				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
 			},
 		},
-		cfg: &state.Config{
+		config: &state.Config{
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
 		activity: testTracker(
@@ -321,7 +321,7 @@ func TestViewFleetListShowsAgentOffIndicator(t *testing.T) {
 				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
 			},
 		},
-		cfg: &state.Config{
+		config: &state.Config{
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
 		activity: testTracker(
@@ -365,7 +365,7 @@ func TestViewFleetListNoAgentIndicatorForStoppedInstance(t *testing.T) {
 				"alpha": {Name: "alpha", Instances: []*fleet.Instance{inst}},
 			},
 		},
-		cfg: &state.Config{
+		config: &state.Config{
 			AgentSettings: state.AgentSettings{ToolSelection: state.AgentToolClaude},
 		},
 		activity:          NewActivityTracker(),

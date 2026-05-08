@@ -9,8 +9,8 @@ import (
 )
 
 // New creates a Backend for the given type.
-func New(bt fleet.BackendType, verbose bool) backend.Backend {
-	switch bt {
+func New(backendType fleet.BackendType, verbose bool) backend.Backend {
+	switch backendType {
 	case fleet.BackendCoder:
 		opts := []coderbackend.Option{}
 		if verbose {
@@ -35,14 +35,14 @@ func New(bt fleet.BackendType, verbose bool) backend.Backend {
 // NewForInstance creates a Backend for the given instance, pre-registering
 // the codespace name mapping when applicable so that Exec/ExecCommand
 // use the correct container ID.
-func NewForInstance(inst *fleet.Instance, verbose bool) backend.Backend {
-	b := New(inst.Backend, verbose)
-	if inst.Backend == fleet.BackendCodespaces && inst.ContainerID != "" {
-		if csb, ok := b.(*codespacesbackend.CodespacesBackend); ok {
-			csb.RegisterName(inst.WorkspaceDir, inst.ContainerID)
+func NewForInstance(instance *fleet.Instance, verbose bool) backend.Backend {
+	instanceBackend := New(instance.Backend, verbose)
+	if instance.Backend == fleet.BackendCodespaces && instance.ContainerID != "" {
+		if codespacesBackend, ok := instanceBackend.(*codespacesbackend.CodespacesBackend); ok {
+			codespacesBackend.RegisterName(instance.WorkspaceDir, instance.ContainerID)
 		}
 	}
-	return b
+	return instanceBackend
 }
 
 // CoderOpenVSCodeArgs builds args for `coder open vscode`.

@@ -31,21 +31,21 @@ func newDownCmd() *cobra.Command {
 				return fmt.Errorf("fleet %q not found", target.Fleet)
 			}
 
-			inst, err := f.GetInstance(target.Instance)
+			instance, err := f.GetInstance(target.Instance)
 			if err != nil {
 				return err
 			}
 
 			// Stop the container
 			fmt.Printf("Stopping %s/%s...\n", target.Fleet, target.Instance)
-			dc := backendutil.New(inst.Backend, false)
-			if err := dc.Down(inst.ContainerID); err != nil {
+			instanceBackend := backendutil.New(instance.Backend, false)
+			if err := instanceBackend.Down(instance.ContainerID); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: failed to remove container: %v\n", err)
 			}
 
 			// Remove the workspace directory
-			if inst.WorkspaceDir != "" {
-				if err := os.RemoveAll(inst.WorkspaceDir); err != nil {
+			if instance.WorkspaceDir != "" {
+				if err := os.RemoveAll(instance.WorkspaceDir); err != nil {
 					fmt.Fprintf(os.Stderr, "warning: failed to remove workspace dir: %v\n", err)
 				}
 			}

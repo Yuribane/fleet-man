@@ -1,50 +1,6 @@
 package fleet
 
-import (
-	"fmt"
-	"time"
-)
-
-type InstanceStatus string
-
-const (
-	StatusCreating InstanceStatus = "creating"
-	StatusRunning  InstanceStatus = "running"
-	StatusStopped  InstanceStatus = "stopped"
-	StatusFailed   InstanceStatus = "failed"
-	StatusStopping InstanceStatus = "stopping"
-	StatusStarting InstanceStatus = "starting"
-	StatusDeleting InstanceStatus = "deleting"
-)
-
-// BackendType identifies which backend an instance uses.
-type BackendType string
-
-const (
-	BackendDevcontainer BackendType = "devcontainer"
-	BackendCoder        BackendType = "coder"
-	BackendCodespaces   BackendType = "codespaces"
-)
-
-// ParseBackendType validates a CLI/backend string and returns its BackendType.
-func ParseBackendType(value string) (BackendType, error) {
-	switch BackendType(value) {
-	case BackendDevcontainer:
-		return BackendDevcontainer, nil
-	case BackendCoder:
-		return BackendCoder, nil
-	case BackendCodespaces:
-		return BackendCodespaces, nil
-	default:
-		return "", fmt.Errorf("invalid backend %q (valid: devcontainer, coder, codespaces)", value)
-	}
-}
-
-// ValidateBackendType returns an error if bt is not a known backend.
-func ValidateBackendType(bt BackendType) error {
-	_, err := ParseBackendType(string(bt))
-	return err
-}
+import "time"
 
 // Instance represents a single devcontainer workspace in a fleet.
 //

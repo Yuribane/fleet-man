@@ -104,14 +104,14 @@ var proxySetupScript = privoxyEnsureInstalled +
 //	  +-----------------------+
 func openBrowserProxyCmd(
 	pf *portforward.Manager,
-	b backend.Backend,
-	inst *fleet.Instance,
+	instanceBackend backend.Backend,
+	instance *fleet.Instance,
 	instanceKey string,
 ) tea.Cmd {
 	// Capture values for the goroutine.
-	workspaceDir := inst.WorkspaceDir
-	containerID := inst.ContainerID
-	instanceName := inst.Name
+	workspaceDir := instance.WorkspaceDir
+	containerID := instance.ContainerID
+	instanceName := instance.Name
 
 	return func() tea.Msg {
 		// 1. Reuse an existing browser proxy forward if one exists.
@@ -124,9 +124,9 @@ func openBrowserProxyCmd(
 			localPort, err = pf.AddBrowserProxy(
 				instanceKey,
 				browserProxyPort,
-				b.PortForwardCommand,
+				instanceBackend.PortForwardCommand,
 				containerID,
-				b.ResolveHostname,
+				instanceBackend.ResolveHostname,
 			)
 			if err != nil {
 				return browserProxyMsg{instanceKey: instanceKey, err: fmt.Errorf("port forward: %w", err)}
@@ -134,7 +134,7 @@ func openBrowserProxyCmd(
 		}
 
 		// 3. Ensure privoxy is installed and running inside the container.
-		if err := ensureProxyRunning(b, workspaceDir); err != nil {
+		if err := ensureProxyRunning(instanceBackend, workspaceDir); err != nil {
 			return browserProxyMsg{instanceKey: instanceKey, err: err}
 		}
 
@@ -153,8 +153,8 @@ func openBrowserProxyCmd(
 
 // ensureProxyRunning shells into the container and runs the proxy setup
 // script. It returns an error if privoxy cannot be installed or started.
-func ensureProxyRunning(b backend.Backend, workspaceDir string) error {
-	cmd := b.ExecCommand(workspaceDir, []string{"sh", "-c", proxySetupScript})
+func ensureProxyRunning(instanceBackend backend.Backend, workspaceDir string) error {
+	cmd := instanceBackend.ExecCommand(workspaceDir, []string{"sh", "-c", proxySetupScript})
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("proxy setup: %w (%s)", err, strings.TrimSpace(string(out)))

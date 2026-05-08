@@ -21,33 +21,33 @@ type Option func(*CodespacesBackend)
 
 // WithVerbose enables verbose output.
 func WithVerbose(v bool) Option {
-	return func(b *CodespacesBackend) { b.verbose = v }
+	return func(codespacesBackend *CodespacesBackend) { codespacesBackend.verbose = v }
 }
 
 // WithRepo sets the GitHub repository (owner/repo) for codespace creation.
 func WithRepo(repo string) Option {
-	return func(b *CodespacesBackend) { b.repo = repo }
+	return func(codespacesBackend *CodespacesBackend) { codespacesBackend.repo = repo }
 }
 
 // WithMachine sets the machine type for codespace creation.
 func WithMachine(machine string) Option {
-	return func(b *CodespacesBackend) { b.machine = machine }
+	return func(codespacesBackend *CodespacesBackend) { codespacesBackend.machine = machine }
 }
 
 // WithIdleTimeout sets the idle timeout duration string (e.g. "30m").
 func WithIdleTimeout(timeout string) Option {
-	return func(b *CodespacesBackend) { b.idleTimeout = timeout }
+	return func(codespacesBackend *CodespacesBackend) { codespacesBackend.idleTimeout = timeout }
 }
 
 // WithDevcontainerPath sets the path to the devcontainer.json within the repo.
 func WithDevcontainerPath(path string) Option {
-	return func(b *CodespacesBackend) { b.devcontainerPath = path }
+	return func(codespacesBackend *CodespacesBackend) { codespacesBackend.devcontainerPath = path }
 }
 
 // WithBranch sets the repository branch the codespace is created from.
 // An empty string lets GitHub pick the repository's default branch.
 func WithBranch(branch string) Option {
-	return func(b *CodespacesBackend) { b.branch = branch }
+	return func(codespacesBackend *CodespacesBackend) { codespacesBackend.branch = branch }
 }
 
 // ===========================================
@@ -79,14 +79,14 @@ type CodespacesBackend struct {
 
 // New creates a new CodespacesBackend.
 func New(opts ...Option) *CodespacesBackend {
-	b := &CodespacesBackend{
+	codespacesBackend := &CodespacesBackend{
 		nameCache:  make(map[string]string),
 		sshConfigs: make(map[string]sshConfig),
 	}
 	for _, o := range opts {
-		o(b)
+		o(codespacesBackend)
 	}
-	return b
+	return codespacesBackend
 }
 
 // RegisterName associates a workspace dir with its real codespace name.
@@ -94,16 +94,16 @@ func New(opts ...Option) *CodespacesBackend {
 // when called from contexts that know the container ID (e.g. the TUI).
 // Also loads any existing SSH config from disk so that native SSH is
 // used for subsequent commands.
-func (b *CodespacesBackend) RegisterName(workspaceDir, codespace string) {
-	b.nameCache[workspaceDir] = codespace
-	b.loadSSHConfig(codespace, workspaceDir)
+func (codespacesBackend *CodespacesBackend) RegisterName(workspaceDir, codespace string) {
+	codespacesBackend.nameCache[workspaceDir] = codespace
+	codespacesBackend.loadSSHConfig(codespace, workspaceDir)
 }
 
 // resolveCodespaceName returns the real codespace name for a workspace dir.
 // Checks the cache first (populated by Up or RegisterName), then falls
 // back to deriving from the path.
-func (b *CodespacesBackend) resolveCodespaceName(workspaceDir string) string {
-	if name, ok := b.nameCache[workspaceDir]; ok {
+func (codespacesBackend *CodespacesBackend) resolveCodespaceName(workspaceDir string) string {
+	if name, ok := codespacesBackend.nameCache[workspaceDir]; ok {
 		return name
 	}
 	return codespaceName(workspaceDir)
@@ -115,21 +115,21 @@ func (b *CodespacesBackend) resolveCodespaceName(workspaceDir string) string {
 
 // Up creates a GitHub Codespace. workspaceDir is used to derive the display
 // name. The repo is set via WithRepo at construction time.
-func (b *CodespacesBackend) Up(workspaceDir string) (*backend.UpResult, error) {
+func (codespacesBackend *CodespacesBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 	displayName := codespaceName(workspaceDir)
 
-	args := []string{"codespace", "create", "--repo", b.repo, "--display-name", displayName}
-	if b.branch != "" {
-		args = append(args, "--branch", b.branch)
+	args := []string{"codespace", "create", "--repo", codespacesBackend.repo, "--display-name", displayName}
+	if codespacesBackend.branch != "" {
+		args = append(args, "--branch", codespacesBackend.branch)
 	}
-	if b.machine != "" {
-		args = append(args, "--machine", b.machine)
+	if codespacesBackend.machine != "" {
+		args = append(args, "--machine", codespacesBackend.machine)
 	}
-	if b.idleTimeout != "" {
-		args = append(args, "--idle-timeout", b.idleTimeout)
+	if codespacesBackend.idleTimeout != "" {
+		args = append(args, "--idle-timeout", codespacesBackend.idleTimeout)
 	}
-	if b.devcontainerPath != "" {
-		args = append(args, "--devcontainer-path", b.devcontainerPath)
+	if codespacesBackend.devcontainerPath != "" {
+		args = append(args, "--devcontainer-path", codespacesBackend.devcontainerPath)
 	}
 
 	cmd := exec.Command("gh", args...)
@@ -159,16 +159,16 @@ func (b *CodespacesBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 	}
 
 	// Cache the real name so ExecCommand can find it later.
-	b.nameCache[workspaceDir] = csName
+	codespacesBackend.nameCache[workspaceDir] = csName
 
 	// Wait for the codespace to become available.
-	if err := b.waitForState(csName, "Available", 5*time.Minute); err != nil {
+	if err := codespacesBackend.waitForState(csName, "Available", 5*time.Minute); err != nil {
 		return nil, err
 	}
 
 	// Generate SSH config for native SSH access with proper PTY support.
 	// Non-fatal: methods fall back to gh codespace ssh if this fails.
-	_, _ = b.generateSSHConfig(csName, workspaceDir)
+	_, _ = codespacesBackend.generateSSHConfig(csName, workspaceDir)
 
 	return &backend.UpResult{
 		Outcome:               "success",
@@ -179,22 +179,22 @@ func (b *CodespacesBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 }
 
 // Down deletes a codespace permanently.
-func (b *CodespacesBackend) Down(containerID string) error {
-	delete(b.sshConfigs, containerID)
+func (codespacesBackend *CodespacesBackend) Down(containerID string) error {
+	delete(codespacesBackend.sshConfigs, containerID)
 	cmd := exec.Command("gh", "codespace", "delete", "-c", containerID, "--force")
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
 // Stop stops a running codespace.
-func (b *CodespacesBackend) Stop(containerID string) error {
+func (codespacesBackend *CodespacesBackend) Stop(containerID string) error {
 	cmd := exec.Command("gh", "codespace", "stop", "-c", containerID)
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
 // Start resumes a stopped codespace using the GitHub REST API.
-func (b *CodespacesBackend) Start(containerID string) error {
+func (codespacesBackend *CodespacesBackend) Start(containerID string) error {
 	cmd := exec.Command("gh", "api", "-X", "POST",
 		fmt.Sprintf("/user/codespaces/%s/start", containerID))
 	cmd.Stderr = os.Stderr
@@ -202,7 +202,7 @@ func (b *CodespacesBackend) Start(containerID string) error {
 		return fmt.Errorf("gh api start codespace: %w", err)
 	}
 
-	return b.waitForState(containerID, "Available", 5*time.Minute)
+	return codespacesBackend.waitForState(containerID, "Available", 5*time.Minute)
 }
 
 // ===========================================
@@ -210,9 +210,9 @@ func (b *CodespacesBackend) Start(containerID string) error {
 // ===========================================
 
 // Exec runs an interactive command inside a codespace via SSH.
-func (b *CodespacesBackend) Exec(workspaceDir string, command []string) error {
-	name := b.resolveCodespaceName(workspaceDir)
-	cmd := b.sshCommand(name, command, true)
+func (codespacesBackend *CodespacesBackend) Exec(workspaceDir string, command []string) error {
+	name := codespacesBackend.resolveCodespaceName(workspaceDir)
+	cmd := codespacesBackend.sshCommand(name, command, true)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -221,9 +221,9 @@ func (b *CodespacesBackend) Exec(workspaceDir string, command []string) error {
 
 // ExecCommand returns an unstarted *exec.Cmd for running a command
 // inside a codespace via SSH.
-func (b *CodespacesBackend) ExecCommand(workspaceDir string, command []string) *exec.Cmd {
-	name := b.resolveCodespaceName(workspaceDir)
-	return b.sshCommand(name, command, true)
+func (codespacesBackend *CodespacesBackend) ExecCommand(workspaceDir string, command []string) *exec.Cmd {
+	name := codespacesBackend.resolveCodespaceName(workspaceDir)
+	return codespacesBackend.sshCommand(name, command, true)
 }
 
 // ===========================================
@@ -232,7 +232,7 @@ func (b *CodespacesBackend) ExecCommand(workspaceDir string, command []string) *
 
 // Stats returns CPU and memory usage for the given codespace names.
 // Uses SSH to read process stats from each codespace concurrently.
-func (b *CodespacesBackend) Stats(containerIDs []string) (map[string]*backend.ContainerStats, error) {
+func (codespacesBackend *CodespacesBackend) Stats(containerIDs []string) (map[string]*backend.ContainerStats, error) {
 	if len(containerIDs) == 0 {
 		return nil, nil
 	}
@@ -246,7 +246,7 @@ func (b *CodespacesBackend) Stats(containerIDs []string) (map[string]*backend.Co
 	ch := make(chan statsResult, len(containerIDs))
 	for _, id := range containerIDs {
 		go func(csName string) {
-			s, err := b.fetchStats(csName)
+			s, err := codespacesBackend.fetchStats(csName)
 			ch <- statsResult{csName, s, err}
 		}(id)
 	}
@@ -263,7 +263,7 @@ func (b *CodespacesBackend) Stats(containerIDs []string) (map[string]*backend.Co
 }
 
 // Logs streams codespace creation logs.
-func (b *CodespacesBackend) Logs(containerID string, follow bool) error {
+func (codespacesBackend *CodespacesBackend) Logs(containerID string, follow bool) error {
 	args := []string{"codespace", "logs", "-c", containerID}
 	if follow {
 		args = append(args, "--follow")
@@ -276,7 +276,7 @@ func (b *CodespacesBackend) Logs(containerID string, follow bool) error {
 }
 
 // LogsCommand returns an unstarted *exec.Cmd for streaming codespace logs.
-func (b *CodespacesBackend) LogsCommand(containerID string, follow bool) *exec.Cmd {
+func (codespacesBackend *CodespacesBackend) LogsCommand(containerID string, follow bool) *exec.Cmd {
 	args := []string{"codespace", "logs", "-c", containerID}
 	if follow {
 		args = append(args, "--follow")
@@ -286,8 +286,8 @@ func (b *CodespacesBackend) LogsCommand(containerID string, follow bool) *exec.C
 
 // CaptureAllSessions lists and captures every tmux session inside a
 // codespace in a single SSH round trip.
-func (b *CodespacesBackend) CaptureAllSessions(containerID string) backend.AllSessions {
-	cmd := b.sshCommand(containerID, []string{backend.CaptureAllScript}, false)
+func (codespacesBackend *CodespacesBackend) CaptureAllSessions(containerID string) backend.AllSessions {
+	cmd := codespacesBackend.sshCommand(containerID, []string{backend.CaptureAllScript}, false)
 	out, err := cmd.Output()
 	if err != nil {
 		return backend.AllSessions{OK: false}
@@ -296,8 +296,8 @@ func (b *CodespacesBackend) CaptureAllSessions(containerID string) backend.AllSe
 }
 
 // AgentToolProbe detects which agent tool is running inside a codespace.
-func (b *CodespacesBackend) AgentToolProbe(containerID string) (string, bool) {
-	cmd := b.sshCommand(containerID, []string{backend.ToolProbeScript}, false)
+func (codespacesBackend *CodespacesBackend) AgentToolProbe(containerID string) (string, bool) {
+	cmd := codespacesBackend.sshCommand(containerID, []string{backend.ToolProbeScript}, false)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", false
@@ -310,8 +310,8 @@ func (b *CodespacesBackend) AgentToolProbe(containerID string) (string, bool) {
 // ===========================================
 
 // EditorURI returns a VS Code URI for connecting to a GitHub Codespace.
-func (b *CodespacesBackend) EditorURI(workspaceDir string, projectName string) (string, bool) {
-	name := b.resolveCodespaceName(workspaceDir)
+func (codespacesBackend *CodespacesBackend) EditorURI(workspaceDir string, projectName string) (string, bool) {
+	name := codespacesBackend.resolveCodespaceName(workspaceDir)
 	uri := fmt.Sprintf("vscode://github.codespaces/connect?name=%s", name)
 	return uri, true
 }
@@ -321,14 +321,14 @@ func (b *CodespacesBackend) EditorURI(workspaceDir string, projectName string) (
 //
 // gh expects the mapping as "<remote-port>:<local-port>", which is the
 // opposite order from `coder port-forward --tcp=<local>:<remote>`.
-func (b *CodespacesBackend) PortForwardCommand(containerID string, localPort, remotePort int) *exec.Cmd {
+func (codespacesBackend *CodespacesBackend) PortForwardCommand(containerID string, localPort, remotePort int) *exec.Cmd {
 	mapping := fmt.Sprintf("%d:%d", remotePort, localPort)
 	return exec.Command("gh", "codespace", "ports", "forward", mapping, "-c", containerID)
 }
 
 // ResolveHostname returns ("", false) for GitHub Codespaces because they
 // are remote and not directly reachable by IP from the host.
-func (b *CodespacesBackend) ResolveHostname(containerID string) (string, bool) {
+func (codespacesBackend *CodespacesBackend) ResolveHostname(containerID string) (string, bool) {
 	return "", false
 }
 
@@ -364,7 +364,7 @@ func sshArgs(csName string, command []string) []string {
 }
 
 // getCodespace fetches codespace details via `gh codespace view`.
-func (b *CodespacesBackend) getCodespace(name string) (*codespaceInfo, error) {
+func (codespacesBackend *CodespacesBackend) getCodespace(name string) (*codespaceInfo, error) {
 	cmd := exec.Command("gh", "codespace", "view", "-c", name, "--json", "name,displayName,state")
 	out, err := cmd.Output()
 	if err != nil {
@@ -380,11 +380,11 @@ func (b *CodespacesBackend) getCodespace(name string) (*codespaceInfo, error) {
 }
 
 // waitForState polls until the codespace reaches the desired state or times out.
-func (b *CodespacesBackend) waitForState(name, desiredState string, timeout time.Duration) error {
+func (codespacesBackend *CodespacesBackend) waitForState(name, desiredState string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 
 	for time.Now().Before(deadline) {
-		info, err := b.getCodespace(name)
+		info, err := codespacesBackend.getCodespace(name)
 		if err == nil && info.State == desiredState {
 			return nil
 		}
@@ -395,8 +395,8 @@ func (b *CodespacesBackend) waitForState(name, desiredState string, timeout time
 }
 
 // fetchStats reads CPU and memory stats from a codespace via SSH.
-func (b *CodespacesBackend) fetchStats(csName string) (*backend.ContainerStats, error) {
-	cmd := b.sshCommand(csName, []string{"ps", "-eo", "pcpu=,rss=", "--no-headers"}, false)
+func (codespacesBackend *CodespacesBackend) fetchStats(csName string) (*backend.ContainerStats, error) {
+	cmd := codespacesBackend.sshCommand(csName, []string{"ps", "-eo", "pcpu=,rss=", "--no-headers"}, false)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err

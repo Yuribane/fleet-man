@@ -9,13 +9,13 @@ import (
 func TestLoadConfigReturnsDefaultsWhenMissing(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	cfg, err := LoadConfig()
+	config, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	if cfg.AgentSettings.ToolSelection != AgentToolClaude {
-		t.Fatalf("ToolSelection = %q, want %q", cfg.AgentSettings.ToolSelection, AgentToolClaude)
+	if config.AgentSettings.ToolSelection != AgentToolClaude {
+		t.Fatalf("ToolSelection = %q, want %q", config.AgentSettings.ToolSelection, AgentToolClaude)
 	}
 }
 
@@ -29,13 +29,13 @@ func TestLoadConfigAppliesDefaultsToEmptyJSON(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	cfg, err := LoadConfig()
+	config, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	if cfg.AgentSettings.ToolSelection != AgentToolClaude {
-		t.Fatalf("ToolSelection = %q, want %q", cfg.AgentSettings.ToolSelection, AgentToolClaude)
+	if config.AgentSettings.ToolSelection != AgentToolClaude {
+		t.Fatalf("ToolSelection = %q, want %q", config.AgentSettings.ToolSelection, AgentToolClaude)
 	}
 }
 
@@ -63,13 +63,13 @@ func TestLoadConfigPreservesValidToolSelections(t *testing.T) {
 				t.Fatalf("WriteFile() error = %v", err)
 			}
 
-			cfg, err := LoadConfig()
+			config, err := LoadConfig()
 			if err != nil {
 				t.Fatalf("LoadConfig() error = %v", err)
 			}
 
-			if cfg.AgentSettings.ToolSelection != tt.tool {
-				t.Fatalf("ToolSelection = %q, want %q", cfg.AgentSettings.ToolSelection, tt.tool)
+			if config.AgentSettings.ToolSelection != tt.tool {
+				t.Fatalf("ToolSelection = %q, want %q", config.AgentSettings.ToolSelection, tt.tool)
 			}
 		})
 	}
@@ -85,13 +85,13 @@ func TestLoadConfigDefaultsInvalidToolSelection(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	cfg, err := LoadConfig()
+	config, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	if cfg.AgentSettings.ToolSelection != AgentToolClaude {
-		t.Fatalf("ToolSelection = %q, want %q", cfg.AgentSettings.ToolSelection, AgentToolClaude)
+	if config.AgentSettings.ToolSelection != AgentToolClaude {
+		t.Fatalf("ToolSelection = %q, want %q", config.AgentSettings.ToolSelection, AgentToolClaude)
 	}
 }
 
@@ -139,16 +139,16 @@ func TestSaveConfigRoundTrip(t *testing.T) {
 func TestLoadConfigDefaultDotfilesSettings(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	cfg, err := LoadConfig()
+	config, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	if cfg.DotfilesSettings.RepoURL != "" {
-		t.Fatalf("RepoURL = %q, want empty", cfg.DotfilesSettings.RepoURL)
+	if config.DotfilesSettings.RepoURL != "" {
+		t.Fatalf("RepoURL = %q, want empty", config.DotfilesSettings.RepoURL)
 	}
-	if cfg.DotfilesSettings.InstallScript != "" {
-		t.Fatalf("InstallScript = %q, want empty", cfg.DotfilesSettings.InstallScript)
+	if config.DotfilesSettings.InstallScript != "" {
+		t.Fatalf("InstallScript = %q, want empty", config.DotfilesSettings.InstallScript)
 	}
 }
 
@@ -234,12 +234,12 @@ func TestSaveConfigRoundTripAutoInstall(t *testing.T) {
 func TestTmuxVimKeysDefaultsToTrue(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	cfg, err := LoadConfig()
+	config, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	if !cfg.GeneralSettings.TmuxVimKeysEnabled() {
+	if !config.GeneralSettings.TmuxVimKeysEnabled() {
 		t.Fatal("TmuxVimKeysEnabled() = false, want true (default)")
 	}
 }
@@ -272,19 +272,19 @@ func TestSaveConfigRoundTripTmuxVimKeys(t *testing.T) {
 }
 
 func TestApplyDefaultsTrimsDotfilesWhitespace(t *testing.T) {
-	cfg := &Config{
+	config := &Config{
 		DotfilesSettings: DotfilesSettings{
 			RepoURL:       "  https://github.com/user/dotfiles  ",
 			InstallScript: "  install.sh\n",
 		},
 	}
 
-	cfg.applyDefaults()
+	config.applyDefaults()
 
-	if cfg.DotfilesSettings.RepoURL != "https://github.com/user/dotfiles" {
-		t.Fatalf("RepoURL = %q, want trimmed", cfg.DotfilesSettings.RepoURL)
+	if config.DotfilesSettings.RepoURL != "https://github.com/user/dotfiles" {
+		t.Fatalf("RepoURL = %q, want trimmed", config.DotfilesSettings.RepoURL)
 	}
-	if cfg.DotfilesSettings.InstallScript != "install.sh" {
-		t.Fatalf("InstallScript = %q, want trimmed", cfg.DotfilesSettings.InstallScript)
+	if config.DotfilesSettings.InstallScript != "install.sh" {
+		t.Fatalf("InstallScript = %q, want trimmed", config.DotfilesSettings.InstallScript)
 	}
 }

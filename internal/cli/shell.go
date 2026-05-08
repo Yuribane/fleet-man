@@ -43,15 +43,15 @@ existing group, or --session to reconnect to a specific named session.`,
 				return fmt.Errorf("fleet %q not found", target.Fleet)
 			}
 
-			inst, err := f.GetInstance(target.Instance)
+			instance, err := f.GetInstance(target.Instance)
 			if err != nil {
 				return err
 			}
 
-			cfg, _ := state.LoadConfig()
+			config, _ := state.LoadConfig()
 			nested := os.Getenv("TMUX") != ""
 
-			sanitized := tui.SanitizeSessionName(inst.Name)
+			sanitized := tui.SanitizeSessionName(instance.Name)
 			var sessionName string
 			switch {
 			case sessionFlag != "":
@@ -85,9 +85,9 @@ existing group, or --session to reconnect to a specific named session.`,
 
 			cols, rows := termSize()
 
-			shellCmd := tui.ShellCommandForSession(cfg, sessionName, cols, rows, nested)
-			dc := backendutil.NewForInstance(inst, false)
-			execCmd := dc.ExecCommand(inst.WorkspaceDir, shellCmd)
+			shellCmd := tui.ShellCommandForSession(config, sessionName, cols, rows, nested)
+			instanceBackend := backendutil.NewForInstance(instance, false)
+			execCmd := instanceBackend.ExecCommand(instance.WorkspaceDir, shellCmd)
 			execCmd.Stdin = os.Stdin
 			execCmd.Stdout = os.Stdout
 			execCmd.Stderr = os.Stderr

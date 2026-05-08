@@ -13,8 +13,8 @@ type containerController interface {
 	Stop(containerID string) error
 }
 
-var newClient = func(bt fleet.BackendType) containerController {
-	return backendutil.New(bt, false)
+var newClient = func(backendType fleet.BackendType) containerController {
+	return backendutil.New(backendType, false)
 }
 
 type Result struct {
@@ -34,77 +34,77 @@ func StartInstance(fleetName, instanceName string) (*Result, error) {
 }
 
 func ToggleInstance(fleetName, instanceName string) (*Result, error) {
-	st, _, inst, err := loadInstance(fleetName, instanceName)
+	st, _, instance, err := loadInstance(fleetName, instanceName)
 	if err != nil {
 		return nil, err
 	}
 
-	switch inst.Status {
+	switch instance.Status {
 	case fleet.StatusRunning, fleet.StatusStopping:
-		return transitionLoadedInstance(st, inst, fleetName, instanceName, fleet.StatusStopped)
+		return transitionLoadedInstance(st, instance, fleetName, instanceName, fleet.StatusStopped)
 	case fleet.StatusStopped, fleet.StatusStarting:
-		return transitionLoadedInstance(st, inst, fleetName, instanceName, fleet.StatusRunning)
+		return transitionLoadedInstance(st, instance, fleetName, instanceName, fleet.StatusRunning)
 	default:
-		return nil, fmt.Errorf("instance %s/%s cannot be toggled from status %q", fleetName, instanceName, inst.Status)
+		return nil, fmt.Errorf("instance %s/%s cannot be toggled from status %q", fleetName, instanceName, instance.Status)
 	}
 }
 
 func transitionInstance(fleetName, instanceName string, targetStatus fleet.InstanceStatus) (*Result, error) {
-	st, _, inst, err := loadInstance(fleetName, instanceName)
+	st, _, instance, err := loadInstance(fleetName, instanceName)
 	if err != nil {
 		return nil, err
 	}
 
-	return transitionLoadedInstance(st, inst, fleetName, instanceName, targetStatus)
+	return transitionLoadedInstance(st, instance, fleetName, instanceName, targetStatus)
 }
 
-func transitionLoadedInstance(st *state.State, inst *fleet.Instance, fleetName, instanceName string, targetStatus fleet.InstanceStatus) (*Result, error) {
+func transitionLoadedInstance(st *state.State, instance *fleet.Instance, fleetName, instanceName string, targetStatus fleet.InstanceStatus) (*Result, error) {
 	result := &Result{
 		FleetName:      fleetName,
 		InstanceName:   instanceName,
-		PreviousStatus: inst.Status,
-		Status:         inst.Status,
+		PreviousStatus: instance.Status,
+		Status:         instance.Status,
 	}
 
-	if inst.Status == targetStatus {
+	if instance.Status == targetStatus {
 		return result, nil
 	}
 
-	if inst.ContainerID == "" {
+	if instance.ContainerID == "" {
 		return nil, fmt.Errorf("instance %s/%s has no container ID", fleetName, instanceName)
 	}
 
-	dc := newClient(inst.Backend)
+	instanceBackend := newClient(instance.Backend)
 
 	switch targetStatus {
 	case fleet.StatusStopped:
-		if inst.Status != fleet.StatusRunning && inst.Status != fleet.StatusStopping {
-			return nil, fmt.Errorf("instance %s/%s cannot be stopped from status %q", fleetName, instanceName, inst.Status)
+		if instance.Status != fleet.StatusRunning && instance.Status != fleet.StatusStopping {
+			return nil, fmt.Errorf("instance %s/%s cannot be stopped from status %q", fleetName, instanceName, instance.Status)
 		}
-		if err := dc.Stop(inst.ContainerID); err != nil {
+		if err := instanceBackend.Stop(instance.ContainerID); err != nil {
 			return nil, fmt.Errorf("stop instance %s/%s: %w", fleetName, instanceName, err)
 		}
 	case fleet.StatusRunning:
-		if inst.Status != fleet.StatusStopped && inst.Status != fleet.StatusStarting {
-			return nil, fmt.Errorf("instance %s/%s cannot be started from status %q", fleetName, instanceName, inst.Status)
+		if instance.Status != fleet.StatusStopped && instance.Status != fleet.StatusStarting {
+			return nil, fmt.Errorf("instance %s/%s cannot be started from status %q", fleetName, instanceName, instance.Status)
 		}
-		if err := dc.Start(inst.ContainerID); err != nil {
+		if err := instanceBackend.Start(instance.ContainerID); err != nil {
 			return nil, fmt.Errorf("start instance %s/%s: %w", fleetName, instanceName, err)
 		}
 	default:
 		return nil, fmt.Errorf("unsupported target status %q", targetStatus)
 	}
 
-	inst.Status = targetStatus
+	instance.Status = targetStatus
 	if targetStatus == fleet.StatusRunning {
-		inst.Error = ""
+		instance.Error = ""
 	}
 
 	if err := state.Save(st); err != nil {
 		return nil, err
 	}
 
-	result.Status = inst.Status
+	result.Status = instance.Status
 	result.Changed = true
 	return result, nil
 }
@@ -120,10 +120,10 @@ func loadInstance(fleetName, instanceName string) (*state.State, *fleet.Fleet, *
 		return nil, nil, nil, fmt.Errorf("fleet %q not found", fleetName)
 	}
 
-	inst, err := f.GetInstance(instanceName)
+	instance, err := f.GetInstance(instanceName)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	return st, f, inst, nil
+	return st, f, instance, nil
 }

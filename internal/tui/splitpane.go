@@ -304,8 +304,8 @@ func paneSessionOrder() []string {
 // in pane index order to preserve the session-to-position mapping. When
 // st is non-nil the layout is also mirrored into state.json so it
 // survives a fleet restart.
-func (fp *fleetPage) saveCurrentGroupLayout(st *state.State) {
-	if fp.activeGroupID == "" || fp.splitInstance == "" {
+func (fleetPage *fleetPage) saveCurrentGroupLayout(st *state.State) {
+	if fleetPage.activeGroupID == "" || fleetPage.splitInstance == "" {
 		return
 	}
 
@@ -322,8 +322,8 @@ func (fp *fleetPage) saveCurrentGroupLayout(st *state.State) {
 	}
 
 	sg := savedGroup{
-		GroupID:      fp.activeGroupID,
-		InstanceName: fp.splitInstance,
+		GroupID:      fleetPage.activeGroupID,
+		InstanceName: fleetPage.splitInstance,
 		Sessions:     sessionNames,
 		Layout:       tmuxLayoutString(),
 		PaneCount:    len(sessionNames),
@@ -332,10 +332,10 @@ func (fp *fleetPage) saveCurrentGroupLayout(st *state.State) {
 	// No-op when nothing changed. The 250ms layout tick fires this
 	// constantly; without this gate an idle split would rewrite
 	// state.json every tick with identical bytes.
-	if existing, ok := fp.savedGroups[fp.activeGroupID]; ok && sameSavedGroup(existing, sg) {
+	if existing, ok := fleetPage.savedGroups[fleetPage.activeGroupID]; ok && sameSavedGroup(existing, sg) {
 		return
 	}
-	fp.savedGroups[fp.activeGroupID] = sg
+	fleetPage.savedGroups[fleetPage.activeGroupID] = sg
 
 	if st == nil {
 		return
@@ -343,7 +343,7 @@ func (fp *fleetPage) saveCurrentGroupLayout(st *state.State) {
 	if st.GroupLayouts == nil {
 		st.GroupLayouts = make(map[string]state.GroupLayout)
 	}
-	st.GroupLayouts[fp.activeGroupID] = state.GroupLayout{
+	st.GroupLayouts[fleetPage.activeGroupID] = state.GroupLayout{
 		GroupID:      sg.GroupID,
 		InstanceName: sg.InstanceName,
 		Sessions:     sg.Sessions,
@@ -357,24 +357,24 @@ func (fp *fleetPage) saveCurrentGroupLayout(st *state.State) {
 // Instead of trusting the saved session list (which may be stale), it
 // queries the inner tmux directly for sessions matching the group prefix.
 // Each discovered session gets its own pane via `fleet shell --session`.
-func (fp *fleetPage) restoreGroupCmd(m *model, fleetName string, inst *fleet.Instance, groupID string) tea.Cmd {
-	b := m.instanceBackend(inst)
-	instanceName := inst.Name
+func (fleetPage *fleetPage) restoreGroupCmd(m *model, fleetName string, instance *fleet.Instance, groupID string) tea.Cmd {
+	instanceBackend := m.instanceBackend(instance)
+	instanceName := instance.Name
 	qualifiedName := fleetName + "/" + instanceName
-	workspaceDir := inst.WorkspaceDir
+	workspaceDir := instance.WorkspaceDir
 	sanitized := SanitizeSessionName(instanceName)
 	prefix := sanitized + groupSep + groupID
 
 	// Grab saved layout if available.
 	savedLayout := ""
-	if sg, ok := fp.savedGroups[groupID]; ok {
+	if sg, ok := fleetPage.savedGroups[groupID]; ok {
 		savedLayout = sg.Layout
 	}
 
 	// Prefer saved session order (from pane titles) to preserve
 	// the exact pane-to-session mapping.
 	var savedOrder []string
-	if sg, ok := fp.savedGroups[groupID]; ok && len(sg.Sessions) > 0 {
+	if sg, ok := fleetPage.savedGroups[groupID]; ok && len(sg.Sessions) > 0 {
 		savedOrder = sg.Sessions
 	}
 
@@ -385,7 +385,7 @@ func (fp *fleetPage) restoreGroupCmd(m *model, fleetName string, inst *fleet.Ins
 		}
 
 		// Query the inner tmux for all sessions in this group.
-		listCmd := b.ExecCommand(workspaceDir, []string{
+		listCmd := instanceBackend.ExecCommand(workspaceDir, []string{
 			"sh", "-c",
 			`tmux list-sessions -F "#{session_name}" 2>/dev/null`,
 		})

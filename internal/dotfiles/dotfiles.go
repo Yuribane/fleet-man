@@ -16,12 +16,12 @@ func ShQuote(s string) string {
 // SetupScript returns the raw shell snippet for dotfiles installation
 // regardless of the auto-install setting. Returns empty if dotfiles are not
 // configured (repo URL or install script missing).
-func SetupScript(cfg *state.Config) string {
-	if cfg == nil {
+func SetupScript(config *state.Config) string {
+	if config == nil {
 		return ""
 	}
-	repo := cfg.DotfilesSettings.RepoURL
-	script := cfg.DotfilesSettings.InstallScript
+	repo := config.DotfilesSettings.RepoURL
+	script := config.DotfilesSettings.InstallScript
 	if repo == "" || script == "" {
 		return ""
 	}

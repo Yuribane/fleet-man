@@ -89,7 +89,7 @@ func TestUpdateSettingsNavUpDown(t *testing.T) {
 	sp := newSettingsPage()
 	fp := newFleetPage()
 	m := &model{
-		cfg:          state.DefaultConfig(),
+		config:          state.DefaultConfig(),
 		toolStatus:   allToolsFound(),
 		currentPage:  sp,
 		fleetPage:    fp,
@@ -158,7 +158,7 @@ func TestUpdateSettingsEnterEditingDotfiles(t *testing.T) {
 	sp := newSettingsPage()
 	fp := newFleetPage()
 	m := &model{
-		cfg:          state.DefaultConfig(),
+		config:          state.DefaultConfig(),
 		toolStatus:   allToolsFound(),
 		currentPage:  sp,
 		fleetPage:    fp,
@@ -187,7 +187,7 @@ func TestUpdateSettingsEditingSavesOnEnter(t *testing.T) {
 	}
 	fp := newFleetPage()
 	m := &model{
-		cfg:          state.DefaultConfig(),
+		config:          state.DefaultConfig(),
 		toolStatus:   allToolsFound(),
 		currentPage:  sp,
 		fleetPage:    fp,
@@ -201,16 +201,16 @@ func TestUpdateSettingsEditingSavesOnEnter(t *testing.T) {
 	if sp.editing {
 		t.Fatal("editing should be false after enter")
 	}
-	if m.cfg.DotfilesSettings.RepoURL != "https://github.com/user/dotfiles" {
-		t.Fatalf("RepoURL = %q, want %q", m.cfg.DotfilesSettings.RepoURL, "https://github.com/user/dotfiles")
+	if m.config.DotfilesSettings.RepoURL != "https://github.com/user/dotfiles" {
+		t.Fatalf("RepoURL = %q, want %q", m.config.DotfilesSettings.RepoURL, "https://github.com/user/dotfiles")
 	}
 
-	cfg, err := state.LoadConfig()
+	config, err := state.LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	if cfg.DotfilesSettings.RepoURL != "https://github.com/user/dotfiles" {
-		t.Fatalf("persisted RepoURL = %q, want %q", cfg.DotfilesSettings.RepoURL, "https://github.com/user/dotfiles")
+	if config.DotfilesSettings.RepoURL != "https://github.com/user/dotfiles" {
+		t.Fatalf("persisted RepoURL = %q, want %q", config.DotfilesSettings.RepoURL, "https://github.com/user/dotfiles")
 	}
 }
 
@@ -218,8 +218,8 @@ func TestUpdateSettingsEditingCancelsOnEsc(t *testing.T) {
 	si := textinput.New()
 	si.CharLimit = 256
 
-	cfg := state.DefaultConfig()
-	cfg.DotfilesSettings.RepoURL = "original"
+	config := state.DefaultConfig()
+	config.DotfilesSettings.RepoURL = "original"
 
 	sp := &settingsPage{
 		editing: true,
@@ -227,7 +227,7 @@ func TestUpdateSettingsEditingCancelsOnEsc(t *testing.T) {
 	}
 	fp := newFleetPage()
 	m := &model{
-		cfg:          cfg,
+		config:          config,
 		toolStatus:   allToolsFound(),
 		currentPage:  sp,
 		fleetPage:    fp,
@@ -241,7 +241,7 @@ func TestUpdateSettingsEditingCancelsOnEsc(t *testing.T) {
 	if sp.editing {
 		t.Fatal("editing should be false after esc")
 	}
-	if m.cfg.DotfilesSettings.RepoURL != "original" {
-		t.Fatalf("RepoURL = %q, want %q (should not have changed)", m.cfg.DotfilesSettings.RepoURL, "original")
+	if m.config.DotfilesSettings.RepoURL != "original" {
+		t.Fatalf("RepoURL = %q, want %q (should not have changed)", m.config.DotfilesSettings.RepoURL, "original")
 	}
 }

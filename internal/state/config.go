@@ -8,80 +8,6 @@ import (
 	"strings"
 )
 
-type AgentTool string
-
-const (
-	AgentToolCodex   AgentTool = "codex"
-	AgentToolClaude  AgentTool = "claude"
-	AgentToolGemini  AgentTool = "gemini"
-	AgentToolCopilot AgentTool = "copilot"
-)
-
-var validAgentTools = map[AgentTool]struct{}{
-	AgentToolCodex:   {},
-	AgentToolClaude:  {},
-	AgentToolGemini:  {},
-	AgentToolCopilot: {},
-}
-
-// GeneralSettings holds general user preferences.
-type GeneralSettings struct {
-	TmuxVimKeys  *bool `json:"tmux_vim_keys,omitempty"`  // nil = true (default on)
-	ShowHelpText *bool `json:"show_help_text,omitempty"` // nil = true (default on)
-}
-
-// TmuxVimKeysEnabled reports whether vim-style tmux pane navigation is active.
-func (g GeneralSettings) TmuxVimKeysEnabled() bool {
-	if g.TmuxVimKeys == nil {
-		return true
-	}
-	return *g.TmuxVimKeys
-}
-
-// ShowHelpTextEnabled reports whether the help bar is visible on the main page.
-func (g GeneralSettings) ShowHelpTextEnabled() bool {
-	if g.ShowHelpText == nil {
-		return true
-	}
-	return *g.ShowHelpText
-}
-
-// AgentSettings holds AI agent preferences.
-type AgentSettings struct {
-	ToolSelection AgentTool `json:"tool_selection"`
-}
-
-// DotfilesSettings holds dotfiles repository preferences.
-type DotfilesSettings struct {
-	RepoURL       string `json:"repo_url"`
-	InstallScript string `json:"install_script"`
-	AutoInstall   bool   `json:"auto_install"`
-}
-
-// CoderParameter holds a single Coder template parameter binding.
-type CoderParameter struct {
-	Name         string `json:"name"`
-	Value        string `json:"value"`                    // may contain ${GIT_URL}, ${GIT_BRANCH}, ${INSTANCE_NAME}
-	DefaultValue string `json:"default_value,omitempty"`  // from template
-	DisplayName  string `json:"display_name,omitempty"`   // from template
-	Description  string `json:"description,omitempty"`    // from template
-	Type         string `json:"type,omitempty"`           // "string", "number"
-}
-
-// CoderSettings holds Coder deployment preferences.
-type CoderSettings struct {
-	Template   string           `json:"template"`
-	Preset     string           `json:"preset,omitempty"`
-	Parameters []CoderParameter `json:"parameters,omitempty"`
-}
-
-// CodespacesSettings holds GitHub Codespaces preferences.
-type CodespacesSettings struct {
-	Machine          string `json:"machine,omitempty"`           // machine type (e.g. "basicLinux32gb")
-	IdleTimeout      string `json:"idle_timeout,omitempty"`      // duration (e.g. "30m")
-	DevcontainerPath string `json:"devcontainer_path,omitempty"` // path to devcontainer.json in repo
-}
-
 // Config holds user preferences.
 type Config struct {
 	GeneralSettings    GeneralSettings    `json:"general_settings"`
@@ -101,6 +27,8 @@ func DefaultConfig() *Config {
 	}
 }
 
+// applyDefaults normalises the config in place: invalid agent tools fall
+// back to the default, and string fields are trimmed.
 func (c *Config) applyDefaults() {
 	if c == nil {
 		return

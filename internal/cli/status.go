@@ -33,9 +33,9 @@ func newStatusCmd() *cobra.Command {
 				fleetRunning := 0
 				fleetStopped := 0
 				fleetOther := 0
-				for _, inst := range f.Instances {
+				for _, instance := range f.Instances {
 					totalInstances++
-					switch inst.Status {
+					switch instance.Status {
 					case fleet.StatusRunning:
 						fleetRunning++
 						running++

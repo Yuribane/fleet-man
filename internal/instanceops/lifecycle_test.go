@@ -49,12 +49,12 @@ func TestStopInstanceTransitionsRunningToStopped(t *testing.T) {
 		t.Fatalf("StopInstance() stop calls = %v, want [abc123]", client.stopCalls)
 	}
 
-	inst := loadLifecycleInstance(t)
-	if inst.Status != fleet.StatusStopped {
-		t.Fatalf("saved status = %q, want %q", inst.Status, fleet.StatusStopped)
+	instance := loadLifecycleInstance(t)
+	if instance.Status != fleet.StatusStopped {
+		t.Fatalf("saved status = %q, want %q", instance.Status, fleet.StatusStopped)
 	}
-	if inst.ContainerID != "abc123" {
-		t.Fatalf("saved container ID = %q, want abc123", inst.ContainerID)
+	if instance.ContainerID != "abc123" {
+		t.Fatalf("saved container ID = %q, want abc123", instance.ContainerID)
 	}
 }
 
@@ -82,9 +82,9 @@ func TestStartInstanceTransitionsStoppedToRunning(t *testing.T) {
 		t.Fatalf("StartInstance() start calls = %v, want [abc123]", client.startCalls)
 	}
 
-	inst := loadLifecycleInstance(t)
-	if inst.Status != fleet.StatusRunning {
-		t.Fatalf("saved status = %q, want %q", inst.Status, fleet.StatusRunning)
+	instance := loadLifecycleInstance(t)
+	if instance.Status != fleet.StatusRunning {
+		t.Fatalf("saved status = %q, want %q", instance.Status, fleet.StatusRunning)
 	}
 }
 
@@ -134,7 +134,7 @@ func TestStartInstanceNoOpsWhenAlreadyRunning(t *testing.T) {
 
 func stubLifecycleClient(client containerController) func() {
 	prev := newClient
-	newClient = func(bt fleet.BackendType) containerController { return client }
+	newClient = func(backendType fleet.BackendType) containerController { return client }
 	return func() {
 		newClient = prev
 	}
@@ -179,9 +179,9 @@ func loadLifecycleInstance(t *testing.T) *fleet.Instance {
 		t.Fatal("fleet alpha not found after load")
 	}
 
-	inst, err := f.GetInstance("agent-1")
+	instance, err := f.GetInstance("agent-1")
 	if err != nil {
 		t.Fatalf("GetInstance() error = %v", err)
 	}
-	return inst
+	return instance
 }

@@ -19,7 +19,7 @@ type Option func(*DevcontainerBackend)
 
 // WithVerbose enables verbose output (sends devcontainer stderr to os.Stderr).
 func WithVerbose(v bool) Option {
-	return func(b *DevcontainerBackend) { b.verbose = v }
+	return func(devcontainerBackend *DevcontainerBackend) { devcontainerBackend.verbose = v }
 }
 
 // DevcontainerBackend implements backend.Backend using the devcontainer
@@ -33,22 +33,22 @@ type DevcontainerBackend struct {
 
 // New creates a new DevcontainerBackend.
 func New(opts ...Option) *DevcontainerBackend {
-	b := &DevcontainerBackend{userCache: make(map[string]string)}
+	devcontainerBackend := &DevcontainerBackend{userCache: make(map[string]string)}
 	for _, o := range opts {
-		o(b)
+		o(devcontainerBackend)
 	}
-	return b
+	return devcontainerBackend
 }
 
 // containerUser returns the non-root user inside the container, caching
 // the result to avoid a docker exec round-trip on every poll.
-func (b *DevcontainerBackend) containerUser(containerID string) string {
-	b.userCacheMu.Lock()
-	if u, ok := b.userCache[containerID]; ok {
-		b.userCacheMu.Unlock()
-		return u
+func (devcontainerBackend *DevcontainerBackend) containerUser(containerID string) string {
+	devcontainerBackend.userCacheMu.Lock()
+	if cached, ok := devcontainerBackend.userCache[containerID]; ok {
+		devcontainerBackend.userCacheMu.Unlock()
+		return cached
 	}
-	b.userCacheMu.Unlock()
+	devcontainerBackend.userCacheMu.Unlock()
 
 	// Pick the owner of an active tmux server socket directory.
 	// tmux creates /tmp/tmux-$UID/ for each user that runs a server,
@@ -62,19 +62,19 @@ func (b *DevcontainerBackend) containerUser(containerID string) string {
 		`for d in /tmp/tmux-[1-9]*/; do [ -d "$d" ] && stat -c %U "$d" 2>/dev/null && exit; done; `+
 			`for d in /home/*/; do [ -d "$d" ] && stat -c %U "$d" 2>/dev/null && exit; done`)
 	out, err := cmd.Output()
-	u := ""
+	user := ""
 	if err == nil {
-		u = strings.TrimSpace(string(out))
+		user = strings.TrimSpace(string(out))
 	}
 
-	b.userCacheMu.Lock()
-	b.userCache[containerID] = u
-	b.userCacheMu.Unlock()
-	return u
+	devcontainerBackend.userCacheMu.Lock()
+	devcontainerBackend.userCache[containerID] = user
+	devcontainerBackend.userCacheMu.Unlock()
+	return user
 }
 
 // Up runs `devcontainer up` for the given workspace folder.
-func (b *DevcontainerBackend) Up(workspaceDir string) (*backend.UpResult, error) {
+func (devcontainerBackend *DevcontainerBackend) Up(workspaceDir string) (*backend.UpResult, error) {
 	args := []string{"up", "--workspace-folder", workspaceDir}
 	args = append(args, sshUpArgs()...)
 	cmd := exec.Command("devcontainer", args...)
@@ -127,7 +127,7 @@ func devcontainerEnv(base []string) ([]string, error) {
 }
 
 // Exec runs `devcontainer exec` in the given workspace folder.
-func (b *DevcontainerBackend) Exec(workspaceDir string, command []string) error {
+func (devcontainerBackend *DevcontainerBackend) Exec(workspaceDir string, command []string) error {
 	args := execArgs(workspaceDir, command)
 	cmd := exec.Command("devcontainer", args...)
 	cmd.Stdin = os.Stdin
@@ -138,20 +138,20 @@ func (b *DevcontainerBackend) Exec(workspaceDir string, command []string) error 
 
 // ExecCommand returns an unstarted *exec.Cmd for running a command
 // inside a workspace via `devcontainer exec`.
-func (b *DevcontainerBackend) ExecCommand(workspaceDir string, command []string) *exec.Cmd {
+func (devcontainerBackend *DevcontainerBackend) ExecCommand(workspaceDir string, command []string) *exec.Cmd {
 	args := execArgs(workspaceDir, command)
 	return exec.Command("devcontainer", args...)
 }
 
 // Down stops and removes a container by ID using docker directly.
-func (b *DevcontainerBackend) Down(containerID string) error {
+func (devcontainerBackend *DevcontainerBackend) Down(containerID string) error {
 	cmd := exec.Command("docker", "rm", "-f", containerID)
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
 // Stop stops a container by ID without removing it.
-func (b *DevcontainerBackend) Stop(containerID string) error {
+func (devcontainerBackend *DevcontainerBackend) Stop(containerID string) error {
 	cmd := exec.Command("docker", "stop", containerID)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = os.Stderr
@@ -159,7 +159,7 @@ func (b *DevcontainerBackend) Stop(containerID string) error {
 }
 
 // Start starts an existing container by ID.
-func (b *DevcontainerBackend) Start(containerID string) error {
+func (devcontainerBackend *DevcontainerBackend) Start(containerID string) error {
 	cmd := exec.Command("docker", "start", containerID)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = os.Stderr
@@ -167,7 +167,7 @@ func (b *DevcontainerBackend) Start(containerID string) error {
 }
 
 // Stats returns CPU and memory usage for the given container IDs.
-func (b *DevcontainerBackend) Stats(containerIDs []string) (map[string]*backend.ContainerStats, error) {
+func (devcontainerBackend *DevcontainerBackend) Stats(containerIDs []string) (map[string]*backend.ContainerStats, error) {
 	if len(containerIDs) == 0 {
 		return nil, nil
 	}
@@ -211,7 +211,7 @@ func (b *DevcontainerBackend) Stats(containerIDs []string) (map[string]*backend.
 }
 
 // Logs streams docker logs for a container.
-func (b *DevcontainerBackend) Logs(containerID string, follow bool) error {
+func (devcontainerBackend *DevcontainerBackend) Logs(containerID string, follow bool) error {
 	args := []string{"logs"}
 	if follow {
 		args = append(args, "-f")
@@ -225,7 +225,7 @@ func (b *DevcontainerBackend) Logs(containerID string, follow bool) error {
 }
 
 // LogsCommand returns an unstarted *exec.Cmd for streaming container logs.
-func (b *DevcontainerBackend) LogsCommand(containerID string, follow bool) *exec.Cmd {
+func (devcontainerBackend *DevcontainerBackend) LogsCommand(containerID string, follow bool) *exec.Cmd {
 	args := []string{"logs"}
 	if follow {
 		args = append(args, "-f")
@@ -236,9 +236,9 @@ func (b *DevcontainerBackend) LogsCommand(containerID string, follow bool) *exec
 
 // CaptureAllSessions lists and captures every tmux session inside a
 // container in one docker exec call.
-func (b *DevcontainerBackend) CaptureAllSessions(containerID string) backend.AllSessions {
+func (devcontainerBackend *DevcontainerBackend) CaptureAllSessions(containerID string) backend.AllSessions {
 	args := []string{"exec"}
-	if u := b.containerUser(containerID); u != "" {
+	if u := devcontainerBackend.containerUser(containerID); u != "" {
 		args = append(args, "-u", u)
 	}
 	args = append(args, containerID, "sh", "-c", backend.CaptureAllScript)
@@ -251,9 +251,9 @@ func (b *DevcontainerBackend) CaptureAllSessions(containerID string) backend.All
 }
 
 // AgentToolProbe detects which agent tool is running inside a container.
-func (b *DevcontainerBackend) AgentToolProbe(containerID string) (string, bool) {
+func (devcontainerBackend *DevcontainerBackend) AgentToolProbe(containerID string) (string, bool) {
 	args := []string{"exec"}
-	if u := b.containerUser(containerID); u != "" {
+	if u := devcontainerBackend.containerUser(containerID); u != "" {
 		args = append(args, "-u", u)
 	}
 	args = append(args, containerID, "sh", "-c", backend.ToolProbeScript)
@@ -266,7 +266,7 @@ func (b *DevcontainerBackend) AgentToolProbe(containerID string) (string, bool) 
 }
 
 // EditorURI returns a VS Code devcontainer remote URI.
-func (b *DevcontainerBackend) EditorURI(workspaceDir string, projectName string) (string, bool) {
+func (devcontainerBackend *DevcontainerBackend) EditorURI(workspaceDir string, projectName string) (string, bool) {
 	hexPath := hex.EncodeToString([]byte(workspaceDir))
 	uri := fmt.Sprintf("vscode-remote://dev-container+%s/workspaces/%s", hexPath, projectName)
 	return uri, true
@@ -274,7 +274,7 @@ func (b *DevcontainerBackend) EditorURI(workspaceDir string, projectName string)
 
 // PortForwardCommand returns an unstarted *exec.Cmd that forwards localPort
 // on the host to remotePort inside the container using socat via docker exec.
-func (b *DevcontainerBackend) PortForwardCommand(containerID string, localPort, remotePort int) *exec.Cmd {
+func (devcontainerBackend *DevcontainerBackend) PortForwardCommand(containerID string, localPort, remotePort int) *exec.Cmd {
 	script := fmt.Sprintf(
 		`socat TCP-LISTEN:%d,fork,reuseaddr EXEC:"docker exec -i %s socat STDIO TCP\\:localhost\\:%d"`,
 		localPort, containerID, remotePort,
@@ -284,7 +284,7 @@ func (b *DevcontainerBackend) PortForwardCommand(containerID string, localPort, 
 
 // ResolveHostname returns the container's IP address obtained via
 // `docker inspect`. For local Docker containers this is directly reachable.
-func (b *DevcontainerBackend) ResolveHostname(containerID string) (string, bool) {
+func (devcontainerBackend *DevcontainerBackend) ResolveHostname(containerID string) (string, bool) {
 	out, err := exec.Command("docker", "inspect",
 		"--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
 		containerID,

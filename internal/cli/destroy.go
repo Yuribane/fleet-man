@@ -27,15 +27,15 @@ func newDestroyCmd() *cobra.Command {
 				return fmt.Errorf("fleet %q not found", fleetName)
 			}
 
-			for _, inst := range f.Instances {
-				fmt.Printf("Stopping %s/%s...\n", fleetName, inst.Name)
-				dc := backendutil.New(inst.Backend, false)
-				if err := dc.Down(inst.ContainerID); err != nil {
-					fmt.Fprintf(os.Stderr, "warning: failed to remove container for %s: %v\n", inst.Name, err)
+			for _, instance := range f.Instances {
+				fmt.Printf("Stopping %s/%s...\n", fleetName, instance.Name)
+				instanceBackend := backendutil.New(instance.Backend, false)
+				if err := instanceBackend.Down(instance.ContainerID); err != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to remove container for %s: %v\n", instance.Name, err)
 				}
-				if inst.WorkspaceDir != "" {
-					if err := os.RemoveAll(inst.WorkspaceDir); err != nil {
-						fmt.Fprintf(os.Stderr, "warning: failed to remove workspace for %s: %v\n", inst.Name, err)
+				if instance.WorkspaceDir != "" {
+					if err := os.RemoveAll(instance.WorkspaceDir); err != nil {
+						fmt.Fprintf(os.Stderr, "warning: failed to remove workspace for %s: %v\n", instance.Name, err)
 					}
 				}
 			}

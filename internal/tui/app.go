@@ -27,9 +27,9 @@ import (
 // ===========================================
 
 type model struct {
-	st  *state.State
-	cfg *state.Config
-	err error
+	st     *state.State
+	config *state.Config
+	err    error
 
 	// Page routing
 	currentPage Page
@@ -140,9 +140,9 @@ func newModel() model {
 	// Resume tracking any instances still in "creating" state from a previous session
 	if m.st != nil {
 		for fleetName, f := range m.st.Fleets {
-			for _, inst := range f.Instances {
-				if inst.Status == fleet.StatusCreating {
-					m.creating[fleetName+"/"+inst.Name] = true
+			for _, instance := range f.Instances {
+				if instance.Status == fleet.StatusCreating {
+					m.creating[fleetName+"/"+instance.Name] = true
 				}
 			}
 		}
@@ -165,14 +165,14 @@ func (m *model) reload() {
 		return
 	}
 
-	cfg, err := state.LoadConfig()
+	config, err := state.LoadConfig()
 	if err != nil {
 		m.err = err
 		return
 	}
 
 	m.st = st
-	m.cfg = cfg
+	m.config = config
 	m.err = nil
 
 	// Auto-collapse expanded instances that are no longer running
@@ -180,7 +180,7 @@ func (m *model) reload() {
 		parts := strings.SplitN(key, "/", 2)
 		if len(parts) == 2 {
 			if f, ok := st.Fleets[parts[0]]; ok {
-				if inst, err := f.GetInstance(parts[1]); err == nil && inst.Status == fleet.StatusRunning {
+				if instance, err := f.GetInstance(parts[1]); err == nil && instance.Status == fleet.StatusRunning {
 					continue
 				}
 			}
@@ -258,8 +258,8 @@ func (m *model) pruneOrphanedSavedGroups() {
 	}
 	live := make(map[string]bool)
 	for _, f := range m.st.Fleets {
-		for _, inst := range f.Instances {
-			live[inst.Name] = true
+		for _, instance := range f.Instances {
+			live[instance.Name] = true
 		}
 	}
 	changed := false
@@ -280,16 +280,16 @@ func (m *model) pruneOrphanedSavedGroups() {
 // ===========================================
 
 // backendFor returns the cached backend for the given type, creating it lazily.
-func (m *model) backendFor(bt fleet.BackendType) backend.Backend {
-	if bt == "" {
-		bt = fleet.BackendDevcontainer
+func (m *model) backendFor(backendType fleet.BackendType) backend.Backend {
+	if backendType == "" {
+		backendType = fleet.BackendDevcontainer
 	}
-	if b, ok := m.backends[bt]; ok {
-		return b
+	if instanceBackend, ok := m.backends[backendType]; ok {
+		return instanceBackend
 	}
-	b := backendutil.New(bt, false)
-	m.backends[bt] = b
-	return b
+	instanceBackend := backendutil.New(backendType, false)
+	m.backends[backendType] = instanceBackend
+	return instanceBackend
 }
 
 // firstFleetRepo returns the "owner/repo" string for the first fleet's
@@ -309,14 +309,14 @@ func (m *model) firstFleetRepo() string {
 // instanceBackend returns the backend for the given instance's backend type.
 // For codespaces, it registers the real codespace name so that exec calls
 // use the correct name instead of deriving from the workspace path.
-func (m *model) instanceBackend(inst *fleet.Instance) backend.Backend {
-	b := m.backendFor(inst.Backend)
-	if inst.Backend == fleet.BackendCodespaces && inst.ContainerID != "" {
-		if csb, ok := b.(*codespacesbackend.CodespacesBackend); ok {
-			csb.RegisterName(inst.WorkspaceDir, inst.ContainerID)
+func (m *model) instanceBackend(instance *fleet.Instance) backend.Backend {
+	backendImpl := m.backendFor(instance.Backend)
+	if instance.Backend == fleet.BackendCodespaces && instance.ContainerID != "" {
+		if csb, ok := backendImpl.(*codespacesbackend.CodespacesBackend); ok {
+			csb.RegisterName(instance.WorkspaceDir, instance.ContainerID)
 		}
 	}
-	return b
+	return backendImpl
 }
 
 // backendGroup holds container IDs grouped by backend type. Sessions
@@ -330,20 +330,20 @@ type backendGroup struct {
 func (m *model) containersByBackend() map[fleet.BackendType]*backendGroup {
 	groups := make(map[fleet.BackendType]*backendGroup)
 	for _, f := range m.st.Fleets {
-		for _, inst := range f.Instances {
-			if inst.ContainerID == "" || inst.Status != fleet.StatusRunning {
+		for _, instance := range f.Instances {
+			if instance.ContainerID == "" || instance.Status != fleet.StatusRunning {
 				continue
 			}
-			bt := inst.Backend
-			if bt == "" {
-				bt = fleet.BackendDevcontainer
+			backendType := instance.Backend
+			if backendType == "" {
+				backendType = fleet.BackendDevcontainer
 			}
-			g, ok := groups[bt]
+			g, ok := groups[backendType]
 			if !ok {
 				g = &backendGroup{}
-				groups[bt] = g
+				groups[backendType] = g
 			}
-			g.ids = append(g.ids, inst.ContainerID)
+			g.ids = append(g.ids, instance.ContainerID)
 		}
 	}
 	return groups
@@ -372,9 +372,9 @@ func (m *model) refreshInstanceSessions(instanceName string) tea.Cmd {
 			continue
 		}
 		if f, ok := m.st.Fleets[parts[0]]; ok {
-			if inst, err := f.GetInstance(parts[1]); err == nil {
-				b := m.instanceBackend(inst)
-				return listSessionsCmd(b, inst.WorkspaceDir, instKey)
+			if instance, err := f.GetInstance(parts[1]); err == nil {
+				instanceBackend := m.instanceBackend(instance)
+				return listSessionsCmd(instanceBackend, instance.WorkspaceDir, instKey)
 			}
 		}
 	}
@@ -393,20 +393,20 @@ func (m model) fetchAllStatsCmd(delay bool) tea.Cmd {
 	}
 
 	type fetchInput struct {
-		dc  backend.Backend
-		ids []string
+		instanceBackend backend.Backend
+		ids             []string
 	}
 	var inputs []fetchInput
-	for bt, g := range groups {
+	for backendType, g := range groups {
 		inputs = append(inputs, fetchInput{
-			dc:  m.backendFor(bt),
-			ids: g.ids,
+			instanceBackend: m.backendFor(backendType),
+			ids:             g.ids,
 		})
 	}
 
 	// If only one backend type, use the simple path
 	if len(inputs) == 1 {
-		return fetchStatsCmd(inputs[0].dc, inputs[0].ids, delay)
+		return fetchStatsCmd(inputs[0].instanceBackend, inputs[0].ids, delay)
 	}
 
 	// Multiple backend types: fetch concurrently and merge
@@ -429,12 +429,12 @@ func (m model) fetchAllStatsCmd(delay bool) tea.Cmd {
 
 		ch := make(chan result, len(inputs))
 		for _, inp := range inputs {
-			go func(dc backend.Backend, ids []string) {
-				stats, _ := dc.Stats(ids)
-				screens := backend.CaptureAllSessionsForAll(dc, ids)
-				probes := backend.AgentToolProbes(dc, ids)
+			go func(instanceBackend backend.Backend, ids []string) {
+				stats, _ := instanceBackend.Stats(ids)
+				screens := backend.CaptureAllSessionsForAll(instanceBackend, ids)
+				probes := backend.AgentToolProbes(instanceBackend, ids)
 				ch <- result{stats, screens, probes, ids}
-			}(inp.dc, inp.ids)
+			}(inp.instanceBackend, inp.ids)
 		}
 
 		for range inputs {
@@ -474,9 +474,9 @@ func (m model) Init() tea.Cmd {
 		cmds = append(cmds, pollCreatingCmd())
 	}
 	// Auto-fetch coder template parameters if template is configured
-	if m.cfg != nil && m.cfg.CoderSettings.Template != "" {
+	if m.config != nil && m.config.CoderSettings.Template != "" {
 		m.coderFetchingParams = true
-		cmds = append(cmds, fetchCoderParamsCmd(m.cfg.CoderSettings.Template))
+		cmds = append(cmds, fetchCoderParamsCmd(m.config.CoderSettings.Template))
 	}
 	// Auto-fetch codespace machine types from the first fleet's repo
 	if repo := m.firstFleetRepo(); repo != "" {
@@ -586,37 +586,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.message = fmt.Sprintf("Failed to fetch parameters: %v", msg.err)
 			return m, spinCmd
 		}
-		if m.cfg == nil {
-			m.cfg = state.DefaultConfig()
+		if m.config == nil {
+			m.config = state.DefaultConfig()
 		}
 		// Merge parameters: keep existing user-set values, add new ones with defaults
 		existing := make(map[string]string)
-		for _, p := range m.cfg.CoderSettings.Parameters {
+		for _, p := range m.config.CoderSettings.Parameters {
 			if p.Value != "" {
 				existing[p.Name] = p.Value
 			}
 		}
 		var newParams []state.CoderParameter
 		for _, rp := range msg.params {
-			val := existing[rp.Name]
+			existingValue := existing[rp.Name]
 			newParams = append(newParams, state.CoderParameter{
 				Name:         rp.Name,
-				Value:        val,
+				Value:        existingValue,
 				DefaultValue: rp.DefaultValue,
 				DisplayName:  rp.DisplayName,
 				Description:  rp.Description,
 				Type:         rp.Type,
 			})
 		}
-		m.cfg.CoderSettings.Parameters = newParams
+		m.config.CoderSettings.Parameters = newParams
 		m.coderPresets = nil
 		for _, p := range msg.presets {
 			m.coderPresets = append(m.coderPresets, p.Name)
 		}
-		if m.cfg.CoderSettings.Preset == "" && len(m.coderPresets) > 0 {
-			m.cfg.CoderSettings.Preset = m.coderPresets[0]
+		if m.config.CoderSettings.Preset == "" && len(m.coderPresets) > 0 {
+			m.config.CoderSettings.Preset = m.coderPresets[0]
 		}
-		_ = state.SaveConfig(m.cfg)
+		_ = state.SaveConfig(m.config)
 		m.message = fmt.Sprintf("Loaded %d parameters, %d presets", len(newParams), len(m.coderPresets))
 		return m, spinCmd
 
@@ -626,9 +626,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, spinCmd
 		}
 		m.codespaceMachines = msg.machines
-		if m.cfg != nil && m.cfg.CodespacesSettings.Machine == "" && len(m.codespaceMachines) > 0 {
-			m.cfg.CodespacesSettings.Machine = m.codespaceMachines[0].Name
-			_ = state.SaveConfig(m.cfg)
+		if m.config != nil && m.config.CodespacesSettings.Machine == "" && len(m.codespaceMachines) > 0 {
+			m.config.CodespacesSettings.Machine = m.codespaceMachines[0].Name
+			_ = state.SaveConfig(m.config)
 		}
 		return m, spinCmd
 
@@ -705,9 +705,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		st, _ := state.Load()
 		if st != nil {
 			if f, ok := st.Fleets[msg.fleet]; ok {
-				if inst, err := f.GetInstance(msg.instance); err == nil {
-					inst.Status = fleet.StatusFailed
-					inst.Error = msg.err.Error()
+				if instance, err := f.GetInstance(msg.instance); err == nil {
+					instance.Status = fleet.StatusFailed
+					instance.Error = msg.err.Error()
 					_ = state.Save(st)
 				}
 			}
@@ -749,9 +749,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			parts := strings.SplitN(msg.instanceKey, "/", 2)
 			if len(parts) == 2 {
 				if f, ok := m.st.Fleets[parts[0]]; ok {
-					if inst, err := f.GetInstance(parts[1]); err == nil {
-						b := m.instanceBackend(inst)
-						extraCmds = append(extraCmds, listSessionsCmd(b, inst.WorkspaceDir, msg.instanceKey))
+					if instance, err := f.GetInstance(parts[1]); err == nil {
+						instanceBackend := m.instanceBackend(instance)
+						extraCmds = append(extraCmds, listSessionsCmd(instanceBackend, instance.WorkspaceDir, msg.instanceKey))
 					}
 				}
 			}
@@ -767,9 +767,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			parts := strings.SplitN(msg.instanceKey, "/", 2)
 			if len(parts) == 2 {
 				if f, ok := m.st.Fleets[parts[0]]; ok {
-					if inst, err := f.GetInstance(parts[1]); err == nil {
-						b := m.instanceBackend(inst)
-						extraCmds = append(extraCmds, listSessionsCmd(b, inst.WorkspaceDir, msg.instanceKey))
+					if instance, err := f.GetInstance(parts[1]); err == nil {
+						instanceBackend := m.instanceBackend(instance)
+						extraCmds = append(extraCmds, listSessionsCmd(instanceBackend, instance.WorkspaceDir, msg.instanceKey))
 					}
 				}
 			}
@@ -802,9 +802,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			parts := strings.SplitN(msg.instanceKey, "/", 2)
 			if len(parts) == 2 {
 				if f, ok := m.st.Fleets[parts[0]]; ok {
-					if inst, err := f.GetInstance(parts[1]); err == nil {
-						b := m.instanceBackend(inst)
-						extraCmds = append(extraCmds, listSessionsCmd(b, inst.WorkspaceDir, msg.instanceKey))
+					if instance, err := f.GetInstance(parts[1]); err == nil {
+						instanceBackend := m.instanceBackend(instance)
+						extraCmds = append(extraCmds, listSessionsCmd(instanceBackend, instance.WorkspaceDir, msg.instanceKey))
 					}
 				}
 			}
@@ -820,8 +820,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				fleetName, instName := parts[0], parts[1]
 				if f, ok := m.st.Fleets[fleetName]; ok {
-					if inst, err := f.GetInstance(instName); err == nil {
-						switch inst.Status {
+					if instance, err := f.GetInstance(instName); err == nil {
+						switch instance.Status {
 						case fleet.StatusRunning:
 							delete(m.creating, key)
 							warnPath := filepath.Join(state.FleetDir(), "logs", fleetName+"-"+instName+".warn")
@@ -831,28 +831,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								m.message = fmt.Sprintf("Instance %s is running — %s (press l for details)", key, firstLine)
 							} else {
 								m.message = fmt.Sprintf("Instance %s is running (container: %s)",
-									key, inst.ContainerID[:min(12, len(inst.ContainerID))])
+									key, instance.ContainerID[:min(12, len(instance.ContainerID))])
 							}
 						case fleet.StatusFailed:
 							delete(m.creating, key)
 							fp := m.fleetPage
-							if inst.Backend == fleet.BackendCodespaces && strings.HasPrefix(inst.Error, codespacesbackend.ErrPrefixAuthScope) {
+							if instance.Backend == fleet.BackendCodespaces && strings.HasPrefix(instance.Error, codespacesbackend.ErrPrefixAuthScope) {
 								fp.mode = viewCodespacesAuth
 								fp.dialogFleet = fleetName
 								fp.dialogInst = instName
 								m.message = ""
-							} else if inst.Backend == fleet.BackendCodespaces && strings.HasPrefix(inst.Error, codespacesbackend.ErrPrefixMachine) {
+							} else if instance.Backend == fleet.BackendCodespaces && strings.HasPrefix(instance.Error, codespacesbackend.ErrPrefixMachine) {
 								fp.mode = viewCodespacesMachine
 								fp.dialogFleet = fleetName
 								fp.dialogInst = instName
 								m.message = ""
-							} else if inst.Backend == fleet.BackendCodespaces && strings.HasPrefix(inst.Error, codespacesbackend.ErrPrefixLimit) {
+							} else if instance.Backend == fleet.BackendCodespaces && strings.HasPrefix(instance.Error, codespacesbackend.ErrPrefixLimit) {
 								fp.mode = viewCodespacesLimit
 								fp.dialogFleet = fleetName
 								fp.dialogInst = instName
 								m.message = ""
 							} else {
-								m.message = fmt.Sprintf("Failed to create %s: %s", key, inst.Error)
+								m.message = fmt.Sprintf("Failed to create %s: %s", key, instance.Error)
 							}
 						}
 					}
