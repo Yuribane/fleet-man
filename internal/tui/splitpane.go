@@ -562,6 +562,9 @@ func restoreSessionNames(discovered, prefix string, savedOrder []string, savedSn
 				seen[name] = true
 			}
 		}
+		if count := savedGroupPaneCount(*savedSnapshot); count > 0 && len(sessions) > count {
+			sessions = sessions[:count]
+		}
 	}
 
 	return sessions
