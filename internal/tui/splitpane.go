@@ -415,39 +415,16 @@ func (fleetPage *fleetPage) restoreGroupCmd(m *model, fleetName string, instance
 		})
 		out, _ := listCmd.Output()
 
-		// Build a set of live sessions for validation.
-		live := make(map[string]bool)
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			name := strings.TrimSpace(line)
-			if name != "" && strings.HasPrefix(name, prefix) {
-				live[name] = true
-			}
+		var savedSnapshot *savedGroup
+		if sg, ok := fleetPage.savedGroups[groupID]; ok {
+			savedSnapshot = &sg
 		}
-
-		// Use saved order if available, filtering to sessions that
-		// still exist. Then append any newly discovered sessions
-		// that weren't in the saved order.
-		var sessions []string
-		seen := make(map[string]bool)
-		for _, s := range savedOrder {
-			if live[s] {
-				sessions = append(sessions, s)
-				seen[s] = true
-			}
-		}
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			name := strings.TrimSpace(line)
-			if name != "" && strings.HasPrefix(name, prefix) && !seen[name] {
-				sessions = append(sessions, name)
-			}
-		}
+		sessions := restoreSessionNames(string(out), prefix, savedOrder, savedSnapshot, sanitized)
 
 		if len(sessions) == 0 {
-			sg, ok := fleetPage.savedGroups[groupID]
-			if !ok {
+			if _, ok := fleetPage.savedGroups[groupID]; !ok {
 				return splitPaneMsg{err: fmt.Errorf("no sessions found for group %s", groupID)}
 			}
-			sessions = savedGroupSessionNames(sg, sanitized)
 		}
 
 		// Kill any existing split panes. Must select the TUI pane first —
@@ -543,6 +520,51 @@ func (fleetPage *fleetPage) restoreGroupCmd(m *model, fleetName string, instance
 		}
 		return msg
 	}
+}
+
+func restoreSessionNames(discovered, prefix string, savedOrder []string, savedSnapshot *savedGroup, sanitized string) []string {
+	// Build a set of live sessions for validation.
+	live := make(map[string]bool)
+	var liveOrder []string
+	for _, line := range strings.Split(strings.TrimSpace(discovered), "\n") {
+		name := strings.TrimSpace(line)
+		if name != "" && strings.HasPrefix(name, prefix) {
+			live[name] = true
+			liveOrder = append(liveOrder, name)
+		}
+	}
+
+	// Use saved order if available, filtering to sessions that still
+	// exist. Then append any newly discovered sessions that weren't in
+	// the saved order.
+	var sessions []string
+	seen := make(map[string]bool)
+	for _, s := range savedOrder {
+		if live[s] {
+			sessions = append(sessions, s)
+			seen[s] = true
+		}
+	}
+	for _, name := range liveOrder {
+		if !seen[name] {
+			sessions = append(sessions, name)
+			seen[name] = true
+		}
+	}
+
+	// If live discovery is incomplete, top up from the saved layout. A
+	// restored `fleet shell --session` uses tmux new-session -A, so a
+	// stale or missing saved session name can be recreated safely.
+	if savedSnapshot != nil {
+		for _, name := range savedGroupSessionNames(*savedSnapshot, sanitized) {
+			if !seen[name] {
+				sessions = append(sessions, name)
+				seen[name] = true
+			}
+		}
+	}
+
+	return sessions
 }
 
 // bindHostSessionCycleKeys binds Ctrl+PageUp/Down on the outer tmux to

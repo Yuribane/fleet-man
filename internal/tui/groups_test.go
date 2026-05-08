@@ -146,3 +146,29 @@ func TestSavedGroupSessionNamesSynthesizesMissingPanes(t *testing.T) {
 		}
 	}
 }
+
+func TestRestoreSessionNamesTopsUpIncompleteLiveDiscovery(t *testing.T) {
+	sg := savedGroup{
+		GroupID:      "abc123",
+		InstanceName: "alpha",
+		Sessions:     []string{"alpha~abc123", "alpha~abc123~ff00"},
+		PaneCount:    2,
+	}
+
+	got := restoreSessionNames(
+		"alpha~abc123\n",
+		"alpha~abc123",
+		sg.Sessions,
+		&sg,
+		"alpha",
+	)
+	want := []string{"alpha~abc123", "alpha~abc123~ff00"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("session[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
