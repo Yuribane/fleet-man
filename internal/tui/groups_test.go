@@ -147,6 +147,23 @@ func TestSavedGroupSessionNamesSynthesizesMissingPanes(t *testing.T) {
 	}
 }
 
+func TestNormalizeSavedGroupSessionsReplacesHostPaneTitles(t *testing.T) {
+	got := normalizeSavedGroupSessions(
+		[]string{"runner-host", "alpha~abc123~ff00"},
+		"alpha",
+		"abc123",
+	)
+	want := []string{"alpha~abc123", "alpha~abc123~ff00"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("session[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestRestoreSessionNamesTopsUpIncompleteLiveDiscovery(t *testing.T) {
 	sg := savedGroup{
 		GroupID:      "abc123",
@@ -173,7 +190,7 @@ func TestRestoreSessionNamesTopsUpIncompleteLiveDiscovery(t *testing.T) {
 	}
 }
 
-func TestRestoreSessionNamesCapsLiveDiscoveryToSavedPaneCount(t *testing.T) {
+func TestRestoreSessionNamesUsesSavedLayoutOverLiveDiscovery(t *testing.T) {
 	sg := savedGroup{
 		GroupID:      "abc123",
 		InstanceName: "alpha",
@@ -182,9 +199,9 @@ func TestRestoreSessionNamesCapsLiveDiscoveryToSavedPaneCount(t *testing.T) {
 	}
 
 	got := restoreSessionNames(
-		"alpha~abc123\nalpha~abc123~ff00\nalpha~abc123~stale\n",
+		"alpha~abc123\nalpha~abc123~stale\n",
 		"alpha~abc123",
-		sg.Sessions,
+		nil,
 		&sg,
 		"alpha",
 	)

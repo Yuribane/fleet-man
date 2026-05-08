@@ -79,6 +79,9 @@ func savedGroupSessionNames(sg savedGroup, sanitizedInstance string) []string {
 		sessions = append(sessions, name)
 		seen[name] = true
 	}
+	if len(sessions) > count {
+		return sessions[:count]
+	}
 	if len(sessions) == 0 {
 		root := groupSessionName(sanitizedInstance, sg.GroupID)
 		sessions = append(sessions, root)
@@ -91,6 +94,37 @@ func savedGroupSessionNames(sg savedGroup, sanitizedInstance string) []string {
 		}
 		sessions = append(sessions, name)
 		seen[name] = true
+	}
+	return sessions
+}
+
+func normalizeSavedGroupSessions(raw []string, sanitizedInstance, groupID string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	sessions := make([]string, 0, len(raw))
+	seen := make(map[string]bool, len(raw))
+	root := groupSessionName(sanitizedInstance, groupID)
+	for _, name := range raw {
+		parsedGroupID, ok := parseGroupID(sanitizedInstance, name)
+		if ok && parsedGroupID == groupID {
+			if !seen[name] {
+				sessions = append(sessions, name)
+				seen[name] = true
+			}
+			continue
+		}
+		replacement := root
+		if seen[replacement] {
+			replacement = groupMemberName(sanitizedInstance, groupID, fmt.Sprintf("restored%02d", len(sessions)))
+		}
+		if !seen[replacement] {
+			sessions = append(sessions, replacement)
+			seen[replacement] = true
+		}
+	}
+	if len(sessions) > len(raw) {
+		return sessions[:len(raw)]
 	}
 	return sessions
 }

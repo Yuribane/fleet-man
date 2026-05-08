@@ -333,8 +333,12 @@ func (fleetPage *fleetPage) saveCurrentGroupLayout(st *state.State) {
 		return
 	}
 
-	// Read session names from outer tmux pane titles, in pane order.
-	sessionNames := paneSessionOrder()
+	// Read session names from outer tmux pane titles, in pane order. Some
+	// panes briefly report the host title before fleet shell sets a title;
+	// normalize those placeholders into deterministic group session names
+	// before persisting the layout.
+	sanitized := SanitizeSessionName(fleetPage.splitInstance)
+	sessionNames := normalizeSavedGroupSessions(paneSessionOrder(), sanitized, fleetPage.activeGroupID)
 
 	// No shell panes visible in the outer tmux means either the group
 	// hasn't opened yet or its panes have already been killed (Ctrl+Q,
@@ -420,7 +424,6 @@ func (fleetPage *fleetPage) restoreGroupCmd(m *model, fleetName string, instance
 			savedSnapshot = &sg
 		}
 		sessions := restoreSessionNames(string(out), prefix, savedOrder, savedSnapshot, sanitized)
-
 		if len(sessions) == 0 {
 			if _, ok := fleetPage.savedGroups[groupID]; !ok {
 				return splitPaneMsg{err: fmt.Errorf("no sessions found for group %s", groupID)}
@@ -523,6 +526,16 @@ func (fleetPage *fleetPage) restoreGroupCmd(m *model, fleetName string, instance
 }
 
 func restoreSessionNames(discovered, prefix string, savedOrder []string, savedSnapshot *savedGroup, sanitized string) []string {
+	// A saved layout is the source of truth for restore: it records the
+	// pane count and session-to-pane order the user left behind. Each
+	// restored `fleet shell --session` uses tmux new-session -A, so the
+	// named session is attached if it survived or recreated if it did
+	// not. Avoid mixing live discovery into this path because Linux and
+	// WSL can report different stale/live inner tmux sets during restart.
+	if savedSnapshot != nil {
+		return savedGroupSessionNames(*savedSnapshot, sanitized)
+	}
+
 	// Build a set of live sessions for validation.
 	live := make(map[string]bool)
 	var liveOrder []string
@@ -549,21 +562,6 @@ func restoreSessionNames(discovered, prefix string, savedOrder []string, savedSn
 		if !seen[name] {
 			sessions = append(sessions, name)
 			seen[name] = true
-		}
-	}
-
-	// If live discovery is incomplete, top up from the saved layout. A
-	// restored `fleet shell --session` uses tmux new-session -A, so a
-	// stale or missing saved session name can be recreated safely.
-	if savedSnapshot != nil {
-		for _, name := range savedGroupSessionNames(*savedSnapshot, sanitized) {
-			if !seen[name] {
-				sessions = append(sessions, name)
-				seen[name] = true
-			}
-		}
-		if count := savedGroupPaneCount(*savedSnapshot); count > 0 && len(sessions) > count {
-			sessions = sessions[:count]
 		}
 	}
 
